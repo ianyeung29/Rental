@@ -1,0 +1,8 @@
+node_modules/
+.next/
+out/
+dev-server.log
+dev-server-error.log
+*.tsbuildinfo
+.impeccable/
+*-review.png
