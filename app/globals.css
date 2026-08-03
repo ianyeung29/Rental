@@ -296,6 +296,13 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .form-drawer { width: min(500px, 100%); }
 .contact-form { display: flex; flex-direction: column; gap: 8px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.inquiry-comment-options { min-inline-size: 0; margin: 6px 0 0; padding: 0; border: 0; }
+.inquiry-comment-options legend { width: 100%; padding: 0; }
+.comment-options { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.comment-option { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 7px 9px; border: 1px solid var(--line-strong); color: var(--muted); background: var(--panel); font-size: 10px; line-height: 1.35; text-align: left; transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease, transform 160ms ease; }
+.comment-option:hover { border-color: var(--blue); color: var(--blue-dark); background: var(--blue-wash); transform: translateY(-1px); }
+.comment-option.active { border-color: var(--blue); color: var(--blue-dark); background: var(--blue-wash); font-weight: 700; }
+.comment-option svg { flex-shrink: 0; }
 .form-safety { display: flex; align-items: flex-start; gap: 7px; margin: 10px 0 8px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .form-safety svg { flex-shrink: 0; color: var(--blue); }
 .post-drawer .drawer-content h2 { max-width: 18ch; }

@@ -169,6 +169,242 @@ const POST_FEATURE_KEYS = [
   "storage",
 ] as const;
 
+const INQUIRY_COMMENT_OPTIONS = [
+  { value: "details", zh: "想进一步了解房屋详情", en: "I'd like to understand more about the house" },
+  { value: "asap", zh: "希望尽快看房", en: "I'd like to see the house as soon as possible" },
+  { value: "costs", zh: "想确认租金、押金及其他费用", en: "I'd like to confirm rent, deposits, and other fees" },
+  { value: "location", zh: "想了解具体位置和周边环境", en: "I'd like to learn more about the location and neighborhood" },
+  { value: "terms", zh: "想确认入住日期和租期", en: "I'd like to confirm the move-in date and lease length" },
+  { value: "furniture", zh: "想确认家具和家电配置", en: "I'd like to confirm the furniture and appliances" },
+  { value: "pets", zh: "我有宠物，想确认是否可以", en: "I have a pet and would like to confirm the policy" },
+  { value: "weekend", zh: "希望安排周末看房", en: "I'd prefer to tour on a weekend" },
+  { value: "utilities", zh: "想确认水电网等费用是否包含", en: "I'd like to confirm whether utilities are included" },
+  { value: "requirements", zh: "想了解申请条件和所需材料", en: "I'd like to learn about the application requirements" },
+] as const;
+
+// Common NYC and Long Island search aliases. Exact listing text remains searchable too.
+const LOCATION_ALIAS_GROUPS = [
+  ["纽约", "紐約", "纽约市", "紐約市", "new york", "new york city", "nyc", "n y c"],
+  ["曼哈顿", "曼哈頓", "曼哈顿区", "曼哈頓區", "manhattan", "new york county"],
+  ["布鲁克林", "布魯克林", "布鲁克林区", "布魯克林區", "brooklyn", "kings county"],
+  ["皇后区", "皇后區", "皇后", "queens", "queens county"],
+  ["布朗克斯", "布朗克斯区", "布朗克斯區", "the bronx", "bronx", "bronx county"],
+  ["史泰登岛", "史泰登島", "斯塔滕岛", "斯塔滕島", "staten island", "richmond county"],
+  ["长岛", "長島", "长岛地区", "長島地區", "long island"],
+  ["拿骚县", "拿騷縣", "nassau", "nassau county"],
+  ["萨福克县", "薩福克縣", "suffolk", "suffolk county"],
+  ["纽约州", "紐約州", "new york state", "ny state"],
+
+  ["曼哈顿中城", "曼哈頓中城", "中城", "midtown", "midtown manhattan"],
+  ["曼哈顿下城", "曼哈頓下城", "下城", "downtown manhattan", "lower manhattan"],
+  ["上东区", "上東區", "upper east side", "ues"],
+  ["上西区", "上西區", "upper west side", "uws"],
+  ["下东区", "下東區", "lower east side", "les"],
+  ["东村", "東村", "east village"],
+  ["西村", "西村", "west village"],
+  ["格林尼治村", "格林尼治村", "格林威治村", "greenwich village"],
+  ["苏活", "蘇活", "苏荷", "蘇荷", "soho", "so ho"],
+  ["诺霍", "諾霍", "诺荷", "諾荷", "noho", "no ho"],
+  ["翠贝卡", "翠貝卡", "tribeca", "tri beca"],
+  ["切尔西", "切爾西", "chelsea"],
+  ["地狱厨房", "地獄廚房", "克林顿", "克林頓", "hell's kitchen", "hells kitchen", "clinton"],
+  ["哈德逊广场", "哈德遜廣場", "哈德逊园区", "哈德遜園區", "hudson yards"],
+  ["金融区", "金融區", "financial district", "fidi"],
+  ["唐人街", "唐人街", "华埠", "華埠", "chinatown"],
+  ["小意大利", "小意大利", "little italy"],
+  ["哈莱姆", "哈萊姆", "哈林", "harlem"],
+  ["华盛顿高地", "華盛頓高地", "washington heights"],
+  ["英伍德", "因伍德", "inwood"],
+  ["晨边高地", "晨邊高地", "莫宁赛德高地", "莫寧賽德高地", "morningside heights"],
+  ["格拉梅西", "格拉梅西", "gramercy", "gramercy park"],
+  ["穆雷山", "穆雷山", "默里山", "murray hill"],
+  ["基普斯湾", "基普斯灣", "kips bay"],
+  ["熨斗区", "熨斗區", "扁铁区", "扁鐵區", "flatiron", "flatiron district"],
+  ["联合广场", "聯合廣場", "union square"],
+  ["炮台公园城", "炮台公園城", "电池公园城", "電池公園城", "battery park city"],
+  ["卡内基山", "卡內基山", "carnegie hill"],
+  ["萨顿广场", "薩頓廣場", "sutton place"],
+  ["斯图文森特镇", "斯圖文森特鎮", "stuyvesant town", "stuy town"],
+  ["罗斯福岛", "羅斯福島", "roosevelt island"],
+  ["肉库区", "肉庫區", "肉类加工区", "肉類加工區", "meatpacking district", "meatpacking"],
+
+  ["布鲁克林市中心", "布魯克林市中心", "downtown brooklyn"],
+  ["布鲁克林高地", "布魯克林高地", "brooklyn heights"],
+  ["曼哈顿桥下", "曼哈頓橋下", "dum​​bo", "dumbo", "down under the manhattan bridge overpass"],
+  ["威廉斯堡", "威廉斯堡", "williamsburg"],
+  ["绿点", "綠點", "greenpoint"],
+  ["布什维克", "布什維克", "bushwick"],
+  ["贝德福德斯图文森特", "貝德福德斯圖文森特", "bedford stuyvesant", "bed stuy", "bed-stuy"],
+  ["格林堡", "格林堡", "fort greene"],
+  ["克林顿山", "克林頓山", "clinton hill"],
+  ["展望高地", "展望高地", "prospect heights"],
+  ["皇冠高地", "皇冠高地", "crown heights"],
+  ["公园坡", "公園坡", "公园斜坡", "公園斜坡", "park slope"],
+  ["卡罗尔花园", "卡羅爾花園", "carroll gardens"],
+  ["圆石山", "圓石山", "鹅卵石山", "鵝卵石山", "cobble hill"],
+  ["博鲁姆山", "博魯姆山", "boerum hill"],
+  ["日落公园", "日落公園", "sunset park"],
+  ["海湾岭", "海灣嶺", "bay ridge"],
+  ["本森赫斯特", "本森赫斯特", "bensonhurst"],
+  ["羊头湾", "羊頭灣", "sheepshead bay"],
+  ["布莱顿海滩", "布萊頓海灘", "brighton beach"],
+  ["康尼岛", "康尼島", "coney island"],
+  ["戴克高地", "戴克高地", "dyker heights"],
+  ["中木区", "中木區", "midwood"],
+  ["坎纳西", "坎納西", "canarsie"],
+  ["红钩", "紅鉤", "red hook"],
+  ["戈瓦努斯", "戈瓦努斯", "gowanus"],
+  ["展望莱弗茨花园", "展望萊弗茨花園", "prospect lefferts gardens", "plg"],
+
+  ["长岛市", "長島市", "长岛城", "長島城", "long island city", "lic"],
+  ["阿斯托里亚", "阿斯托里亞", "astoria"],
+  ["阳光边", "陽光邊", "sunnyside"],
+  ["伍德赛德", "伍德賽德", "woodside"],
+  ["杰克逊高地", "傑克遜高地", "jackson heights"],
+  ["艾姆赫斯特", "艾姆赫斯特", "elmhurst"],
+  ["科罗娜", "科羅娜", "corona"],
+  ["法拉盛", "法拉盛", "flushing"],
+  ["新鲜草原", "新鮮草原", "fresh meadows"],
+  ["森林小丘", "森林小丘", "森林山", "森林山", "forest hills"],
+  ["雷哥公园", "雷哥公園", "rego park"],
+  ["凯尤花园", "凱尤花園", "奇尤花园", "奇尤花園", "kew gardens"],
+  ["里士满山", "里士滿山", "里士满丘", "里士滿丘", "richmond hill"],
+  ["牙买加", "牙買加", "j​​amaica", "jamaica"],
+  ["牙买加庄园", "牙買加莊園", "jamaica estates"],
+  ["布里亚伍德", "布里亞伍德", "briarwood"],
+  ["贝赛德", "貝賽德", "贝赛", "貝賽", "bayside"],
+  ["道格拉斯顿", "道格拉斯頓", "douglaston"],
+  ["小颈", "小頸", "little neck"],
+  ["白石", "白石", "whitestone"],
+  ["里奇伍德", "里奇伍德", "ridgewood"],
+  ["马斯佩斯", "馬斯佩斯", "maspeth"],
+  ["臭氧公园", "臭氧公園", "臭氧园", "臭氧園", "ozone park"],
+  ["霍华德海滩", "霍華德海灘", "howard beach"],
+  ["洛克威", "洛克威", "洛克威海滩", "洛克威海灘", "rockaway", "rockaway beach"],
+  ["中村", "中村", "middle village"],
+  ["劳雷尔顿", "勞雷爾頓", "laurelton"],
+  ["圣奥尔本斯", "聖奧爾本斯", "st. albans", "st albans"],
+  ["坎布里亚高地", "坎布里亞高地", "cambria heights"],
+
+  ["河代尔", "河代爾", "河谷", "riverdale"],
+  ["金斯布里奇", "金斯布里奇", "kingsbridge"],
+  ["福特汉姆", "福特漢姆", "fordham"],
+  ["贝尔蒙特", "貝爾蒙特", "belmont"],
+  ["大学高地", "大學高地", "university heights"],
+  ["莫里斯公园", "莫里斯公園", "morris park"],
+  ["佩勒姆湾", "佩勒姆灣", "pelham bay"],
+  ["索罗格斯颈", "索羅格斯頸", "索罗格颈", "索羅格頸", "throggs neck", "throgs neck"],
+  ["莫特黑文", "莫特黑文", "mott haven"],
+  ["康科斯", "康科斯", "the concourse", "concourse"],
+  ["诺伍德", "諾伍德", "norwood"],
+  ["城市岛", "城市島", "city island"],
+  ["桑德维尤", "桑德維尤", "soundview"],
+
+  ["圣乔治", "聖喬治", "st. george", "st george"],
+  ["斯台普顿", "斯台普頓", "stapleton"],
+  ["汤普金斯维尔", "湯普金斯維爾", "tompkinsville"],
+  ["新斯普林维尔", "新斯普林維爾", "new springville"],
+  ["新多普", "新多普", "new dorp"],
+  ["大基尔斯", "大基爾斯", "great kills"],
+  ["南海滩", "南海灘", "south beach"],
+  ["托滕维尔", "托滕維爾", "tottenville"],
+  ["休格诺", "休格諾", "huguenot"],
+
+  ["大颈", "大頸", "great neck"],
+  ["曼哈塞特", "曼哈塞特", "manhasset"],
+  ["华盛顿港", "華盛頓港", "port washington"],
+  ["米尼奥拉", "米尼奧拉", "mineola"],
+  ["花园城", "花園城", "garden city"],
+  ["亨普斯特德", "亨普斯特德", "hempstead"],
+  ["尤宁代尔", "尤寧代爾", "uniondale"],
+  ["西伯里", "西伯里", "westbury"],
+  ["新海德公园", "新海德公園", "new hyde park"],
+  ["花卉公园", "花卉公園", "floral park"],
+  ["埃尔蒙特", "埃爾蒙特", "elmont"],
+  ["富兰克林广场", "富蘭克林廣場", "franklin square"],
+  ["谷溪", "谷溪", "山谷溪", "山谷溪", "valley stream"],
+  ["洛克维尔中心", "洛克維爾中心", "rockville centre", "rockville center"],
+  ["长滩", "長灘", "long beach"],
+  ["海滨", "海濱", "奥申赛德", "奧申賽德", "oceanside"],
+  ["林布鲁克", "林布魯克", "lynbrook"],
+  ["弗里波特", "弗里波特", "freeport"],
+  ["梅里克", "梅里克", "merrick"],
+  ["贝尔莫", "貝爾莫", "bellmore"],
+  ["旺塔", "旺塔", "wantagh"],
+  ["马萨佩夸", "馬薩佩夸", "massapequa"],
+  ["莱维敦", "萊維敦", "levittown"],
+  ["希克斯维尔", "希克斯維爾", "hicksville"],
+  ["普莱恩维尤", "普萊恩維尤", "plainview"],
+  ["西奥塞特", "西奧塞特", "syosset"],
+  ["杰里科", "傑里科", "jericho"],
+  ["罗斯林", "羅斯林", "roslyn"],
+  ["格伦科夫", "格倫科夫", "glen cove"],
+  ["牡蛎湾", "牡蠣灣", "oyster bay"],
+  ["贝思佩奇", "貝思佩奇", "bethpage"],
+  ["东草原", "東草原", "east meadow"],
+  ["西亨普斯特德", "西亨普斯特德", "west hempstead"],
+
+  ["亨廷顿", "亨廷頓", "huntington"],
+  ["亨廷顿站", "亨廷頓站", "huntington station"],
+  ["冷泉港", "冷泉港", "cold spring harbor"],
+  ["北港", "北港", "northport"],
+  ["康马克", "康馬克", "commack"],
+  ["史密斯敦", "史密斯敦", "smithtown"],
+  ["霍波格", "霍波格", "hauppauge"],
+  ["石溪", "石溪", "stony brook"],
+  ["塞托基特", "塞托基特", "setauket"],
+  ["杰斐逊港", "傑斐遜港", "port jefferson"],
+  ["朗康科马", "朗康科馬", "ronkonkoma"],
+  ["朗康科马湖", "朗康科馬湖", "lake ronkonkoma"],
+  ["伊斯利普", "伊斯利普", "艾斯利普", "is​​lip", "islip"],
+  ["湾岸", "灣岸", "bay shore"],
+  ["巴比伦", "巴比倫", "babylon"],
+  ["林登赫斯特", "林登赫斯特", "lindenhurst"],
+  ["法明代尔", "法明代爾", "farmingdale"],
+  ["梅尔维尔", "梅爾維爾", "melville"],
+  ["布伦特伍德", "布倫特伍德", "brentwood"],
+  ["中央伊斯利普", "中央伊斯利普", "central islip"],
+  ["河头", "河頭", "riverhead"],
+  ["帕乔格", "帕喬格", "patchogue"],
+  ["东汉普顿", "東漢普頓", "east hampton"],
+  ["南安普顿", "南安普頓", "southampton"],
+  ["萨格港", "薩格港", "sag harbor"],
+  ["谢尔特岛", "謝爾特島", "shelter island"],
+  ["蒙托克", "蒙托克", "montauk"],
+  ["阿马甘塞特", "阿馬甘塞特", "amagansett"],
+  ["西汉普顿", "西漢普頓", "westhampton"],
+  ["梅德福", "梅德福", "medford"],
+  ["贝波特", "貝波特", "bayport"],
+  ["鹿园", "鹿園", "deer park"],
+  ["雪莉", "雪莉", "shirley"],
+  ["马斯蒂克", "馬斯蒂克", "mastic"],
+  ["塞尔登", "塞爾登", "selden"],
+  ["森特里奇", "森特里奇", "centereach"],
+  ["金斯公园", "金斯公園", "kings park"],
+  ["肖勒姆", "肖勒姆", "shoreham"],
+  ["韦丁河", "韋丁河", "wading river"],
+] as const;
+
+function normalizeSearchText(value: string) {
+  return value.toLocaleLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+const NORMALIZED_LOCATION_ALIAS_GROUPS = LOCATION_ALIAS_GROUPS.map((group) => group.map(normalizeSearchText));
+
+function locationSearchVariants(value: string) {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return [];
+  const variants = new Set([normalized]);
+  NORMALIZED_LOCATION_ALIAS_GROUPS.forEach((group) => {
+    if (group.some((alias) => normalized.includes(alias))) group.forEach((alias) => variants.add(alias));
+  });
+  return [...variants];
+}
+
+function listingLocationSearchText(listing: Listing) {
+  return locationSearchVariants([listing.titleZh, listing.titleEn, listing.areaZh, listing.areaEn].join(" ")).join(" ");
+}
+
 function compressPhoto(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -337,7 +573,7 @@ const copy = {
     filters: "筛选条件",
     reset: "重置",
     location: "位置、大学或地标",
-    locationPlaceholder: "例如 Forest Hills 或 Columbia",
+    locationPlaceholder: "例如 皇后区 / Queens",
     maxPrice: "最高月租",
     anyPrice: "不限",
     type: "房源类型",
@@ -458,7 +694,7 @@ const copy = {
     filters: "Filter desk",
     reset: "Reset",
     location: "Location, university, or landmark",
-    locationPlaceholder: "Try Forest Hills or Columbia",
+    locationPlaceholder: "Try 皇后区 / Queens",
     maxPrice: "Maximum monthly rent",
     anyPrice: "Any price",
     type: "Rental type",
@@ -740,6 +976,7 @@ export default function HomePage() {
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [contactListing, setContactListing] = useState<Listing | null>(null);
+  const [selectedInquiryComments, setSelectedInquiryComments] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
   const [postOpen, setPostOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
@@ -1024,11 +1261,11 @@ export default function HomePage() {
   );
 
   const filteredListings = useMemo(() => {
-    const query = appliedLocation.trim().toLowerCase();
+    const queryVariants = locationSearchVariants(appliedLocation);
     const ceiling = maxPrice ? Number(maxPrice) : Number.POSITIVE_INFINITY;
     const filtered = allListings.filter((listing) => {
-      const searchable = `${listing.titleZh} ${listing.titleEn} ${listing.areaZh} ${listing.areaEn}`.toLowerCase();
-      const matchesLocation = !query || searchable.includes(query);
+      const searchable = listingLocationSearchText(listing);
+      const matchesLocation = queryVariants.length === 0 || queryVariants.some((variant) => searchable.includes(variant));
       const matchesPrice = listing.price <= ceiling;
       const matchesType = rentalType === "all" || listing.type === rentalType;
       const matchesMoveIn = !moveIn || listing.moveIn === "immediate" || moveInMonth(listing.moveIn) === moveIn;
@@ -1290,10 +1527,27 @@ export default function HomePage() {
     }
   };
 
+  const openContact = (listing: Listing) => {
+    setContactListing(listing);
+    setSelectedInquiryComments([]);
+    setInquiryError("");
+  };
+
+  const closeContact = () => {
+    setContactListing(null);
+    setSelectedInquiryComments([]);
+  };
+
   const submitInquiry = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!contactListing || inquirySubmitting) return;
     const formData = new FormData(event.currentTarget);
+    const selectedCommentText = selectedInquiryComments.map((value) => {
+      const option = INQUIRY_COMMENT_OPTIONS.find((item) => item.value === value);
+      return option ? `• ${locale === "zh" ? option.zh : option.en}` : "";
+    }).filter((comment) => comment.length > 0);
+    const freeformMessage = String(formData.get("message") || "").trim();
+    const message = [...selectedCommentText, freeformMessage].filter((comment) => comment.length > 0).join("\n");
     const inquiry: Inquiry = {
       id: `inquiry-${inquirySequence.current++}`,
       listingId: contactListing.id,
@@ -1304,7 +1558,7 @@ export default function HomePage() {
       occupants: String(formData.get("occupants") || ""),
       pets: String(formData.get("pets") || ""),
       tourPreference: String(formData.get("tourPreference") || ""),
-      message: String(formData.get("message") || ""),
+      message,
       status: "sent",
     };
     if (contactListing.source === "remote") {
@@ -1316,7 +1570,7 @@ export default function HomePage() {
       }
       if (!currentUser.emailVerified) {
         setInquiryError(locale === "zh" ? "请先验证邮箱，再发送咨询。" : "Verify your email before sending an inquiry.");
-        setContactListing(null);
+        closeContact();
         setAccountOpen(true);
         setDashboardTab("listings");
         return;
@@ -1331,7 +1585,7 @@ export default function HomePage() {
         const result = await response.json() as DashboardInquiry & { error?: string; confirmationSent?: boolean };
         if (!response.ok) throw new Error(result.error || "The inquiry could not be sent.");
         setServerInquiries((current) => [result, ...current]);
-        setContactListing(null);
+        closeContact();
         showToast(result.confirmationSent
           ? (locale === "zh" ? "咨询已发送，确认邮件也已发出" : "Inquiry sent; confirmation email delivered")
           : (locale === "zh" ? "咨询已发送" : "Inquiry sent"));
@@ -1343,7 +1597,7 @@ export default function HomePage() {
       return;
     }
     setInquiries((current) => [inquiry, ...current]);
-    setContactListing(null);
+    closeContact();
     showToast(t.inquirySent);
   };
 
@@ -1832,7 +2086,7 @@ export default function HomePage() {
                         <button className="link-button" type="button" onClick={() => openListing(listing)}>{t.view}<ArrowIcon size={15} /></button>
                         <div className="action-group">
                           <button className={`compare-button ${comparing ? "active" : ""}`} type="button" onClick={() => toggleCompare(listing.id)} aria-pressed={comparing}>{comparing ? <CheckIcon size={13} /> : ""}{comparing ? t.comparing : t.compare}</button>
-                          <button className="contact-button" type="button" onClick={() => { setContactListing(listing); setInquiryError(""); }}><ChatIcon size={15} />{t.contact}</button>
+                          <button className="contact-button" type="button" onClick={() => openContact(listing)}><ChatIcon size={15} />{t.contact}</button>
                         </div>
                       </div>
                     </div>
@@ -2064,7 +2318,7 @@ export default function HomePage() {
               <div className="tag-row drawer-tags">{listingTags(selectedListing).map((tag) => <span className="listing-tag" key={tag}>{tag}</span>)}</div>
               <div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>{listingPrivacy(selectedListing)}</p></div></div>
               <div className="detail-action-dock">
-                <button className="primary-button full-button" type="button" onClick={() => { setSelectedListing(null); setContactListing(selectedListing); setInquiryError(""); }}><ChatIcon />{t.requestTour}</button>
+                <button className="primary-button full-button" type="button" onClick={() => { setSelectedListing(null); openContact(selectedListing); }}><ChatIcon />{t.requestTour}</button>
               </div>
               <button className="text-button detail-report-button" type="button" onClick={openReportForListing}>{locale === "zh" ? "举报此房源" : "Report this listing"}</button>
             </div>
@@ -2075,21 +2329,31 @@ export default function HomePage() {
       {reportOpen && selectedListing && <ReportDrawer locale={locale} listingTitle={listingTitle(selectedListing)} loading={reportLoading} error={reportError} onClose={() => { setReportOpen(false); setReportError(""); }} onSubmit={submitReport} />}
 
       {contactListing && (
-        <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContactListing(null); }}>
+        <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeContact(); }}>
           <aside className="drawer form-drawer" role="dialog" aria-modal="true" aria-labelledby="contact-title">
             <div className="drawer-content">
-              <div className="drawer-heading"><span className="section-label">{contactListing.titleEn}</span><button className="drawer-close" type="button" onClick={() => setContactListing(null)} aria-label={t.close}><CloseIcon /></button></div>
+              <div className="drawer-heading"><span className="section-label">{contactListing.titleEn}</span><button className="drawer-close" type="button" onClick={closeContact} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="contact-title">{t.contactTitle}</h2>
               <p className="drawer-intro">{t.contactIntro}</p>
-              <form className="contact-form" onSubmit={submitInquiry}>
+              <form key={contactListing.id} className="contact-form" onSubmit={submitInquiry}>
                 {inquiryError && <p className="form-error" role="alert">{inquiryError}</p>}
                 <label className="field-label" htmlFor="contact-move">{t.intendedMove}</label>
-                <select id="contact-move" name="moveIn" defaultValue={contactListing.moveIn === "immediate" ? "immediate" : moveInMonth(contactListing.moveIn) || "september"}><option value="immediate">{t.immediate}</option><option value="august">{t.august}</option><option value="september">{t.september}</option><option value="october">{t.october}</option></select>
+                <select id="contact-move" name="moveIn" defaultValue={contactListing.moveIn === "immediate" ? "immediate" : moveInMonth(contactListing.moveIn) || "september"}><option value="immediate">{locale === "zh" ? "立即入住" : "Move in immediately"}</option><option value="august">{locale === "zh" ? "2026年8月" : "Aug 2026"}</option><option value="september">{locale === "zh" ? "2026年9月" : "Sep 2026"}</option><option value="october">{locale === "zh" ? "2026年10月" : "Oct 2026"}</option></select>
                 <label className="field-label" htmlFor="contact-lease">{t.leaseLength}</label>
-                <select id="contact-lease" name="leaseLength" defaultValue="12"><option value="6">6 months</option><option value="12">12 months</option><option value="24">24+ months</option></select>
+                <select id="contact-lease" name="leaseLength" defaultValue="12"><option value="6">{locale === "zh" ? "6个月" : "6 months"}</option><option value="12">{locale === "zh" ? "12个月" : "12 months"}</option><option value="24">{locale === "zh" ? "24个月以上" : "24+ months"}</option><option value="undefined">{locale === "zh" ? "未确定" : "Undefined"}</option></select>
                 <div className="form-row"><div><label className="field-label" htmlFor="contact-occupants">{t.occupants}</label><select id="contact-occupants" name="occupants" defaultValue="1"><option value="1">1</option><option value="2">2</option><option value="3+">3+</option></select></div><div><label className="field-label" htmlFor="contact-pets">{t.petsQuestion}</label><select id="contact-pets" name="pets" defaultValue="no"><option value="no">{t.noPets}</option><option value="yes">{t.yesPets}</option></select></div></div>
                 <label className="field-label" htmlFor="contact-tour">{locale === "zh" ? "看房偏好" : "Tour preference"}</label>
                 <select id="contact-tour" name="tourPreference" defaultValue="flexible"><option value="flexible">{locale === "zh" ? "时间灵活" : "Flexible"}</option><option value="weekday">{locale === "zh" ? "工作日" : "Weekdays"}</option><option value="weekend">{locale === "zh" ? "周末" : "Weekends"}</option></select>
+                <fieldset className="inquiry-comment-options">
+                  <legend className="field-label">{locale === "zh" ? "你想了解什么？（可多选）" : "What would you like to know? (Choose any)"}</legend>
+                  <div className="comment-options">
+                    {INQUIRY_COMMENT_OPTIONS.map((option) => {
+                      const selected = selectedInquiryComments.includes(option.value);
+                      return <button className={`comment-option ${selected ? "active" : ""}`} key={option.value} type="button" onClick={() => setSelectedInquiryComments((current) => selected ? current.filter((value) => value !== option.value) : [...current, option.value])} aria-pressed={selected}>{selected && <CheckIcon size={12} />}{locale === "zh" ? option.zh : option.en}</button>;
+                    })}
+                  </div>
+                  <p className="field-help">{locale === "zh" ? "可选择多个，选中的内容会和你的消息一起发送给发布者。" : "Choose any number; selected prompts will be sent with your message."}</p>
+                </fieldset>
                 <label className="field-label" htmlFor="contact-message">{t.message}</label>
                 <textarea id="contact-message" name="message" placeholder={t.messagePlaceholder} rows={4} />
                 <p className="form-safety"><ShieldIcon size={15} />{locale === "zh" ? "我们不会在这个阶段要求信用资料或受保护特征。" : "We do not ask for credit files or protected traits at this stage."}</p>
