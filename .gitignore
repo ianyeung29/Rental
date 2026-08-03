@@ -3,6 +3,10 @@ node_modules/
 out/
 dev-server.log
 dev-server-error.log
+*-server-3011*.log
 *.tsbuildinfo
+.env
+.env*.local
+!.env.example
 .impeccable/
 *-review.png

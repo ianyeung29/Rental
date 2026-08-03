@@ -6,10 +6,10 @@ colors:
   primary-deep: "#1D4FC0"
   visibility-lime: "#D7E85D"
   ink: "#142A44"
-  neutral-bg: "#F3F6F1"
-  surface: "#FFFFFF"
-  blue-wash: "#EDF3FF"
-  divider: "#D8E0E2"
+  neutral-bg: "#F6F4EF"
+  surface: "#FFFDF9"
+  blue-wash: "#EDF2F8"
+  divider: "#DEDFD9"
   muted: "#637384"
   coral-save: "#E28C61"
 typography:
@@ -78,7 +78,7 @@ components:
 
 This interface borrows the clarity of a multilingual public-service counter, an availability board, and a well-kept folder system. It is an operating surface first: the renter should be able to scan, filter, compare, and understand the next safe action without wading through a marketing hero or a low-information classified feed.
 
-The world is daylight paper, enamel blue, visibility lime, and tabbed panels. Listing photography supplies warmth and human scale; status labels supply confidence. The product is Chinese-first without red/gold cultural shorthand. Surfaces are flat and squared at rest, with depth reserved for drawers and transient feedback.
+The world is porcelain paper, enamel blue, visibility lime, and tabbed panels. Listing photography supplies warmth and human scale; status labels supply confidence. The product is Chinese-first without red/gold cultural shorthand. Surfaces are flat and squared at rest, with depth reserved for drawers and transient feedback.
 
 **Key Characteristics:**
 
@@ -104,10 +104,10 @@ The palette treats blue as the navigation and action signal, lime as visibility 
 ### Neutral
 
 - **Desk Ink** (#142A44): Headings, primary copy, top-level action surfaces, and the dark comparison bar.
-- **Daylight Paper** (#F3F6F1): The page canvas and quiet filter surfaces.
-- **Surface White** (#FFFFFF): Listing cards, fields, and drawer interiors.
-- **Blue Wash** (#EDF3FF): Privacy, synthetic-data, and explanatory callouts.
-- **Divider Gray** (#D8E0E2): Structural rules and card borders.
+- **Porcelain Paper** (#F6F4EF): The page canvas and quiet filter surfaces.
+- **Warm Surface** (#FFFDF9): Listing cards, fields, and drawer interiors.
+- **Blue Wash** (#EDF2F8): Privacy, synthetic-data, and explanatory callouts.
+- **Divider Gray** (#DEDFD9): Structural rules and card borders.
 - **Working Muted** (#637384): Supporting copy, metadata, and secondary labels.
 
 **The Signal Separation Rule.** Blue means action or navigation; lime means a confirmed or current state; coral means saved by the renter. Do not use a generic badge color to imply a verification claim.
