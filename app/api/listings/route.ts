@@ -237,10 +237,23 @@ function agentFeeLabel(input: ReturnType<typeof normalizeBody>) {
   return "请经纪报价";
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!sql) return NextResponse.json({ error: "DATABASE_URL is not configured on the server yet." }, { status: 503 });
   try {
     await ensureDatabaseSchema();
+    const params = new URL(request.url).searchParams;
+    const requestedLimit = Number(params.get("limit") || 100);
+    const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
+    const requestedOffset = Number(params.get("offset") || 0);
+    const offset = Number.isInteger(requestedOffset) ? Math.max(requestedOffset, 0) : 0;
+    const sort = params.get("sort");
+    const orderBy = sort === "price"
+      ? "l.price ASC, l.created_at DESC"
+      : sort === "moveIn"
+        ? "CASE WHEN l.move_in = 'immediate' THEN 0 WHEN l.move_in ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN 1 ELSE 2 END, CASE WHEN l.move_in ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN l.move_in END ASC NULLS LAST, l.created_at DESC"
+        : sort === "verified"
+          ? "CASE WHEN l.is_sample THEN 1 ELSE 0 END, l.created_at DESC"
+          : "l.created_at DESC";
     const rows = await sql.query(`
       SELECT
         l.id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type,
@@ -255,10 +268,12 @@ export async function GET() {
       LEFT JOIN rental_listing_media m ON m.listing_id = l.id
       WHERE l.status = 'published' AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
       GROUP BY l.id
-      ORDER BY l.created_at DESC
-      LIMIT 100
-    `);
-    return NextResponse.json(rows.map((row) => toClientListing(row as Record<string, unknown>)));
+      ORDER BY ${orderBy}
+      LIMIT $1 OFFSET $2
+    `, [limit + 1, offset]);
+    const hasMore = rows.length > limit;
+    const listings = rows.slice(0, limit).map((row) => toClientListing(row as Record<string, unknown>));
+    return NextResponse.json(listings, { headers: { "X-Has-More": String(hasMore) } });
   } catch {
     return NextResponse.json({ error: "Listings could not be loaded from the database." }, { status: 502 });
   }

@@ -4,7 +4,7 @@ import { ensureDatabaseSchema, sql } from "../../lib/db";
 
 const MAX_BODY_LENGTH = 2_000;
 const ALLOWED_RENTAL_TYPES = new Set(["all", "entire", "privateRoom", "sublet"]);
-const ALLOWED_SORT_MODES = new Set(["fit", "price", "fresh"]);
+const ALLOWED_SORT_MODES = new Set(["fit", "price", "fresh", "moveIn", "verified"]);
 const ALLOWED_MOVE_IN = new Set(["", "august", "september", "october"]);
 const ALLOWED_FEATURES = new Set([
   "furnished",
