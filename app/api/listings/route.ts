@@ -24,6 +24,15 @@ const ALLOWED_FEATURES = new Set([
   "gym",
   "doorman",
   "storage",
+  "naturalLight",
+  "privateEntrance",
+  "privateBathroom",
+  "walkInCloset",
+  "hardwoodFloors",
+  "packageRoom",
+  "roofDeck",
+  "nearTransit",
+  "shortTerm",
 ]);
 const ALLOWED_AGENT_SERVICES = new Set(["selfManaged", "agentMatch"]);
 const ALLOWED_AGENT_FEE_PLANS = new Set(["agentQuote", "firstMonthRent", "flatFee"]);
@@ -41,6 +50,15 @@ const FEATURE_LABELS: Record<string, [string, string]> = {
   gym: ["健身房", "Gym"],
   doorman: ["门卫 / 前台", "Doorman / front desk"],
   storage: ["储物空间", "Storage"],
+  naturalLight: ["采光好", "Great natural light"],
+  privateEntrance: ["独立出入口", "Private entrance"],
+  privateBathroom: ["独立卫生间", "Private bathroom"],
+  walkInCloset: ["步入式衣帽间", "Walk-in closet"],
+  hardwoodFloors: ["木地板", "Hardwood floors"],
+  packageRoom: ["包裹室", "Package room"],
+  roofDeck: ["屋顶露台", "Rooftop terrace"],
+  nearTransit: ["近公共交通", "Near public transit"],
+  shortTerm: ["短租可询", "Short-term lease possible"],
 };
 
 type ListingBody = {

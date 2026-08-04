@@ -243,15 +243,165 @@ const POST_FEATURE_KEYS = [
   "gym",
   "doorman",
   "storage",
+  "naturalLight",
+  "privateEntrance",
+  "privateBathroom",
+  "walkInCloset",
+  "hardwoodFloors",
+  "packageRoom",
+  "roofDeck",
+  "nearTransit",
+  "shortTerm",
 ] as const;
 
-const POPULAR_LOCATION_SHORTCUTS = [
-  { zh: "皇后区 / Queens", en: "Queens", value: "Queens" },
-  { zh: "森林小丘 / Forest Hills", en: "Forest Hills", value: "Forest Hills" },
+type PopularArea = {
+  id: string;
+  zh: string;
+  en: string;
+  value: string;
+};
+
+type PopularAreaGroup = PopularArea & {
+  locations: readonly PopularArea[];
+};
+
+// Keep this response-shaped so curated records can later be replaced by
+// database-ranked boroughs and areas without changing the picker UI.
+const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
+  {
+    id: "manhattan",
+    zh: "曼哈顿",
+    en: "Manhattan",
+    value: "Manhattan",
+    locations: [
+      { id: "midtown", zh: "中城", en: "Midtown", value: "Midtown" },
+      { id: "lower-manhattan", zh: "下城 / 金融区", en: "Lower Manhattan", value: "Lower Manhattan" },
+      { id: "upper-east-side", zh: "上东区", en: "Upper East Side", value: "Upper East Side" },
+      { id: "upper-west-side", zh: "上西区", en: "Upper West Side", value: "Upper West Side" },
+      { id: "chelsea", zh: "切尔西", en: "Chelsea", value: "Chelsea" },
+      { id: "chinatown", zh: "唐人街 / 华埠", en: "Chinatown", value: "Chinatown" },
+      { id: "two-bridges", zh: "双桥", en: "Two Bridges", value: "Two Bridges" },
+      { id: "lower-east-side", zh: "下东区", en: "Lower East Side", value: "Lower East Side" },
+      { id: "harlem", zh: "哈莱姆", en: "Harlem", value: "Harlem" },
+    ],
+  },
+  {
+    id: "brooklyn",
+    zh: "布鲁克林",
+    en: "Brooklyn",
+    value: "Brooklyn",
+    locations: [
+      { id: "downtown-brooklyn", zh: "布鲁克林市中心", en: "Downtown Brooklyn", value: "Downtown Brooklyn" },
+      { id: "brooklyn-heights", zh: "布鲁克林高地", en: "Brooklyn Heights", value: "Brooklyn Heights" },
+      { id: "williamsburg", zh: "威廉斯堡", en: "Williamsburg", value: "Williamsburg" },
+      { id: "greenpoint", zh: "绿点", en: "Greenpoint", value: "Greenpoint" },
+      { id: "bushwick", zh: "布什维克", en: "Bushwick", value: "Bushwick" },
+      { id: "park-slope", zh: "公园坡", en: "Park Slope", value: "Park Slope" },
+      { id: "bensonhurst", zh: "本森赫斯特", en: "Bensonhurst", value: "Bensonhurst" },
+      { id: "sunset-park", zh: "日落公园", en: "Sunset Park", value: "Sunset Park" },
+      { id: "gravesend", zh: "格雷夫森德", en: "Gravesend", value: "Gravesend" },
+      { id: "sheepshead-bay", zh: "羊头湾", en: "Sheepshead Bay", value: "Sheepshead Bay" },
+      { id: "bath-beach", zh: "巴斯海滩", en: "Bath Beach", value: "Bath Beach" },
+      { id: "homecrest", zh: "霍姆克雷斯特", en: "Homecrest", value: "Homecrest" },
+      { id: "bay-ridge", zh: "海湾岭", en: "Bay Ridge", value: "Bay Ridge" },
+    ],
+  },
+  {
+    id: "queens",
+    zh: "皇后区",
+    en: "Queens",
+    value: "Queens",
+    locations: [
+      { id: "long-island-city", zh: "长岛市", en: "Long Island City", value: "Long Island City" },
+      { id: "forest-hills", zh: "森林小丘", en: "Forest Hills", value: "Forest Hills" },
+      { id: "flushing", zh: "法拉盛", en: "Flushing", value: "Flushing" },
+      { id: "murray-hill-queens", zh: "法拉盛梅里山", en: "Murray Hill", value: "Murray Hill" },
+      { id: "college-point", zh: "学院点", en: "College Point", value: "College Point" },
+      { id: "woodside", zh: "木边", en: "Woodside", value: "Woodside" },
+      { id: "astoria", zh: "阿斯托里亚", en: "Astoria", value: "Astoria" },
+      { id: "jackson-heights", zh: "杰克逊高地", en: "Jackson Heights", value: "Jackson Heights" },
+      { id: "elmhurst", zh: "艾姆赫斯特", en: "Elmhurst", value: "Elmhurst" },
+      { id: "fresh-meadows", zh: "新鲜草原", en: "Fresh Meadows", value: "Fresh Meadows" },
+      { id: "bayside", zh: "贝赛德", en: "Bayside", value: "Bayside" },
+    ],
+  },
+  {
+    id: "bronx",
+    zh: "布朗克斯",
+    en: "The Bronx",
+    value: "Bronx",
+    locations: [
+      { id: "fordham", zh: "福德姆", en: "Fordham", value: "Fordham" },
+      { id: "riverdale", zh: "河谷区", en: "Riverdale", value: "Riverdale" },
+      { id: "kingsbridge", zh: "金斯布里奇", en: "Kingsbridge", value: "Kingsbridge" },
+      { id: "pelham-bay", zh: "佩勒姆湾", en: "Pelham Bay", value: "Pelham Bay" },
+      { id: "belmont", zh: "贝尔蒙特", en: "Belmont", value: "Belmont" },
+      { id: "throgs-neck", zh: "特罗格斯颈", en: "Throgs Neck", value: "Throgs Neck" },
+    ],
+  },
+  {
+    id: "staten-island",
+    zh: "史泰登岛",
+    en: "Staten Island",
+    value: "Staten Island",
+    locations: [
+      { id: "st-george", zh: "圣乔治", en: "St. George", value: "St. George" },
+      { id: "new-dorp", zh: "新多普", en: "New Dorp", value: "New Dorp" },
+      { id: "tottenville", zh: "托滕维尔", en: "Tottenville", value: "Tottenville" },
+      { id: "great-kills", zh: "大基尔斯", en: "Great Kills", value: "Great Kills" },
+      { id: "stapleton", zh: "斯台普顿", en: "Stapleton", value: "Stapleton" },
+    ],
+  },
+  {
+    id: "long-island",
+    zh: "长岛",
+    en: "Long Island",
+    value: "Long Island",
+    locations: [
+      { id: "nassau", zh: "拿骚县", en: "Nassau County", value: "Nassau" },
+      { id: "suffolk", zh: "萨福克县", en: "Suffolk County", value: "Suffolk" },
+      { id: "great-neck", zh: "大颈", en: "Great Neck", value: "Great Neck" },
+      { id: "jericho", zh: "杰里科", en: "Jericho", value: "Jericho" },
+      { id: "new-hyde-park", zh: "新海德公园", en: "New Hyde Park", value: "New Hyde Park" },
+      { id: "garden-city", zh: "花园城", en: "Garden City", value: "Garden City" },
+      { id: "hicksville", zh: "希克斯维尔", en: "Hicksville", value: "Hicksville" },
+      { id: "huntington", zh: "亨廷顿", en: "Huntington", value: "Huntington" },
+      { id: "commack", zh: "科马克", en: "Commack", value: "Commack" },
+      { id: "stony-brook", zh: "石溪", en: "Stony Brook", value: "Stony Brook" },
+      { id: "patchogue", zh: "帕奇奥格", en: "Patchogue", value: "Patchogue" },
+    ],
+  },
+  {
+    id: "upstate-new-york",
+    zh: "纽约上州",
+    en: "Upstate New York",
+    value: "Upstate New York",
+    locations: [
+      { id: "albany", zh: "奥尔巴尼", en: "Albany", value: "Albany" },
+      { id: "buffalo", zh: "水牛城", en: "Buffalo", value: "Buffalo" },
+      { id: "rochester", zh: "罗切斯特", en: "Rochester", value: "Rochester" },
+      { id: "syracuse", zh: "锡拉丘兹", en: "Syracuse", value: "Syracuse" },
+      { id: "ithaca", zh: "伊萨卡", en: "Ithaca", value: "Ithaca" },
+      { id: "saratoga-springs", zh: "萨拉托加泉", en: "Saratoga Springs", value: "Saratoga Springs" },
+      { id: "kingston", zh: "金斯顿", en: "Kingston", value: "Kingston" },
+    ],
+  },
+] as const;
+
+const POPULAR_LOCATION_SHORTCUTS = POPULAR_AREA_GROUPS.flatMap((group) => [
+  { zh: `${group.zh} / ${group.en}`, en: group.en, value: group.value },
+  ...group.locations.map((area) => ({ zh: `${area.zh} / ${area.en}`, en: area.en, value: area.value })),
+]);
+
+const POST_AREA_SHORTCUTS = [
   { zh: "法拉盛 / Flushing", en: "Flushing", value: "Flushing" },
+  { zh: "森林小丘 / Forest Hills", en: "Forest Hills", value: "Forest Hills" },
   { zh: "长岛市 / Long Island City", en: "Long Island City", value: "Long Island City" },
-  { zh: "拿骚县 / Nassau", en: "Nassau", value: "Nassau" },
-  { zh: "萨福克县 / Suffolk", en: "Suffolk", value: "Suffolk" },
+  { zh: "日落公园 / Sunset Park", en: "Sunset Park", value: "Sunset Park" },
+  { zh: "本森赫斯特 / Bensonhurst", en: "Bensonhurst", value: "Bensonhurst" },
+  { zh: "大颈 / Great Neck", en: "Great Neck", value: "Great Neck" },
+  { zh: "杰里科 / Jericho", en: "Jericho", value: "Jericho" },
+  { zh: "奥尔巴尼 / Albany", en: "Albany", value: "Albany" },
 ] as const;
 
 const INQUIRY_COMMENT_OPTIONS = [
@@ -279,6 +429,14 @@ const LOCATION_ALIAS_GROUPS = [
   ["拿骚县", "拿騷縣", "nassau", "nassau county"],
   ["萨福克县", "薩福克縣", "suffolk", "suffolk county"],
   ["纽约州", "紐約州", "new york state", "ny state"],
+  ["纽约上州", "紐約上州", "纽约州北部", "紐約州北部", "纽约州北部地区", "紐約州北部地區", "upstate new york", "upstate ny", "upstate"],
+  ["奥尔巴尼", "奧爾巴尼", "albany"],
+  ["水牛城", "buffalo"],
+  ["罗切斯特", "羅切斯特", "rochester"],
+  ["锡拉丘兹", "錫拉丘茲", "syracuse"],
+  ["伊萨卡", "伊薩卡", "ithaca"],
+  ["萨拉托加泉", "薩拉托加泉", "saratoga springs"],
+  ["金斯顿", "金斯頓", "kingston"],
 
   ["曼哈顿中城", "曼哈頓中城", "中城", "midtown", "midtown manhattan"],
   ["曼哈顿下城", "曼哈頓下城", "下城", "downtown manhattan", "lower manhattan"],
@@ -296,13 +454,14 @@ const LOCATION_ALIAS_GROUPS = [
   ["哈德逊广场", "哈德遜廣場", "哈德逊园区", "哈德遜園區", "hudson yards"],
   ["金融区", "金融區", "financial district", "fidi"],
   ["唐人街", "唐人街", "华埠", "華埠", "chinatown"],
+  ["双桥", "雙橋", "two bridges"],
   ["小意大利", "小意大利", "little italy"],
   ["哈莱姆", "哈萊姆", "哈林", "harlem"],
   ["华盛顿高地", "華盛頓高地", "washington heights"],
   ["英伍德", "因伍德", "inwood"],
   ["晨边高地", "晨邊高地", "莫宁赛德高地", "莫寧賽德高地", "morningside heights"],
   ["格拉梅西", "格拉梅西", "gramercy", "gramercy park"],
-  ["穆雷山", "穆雷山", "默里山", "murray hill"],
+  ["穆雷山", "默里山", "法拉盛梅里山", "murray hill", "murray hill queens"],
   ["基普斯湾", "基普斯灣", "kips bay"],
   ["熨斗区", "熨斗區", "扁铁区", "扁鐵區", "flatiron", "flatiron district"],
   ["联合广场", "聯合廣場", "union square"],
@@ -332,6 +491,9 @@ const LOCATION_ALIAS_GROUPS = [
   ["海湾岭", "海灣嶺", "bay ridge"],
   ["本森赫斯特", "本森赫斯特", "bensonhurst"],
   ["羊头湾", "羊頭灣", "sheepshead bay"],
+  ["格雷夫森德", "格雷夫森德", "gravesend"],
+  ["巴斯海滩", "巴斯海灘", "bath beach"],
+  ["霍姆克雷斯特", "霍姆克雷斯特", "homecrest"],
   ["布莱顿海滩", "布萊頓海灘", "brighton beach"],
   ["康尼岛", "康尼島", "coney island"],
   ["戴克高地", "戴克高地", "dyker heights"],
@@ -345,6 +507,7 @@ const LOCATION_ALIAS_GROUPS = [
   ["阿斯托里亚", "阿斯托里亞", "astoria"],
   ["阳光边", "陽光邊", "sunnyside"],
   ["伍德赛德", "伍德賽德", "woodside"],
+  ["学院点", "學院點", "college point"],
   ["杰克逊高地", "傑克遜高地", "jackson heights"],
   ["艾姆赫斯特", "艾姆赫斯特", "elmhurst"],
   ["科罗娜", "科羅娜", "corona"],
@@ -781,6 +944,15 @@ const copy = {
     gym: "健身房",
     doorman: "门卫 / 前台",
     storage: "储物空间",
+    naturalLight: "采光好",
+    privateEntrance: "独立出入口",
+    privateBathroom: "独立卫生间",
+    walkInCloset: "步入式衣帽间",
+    hardwoodFloors: "木地板",
+    packageRoom: "包裹室",
+    roofDeck: "屋顶露台",
+    nearTransit: "近公共交通",
+    shortTerm: "短租可询",
     immediate: "立即入住",
     chooseDate: "指定入住日期",
     august: "2026年8月",
@@ -797,6 +969,9 @@ const copy = {
     soonest: "最快入住",
     verifiedFirst: "优先已验证",
     popularAreas: "热门区域",
+    popularBoroughs: "先选择行政区或地区",
+    popularPlaces: "选择热门城市 / 社区",
+    collapsePlaces: "收起",
     loadMore: "加载更多房源",
     loadingMore: "正在加载…",
     compare: "比较",
@@ -913,6 +1088,15 @@ const copy = {
     gym: "Gym",
     doorman: "Doorman / front desk",
     storage: "Storage",
+    naturalLight: "Great natural light",
+    privateEntrance: "Private entrance",
+    privateBathroom: "Private bathroom",
+    walkInCloset: "Walk-in closet",
+    hardwoodFloors: "Hardwood floors",
+    packageRoom: "Package room",
+    roofDeck: "Rooftop terrace",
+    nearTransit: "Near public transit",
+    shortTerm: "Short-term lease possible",
     immediate: "Move in immediately",
     chooseDate: "Choose a move-in date",
     august: "Aug 2026",
@@ -929,6 +1113,9 @@ const copy = {
     soonest: "Soonest move-in",
     verifiedFirst: "Verified first",
     popularAreas: "Popular areas",
+    popularBoroughs: "Start with a borough or region",
+    popularPlaces: "Choose a popular city or neighborhood",
+    collapsePlaces: "Hide",
     loadMore: "Load more listings",
     loadingMore: "Loading more…",
     compare: "Compare",
@@ -1099,6 +1286,27 @@ function ChatIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+function ShareIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="18" cy="5" r="2.5" />
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="19" r="2.5" />
+      <path d="m8.2 10.8 7.5-4.4M8.2 13.2l7.5 4.4" />
+    </svg>
+  );
+}
+
+function LinkIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m9.5 14.5 5-5" />
+      <path d="M7.6 17.4H6a4 4 0 0 1 0-8h3" />
+      <path d="M16.4 6.6H18a4 4 0 0 1 0 8h-3" />
+    </svg>
+  );
+}
+
 function CheckIcon({ size = 14 }: { size?: number }) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1154,6 +1362,7 @@ export default function HomePage() {
   const [locale, setLocale] = useState<Locale>("zh");
   const [locationInput, setLocationInput] = useState("");
   const [appliedLocation, setAppliedLocation] = useState("");
+  const [selectedPopularAreaId, setSelectedPopularAreaId] = useState("");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [bedrooms, setBedrooms] = useState("");
@@ -1204,6 +1413,8 @@ export default function HomePage() {
   const [editingListingId, setEditingListingId] = useState<string | null>(null);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [shareListing, setShareListing] = useState<Listing | null>(null);
+  const [shareFeedback, setShareFeedback] = useState("");
   const [visibleResultCount, setVisibleResultCount] = useState(6);
   const [contactListing, setContactListing] = useState<Listing | null>(null);
   const [selectedInquiryComments, setSelectedInquiryComments] = useState<string[]>([]);
@@ -1223,7 +1434,9 @@ export default function HomePage() {
   const [toast, setToast] = useState("");
   const [verificationNotice, setVerificationNotice] = useState("");
   const inquirySequence = useRef(0);
+  const sharedListingIdRef = useRef<string | null>(null);
   const t = copy[locale];
+  const selectedPopularArea = POPULAR_AREA_GROUPS.find((group) => group.id === selectedPopularAreaId) || null;
   const selectedAgentProfile = agentProfiles.find((profile) => profile.id === draft.agentProfileId) || null;
   const searchSnapshot = useMemo<SearchSnapshot>(() => ({
     location: appliedLocation,
@@ -1693,10 +1906,30 @@ export default function HomePage() {
     setSelectedListing(listing);
   };
 
+  const openShare = (listing: Listing) => {
+    setSelectedListing(null);
+    setShareListing(listing);
+    setShareFeedback("");
+  };
+
   const allListings = useMemo(
     () => [...remoteListings, ...customListings, ...(remoteListings.length > 0 ? [] : LISTINGS)],
     [customListings, remoteListings],
   );
+
+  useEffect(() => {
+    if (!hydrated || sharedListingIdRef.current || allListings.length === 0) return;
+    const listingId = new URLSearchParams(window.location.search).get("listing");
+    if (!listingId) return;
+    const matchedListing = allListings.find((listing) => listing.id === listingId);
+    if (!matchedListing) return;
+    sharedListingIdRef.current = listingId;
+    const openTimer = window.setTimeout(() => {
+      setSelectedPhotoIndex(0);
+      setSelectedListing(matchedListing);
+    }, 0);
+    return () => window.clearTimeout(openTimer);
+  }, [allListings, hydrated]);
 
   const filteredListings = useMemo(() => {
     const queryVariants = locationSearchVariants(appliedLocation);
@@ -2020,9 +2253,15 @@ export default function HomePage() {
     setActiveFeatures((current) => (current.includes(feature) ? current.filter((item) => item !== feature) : [...current, feature]));
   };
 
+  const applyPopularLocation = (value: string) => {
+    setLocationInput(value);
+    setAppliedLocation(value);
+  };
+
   const resetFilters = () => {
     setLocationInput("");
     setAppliedLocation("");
+    setSelectedPopularAreaId("");
     setMinPrice("");
     setMaxPrice("");
     setBedrooms("");
@@ -2372,6 +2611,8 @@ export default function HomePage() {
         }
       } else {
         setRemoteListings((current) => [result, ...current]);
+        setShareListing(result);
+        setShareFeedback("");
       }
       if (currentUser?.emailVerified) await fetch("/api/my/draft", { method: "DELETE" }).catch(() => undefined);
       setDraft(EMPTY_DRAFT);
@@ -2409,6 +2650,15 @@ export default function HomePage() {
       gym: ["健身房", "Gym"],
       doorman: ["门卫 / 前台", "Doorman / front desk"],
       storage: ["储物空间", "Storage"],
+      naturalLight: ["采光好", "Great natural light"],
+      privateEntrance: ["独立出入口", "Private entrance"],
+      privateBathroom: ["独立卫生间", "Private bathroom"],
+      walkInCloset: ["步入式衣帽间", "Walk-in closet"],
+      hardwoodFloors: ["木地板", "Hardwood floors"],
+      packageRoom: ["包裹室", "Package room"],
+      roofDeck: ["屋顶露台", "Rooftop terrace"],
+      nearTransit: ["近公共交通", "Near public transit"],
+      shortTerm: ["短租可询", "Short-term lease possible"],
     } as const;
     const tagsZh = draft.features.map((feature) => featureLabels[feature as keyof typeof featureLabels][0]);
     const tagsEn = draft.features.map((feature) => featureLabels[feature as keyof typeof featureLabels][1]);
@@ -2503,6 +2753,83 @@ export default function HomePage() {
   };
   const selectedPhotos = selectedListing ? listingPhotos(selectedListing) : [];
   const selectedPhoto = selectedPhotos[selectedPhotoIndex] || selectedListing?.image || "";
+  const buildListingShareUrl = (listing: Listing) => {
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}/?listing=${encodeURIComponent(listing.id)}`;
+  };
+  const buildListingShareText = (listing: Listing, url: string) => {
+    const title = locale === "zh" ? listing.titleZh : listing.titleEn;
+    const area = locale === "zh" ? listing.areaZh : listing.areaEn;
+    const type = locale === "zh" ? listing.typeZh : listing.typeEn;
+    const tags = listingTags(listing).slice(0, 5);
+    const lines = locale === "zh"
+      ? [
+          `【房源推荐】${title || "房源"}`,
+          `位置：${area}`,
+          `月租：${formatPrice(listing)}`,
+          `户型：${listing.bedrooms === "0" ? "单间" : `${listing.bedrooms} 卧`} · ${listing.bathrooms} 卫 · ${type}`,
+          `入住：${listingMoveIn(listing)}`,
+          tags.length > 0 ? `特点：${tags.join(" · ")}` : "",
+          url ? `详情：${url}` : "",
+        ]
+      : [
+          `${type}: ${title || "Rental listing"}`,
+          `Area: ${area}`,
+          `Rent: ${formatPrice(listing)}`,
+          `Layout: ${listing.bedrooms === "0" ? "Studio" : `${listing.bedrooms} bed`} · ${listing.bathrooms} bath`,
+          `Move-in: ${listingMoveIn(listing)}`,
+          tags.length > 0 ? `Features: ${tags.join(" · ")}` : "",
+          url ? `Details: ${url}` : "",
+        ];
+    return lines.filter(Boolean).join("\n");
+  };
+  const shareUrl = shareListing ? buildListingShareUrl(shareListing) : "";
+  const shareText = shareListing ? buildListingShareText(shareListing, shareUrl) : "";
+  const copySharePayload = async (value: string, successMessage: string) => {
+    if (!value) return;
+    if (!navigator.clipboard?.writeText) {
+      setShareFeedback(locale === "zh" ? "当前浏览器不支持自动复制，请手动选择下方文案。" : "This browser cannot copy automatically. Select the caption below.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setShareFeedback(successMessage);
+    } catch {
+      setShareFeedback(locale === "zh" ? "复制失败，请手动选择下方文案。" : "Copy failed. Select the caption below.");
+    }
+  };
+  const handleNativeShare = async () => {
+    if (!shareListing) return;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: listingTitle(shareListing), text: shareText, url: shareUrl });
+        setShareFeedback(locale === "zh" ? "已打开系统分享菜单。" : "The system share menu is open.");
+        return;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+      }
+    }
+    await copySharePayload(`${shareText}\n${shareUrl}`, locale === "zh" ? "分享文案和链接已复制。" : "The caption and link were copied.");
+  };
+  const handleWeChatMomentsShare = async () => {
+    if (!shareListing) return;
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: listingTitle(shareListing), text: shareText, url: shareUrl });
+        setShareFeedback(locale === "zh" ? "分享菜单已打开，请选择微信，再选择朋友圈。" : "The share menu is open. Choose WeChat, then Moments.");
+        return;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+      }
+    }
+    await copySharePayload(`${shareText}\n${shareUrl}`, locale === "zh" ? "朋友圈文案和链接已复制，请在微信中粘贴分享。" : "The Moments caption and link were copied. Paste them into WeChat to share.");
+  };
+  const handleChannelShare = async (channel: "wechat" | "tiktok") => {
+    const message = channel === "wechat"
+      ? (locale === "zh" ? "微信分享文案和链接已复制；请在微信中打开房源页，再点右上角分享。" : "The WeChat caption and link were copied. Open the listing in WeChat, then use the top-right share menu.")
+      : (locale === "zh" ? "TikTok 发布文案和链接已复制；请配合房源照片发布。" : "The TikTok caption and link were copied. Add the listing photo when you post.");
+    await copySharePayload(`${shareText}\n${shareUrl}`, message);
+  };
 
   return (
     <main className="app-shell">
@@ -2571,17 +2898,55 @@ export default function HomePage() {
                 <input id="location" list="location-options" value={locationInput} onChange={(event) => setLocationInput(event.target.value)} placeholder={t.locationPlaceholder} />
               </div>
               <datalist id="location-options">
-                {POPULAR_LOCATION_SHORTCUTS.map((shortcut) => <option key={shortcut.value} value={shortcut.value}>{shortcut.zh}</option>)}
+                {POPULAR_LOCATION_SHORTCUTS.map((shortcut) => <option key={`${shortcut.zh}-${shortcut.value}`} value={shortcut.value}>{shortcut.zh}</option>)}
               </datalist>
               <div className="location-shortcuts" aria-label={t.popularAreas}>
-                <span>{t.popularAreas}</span>
-                <div>
-                  {POPULAR_LOCATION_SHORTCUTS.map((shortcut) => (
-                    <button className={`location-shortcut ${locationInput === shortcut.value ? "active" : ""}`} type="button" key={shortcut.value} onClick={() => { setLocationInput(shortcut.value); setAppliedLocation(shortcut.value); }}>
-                      {locale === "zh" ? shortcut.zh : shortcut.en}
+                <div className="location-shortcuts-heading">
+                  <span>{t.popularAreas}</span>
+                  <span>{t.popularBoroughs}</span>
+                </div>
+                <div className="location-boroughs">
+                  {POPULAR_AREA_GROUPS.map((group) => (
+                    <button
+                      className={`location-borough ${selectedPopularAreaId === group.id ? "active" : ""}`}
+                      type="button"
+                      key={group.id}
+                      aria-pressed={selectedPopularAreaId === group.id}
+                      aria-controls={selectedPopularAreaId === group.id ? "popular-area-options" : undefined}
+                      onClick={() => setSelectedPopularAreaId(group.id)}
+                    >
+                      <strong>{locale === "zh" ? group.zh : group.en}</strong>
+                      <small>{locale === "zh" ? group.en : group.zh}</small>
                     </button>
                   ))}
                 </div>
+                {selectedPopularArea && (
+                  <div className="location-area-panel" id="popular-area-options" aria-live="polite">
+                    <div className="location-area-panel-heading">
+                      <span>{t.popularPlaces}</span>
+                      <button className="location-area-collapse" type="button" onClick={() => setSelectedPopularAreaId("")}>{t.collapsePlaces}</button>
+                    </div>
+                    <div className="location-area-options">
+                      <button
+                        className={`location-area-option ${locationInput === selectedPopularArea.value ? "active" : ""}`}
+                        type="button"
+                        onClick={() => applyPopularLocation(selectedPopularArea.value)}
+                      >
+                        {locale === "zh" ? `全部${selectedPopularArea.zh}` : `All ${selectedPopularArea.en}`}
+                      </button>
+                      {selectedPopularArea.locations.map((area) => (
+                        <button
+                          className={`location-area-option ${locationInput === area.value ? "active" : ""}`}
+                          type="button"
+                          key={area.id}
+                          onClick={() => applyPopularLocation(area.value)}
+                        >
+                          {locale === "zh" ? `${area.zh} / ${area.en}` : `${area.en} / ${area.zh}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <p className="field-note"><LockIcon size={14} />{t.approximate}</p>
 
@@ -2728,6 +3093,7 @@ export default function HomePage() {
                       <div className="listing-actions">
                         <button className="link-button" type="button" onClick={() => openListing(listing)}>{t.view}<ArrowIcon size={15} /></button>
                         <div className="action-group">
+                          <button className="share-button" type="button" onClick={() => openShare(listing)}><ShareIcon size={14} />{locale === "zh" ? "分享" : "Share"}</button>
                           <button className={`compare-button ${comparing ? "active" : ""}`} type="button" onClick={() => toggleCompare(listing.id)} aria-pressed={comparing}>{comparing ? <CheckIcon size={13} /> : ""}{comparing ? t.comparing : t.compare}</button>
                           <button className="contact-button" type="button" onClick={() => openContact(listing)}><ChatIcon size={15} />{t.contact}</button>
                         </div>
@@ -2859,9 +3225,11 @@ export default function HomePage() {
 
               {postStep === 1 && (
                 <div className="post-form-grid">
-                  <label className="field-label" htmlFor="post-title-zh">中文房源标题<input id="post-title-zh" value={draft.titleZh} onChange={(event) => updateDraft({ titleZh: event.target.value })} placeholder="近地铁的明亮两居" /></label>
-                  <label className="field-label" htmlFor="post-area-zh">公开区域<input id="post-area-zh" value={draft.areaZh} onChange={(event) => updateDraft({ areaZh: event.target.value })} placeholder="皇后区 · Forest Hills 一带" /></label>
-                  <label className="field-label" htmlFor="post-private-address">精确地址（私密）<input id="post-private-address" value={draft.privateAddress} onChange={(event) => updateDraft({ privateAddress: event.target.value })} placeholder="请输入完整街道地址" /></label>
+                  <div className="post-quick-start field-span-2" role="note"><strong>{locale === "zh" ? "先选一个常用区域，再填写 3 项核心信息" : "Start with a popular area, then add the 3 core details"}</strong><p>{locale === "zh" ? "标题、公开区域和精确地址是第一步必填项；精确地址只用于后续看房沟通。" : "Title, public area, and exact address are required here; the exact address stays out of the public listing."}</p></div>
+                  <label className="field-label" htmlFor="post-title-zh">{locale === "zh" ? "中文房源标题" : "Listing title"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-title-zh" value={draft.titleZh} onChange={(event) => updateDraft({ titleZh: event.target.value })} placeholder={locale === "zh" ? "近地铁的明亮两居" : "Bright two-bedroom near transit"} /></label>
+                  <label className="field-label field-span-2" htmlFor="post-area-zh">{locale === "zh" ? "公开区域" : "Public area"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-area-zh" value={draft.areaZh} onChange={(event) => updateDraft({ areaZh: event.target.value, areaEn: "" })} placeholder={locale === "zh" ? "皇后区 · Forest Hills 一带" : "Queens · around Forest Hills"} /></label>
+                  <div className="post-area-shortcuts field-span-2" aria-label={locale === "zh" ? "常用区域快捷选择" : "Popular area shortcuts"}><div className="post-helper-heading"><span>{locale === "zh" ? "常用区域" : "Popular areas"}</span><small>{locale === "zh" ? "点击后仍可修改" : "You can edit it after selecting"}</small></div><div className="post-area-shortcut-list">{POST_AREA_SHORTCUTS.map((shortcut) => <button className={`post-area-shortcut ${draft.areaEn === shortcut.en ? "active" : ""}`} key={shortcut.value} type="button" onClick={() => updateDraft({ areaZh: shortcut.zh, areaEn: shortcut.en })} aria-pressed={draft.areaEn === shortcut.en}>{shortcut.zh}</button>)}</div></div>
+                  <label className="field-label" htmlFor="post-private-address">{locale === "zh" ? "精确地址（私密）" : "Exact address (private)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-private-address" value={draft.privateAddress} onChange={(event) => updateDraft({ privateAddress: event.target.value })} placeholder={locale === "zh" ? "请输入完整街道地址" : "Enter the full street address"} /></label>
                   <div className="post-privacy-note"><LockIcon /><div><strong>{t.addressPrivate}</strong><p>仅保存在本地草稿，不会出现在公开房源卡片。</p></div></div>
                   <label className="field-label" htmlFor="post-role">发布者角色<select id="post-role" value={draft.posterRole} onChange={(event) => updateDraft({ posterRole: event.target.value as ListingDraft["posterRole"] })}><option value="owner">房主</option><option value="agent">房产经纪</option></select></label>
                 </div>
@@ -2870,12 +3238,13 @@ export default function HomePage() {
               {postStep === 2 && (
                 <div className="post-form-grid">
                   <label className="field-label" htmlFor="post-type">{t.type}<select id="post-type" value={draft.rentalType} onChange={(event) => updateDraft({ rentalType: event.target.value as ListingDraft["rentalType"] })}><option value="entire">{t.entire}</option><option value="privateRoom">{t.privateRoom}</option><option value="sublet">{t.sublet}</option></select></label>
-                  <label className="field-label" htmlFor="post-price">{t.maxPrice}<input id="post-price" type="number" min="1" value={draft.price} onChange={(event) => updateDraft({ price: event.target.value })} placeholder="2400" /></label>
+                  <label className="field-label" htmlFor="post-price">{locale === "zh" ? "月租（USD）" : "Monthly rent (USD)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-price" type="number" min="1" value={draft.price} onChange={(event) => updateDraft({ price: event.target.value })} placeholder="2400" /></label>
                   <label className="field-label" htmlFor="post-bedrooms">{locale === "zh" ? "卧室" : "Bedrooms"}<select id="post-bedrooms" value={draft.bedrooms} onChange={(event) => updateDraft({ bedrooms: event.target.value })}><option value="0">Studio</option><option value="1">1</option><option value="2">2</option><option value="3">3+</option></select></label>
                   <label className="field-label" htmlFor="post-bathrooms">{locale === "zh" ? "卫生间" : "Bathrooms"}<select id="post-bathrooms" value={draft.bathrooms} onChange={(event) => updateDraft({ bathrooms: event.target.value })}><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3+</option></select></label>
                   <label className="field-label" htmlFor="post-move-in-mode">可入住时间<select id="post-move-in-mode" value={draft.moveInMode} onChange={(event) => updateDraft({ moveInMode: event.target.value as ListingDraft["moveInMode"] })}><option value="immediate">{t.immediate}</option><option value="date">{t.chooseDate}</option></select></label>
                   {draft.moveInMode === "date" && <label className="field-label" htmlFor="post-move-in-date">入住日期<input id="post-move-in-date" type="date" value={draft.moveInDate} onInput={(event) => updateDraft({ moveInDate: event.currentTarget.value })} onChange={(event) => updateDraft({ moveInDate: event.target.value })} /></label>}
                   <label className="field-label" htmlFor="post-lease">{locale === "zh" ? "最短租期（月）" : "Minimum lease (months)"}<input id="post-lease" type="number" min="1" value={draft.lease} onChange={(event) => updateDraft({ lease: event.target.value })} /></label>
+                  <div className="post-quick-presets field-span-2"><div className="post-quick-presets-group"><span>{locale === "zh" ? "常用月租" : "Common rents"}</span><div className="post-quick-preset-list">{["1500", "2000", "2400", "3000"].map((value) => <button className={`post-quick-preset ${draft.price === value ? "active" : ""}`} key={value} type="button" onClick={() => updateDraft({ price: value })} aria-pressed={draft.price === value}>${Number(value).toLocaleString("en-US")}</button>)}</div></div><div className="post-quick-presets-group"><span>{locale === "zh" ? "常用租期" : "Common terms"}</span><div className="post-quick-preset-list">{["3", "6", "12", "24"].map((value) => <button className={`post-quick-preset ${draft.lease === value ? "active" : ""}`} key={value} type="button" onClick={() => updateDraft({ lease: value })} aria-pressed={draft.lease === value}>{value} {locale === "zh" ? "个月" : "mo"}</button>)}</div></div></div>
                   <div className="field-label feature-field-label">房源特点（可多选）<div className="feature-filters post-features">{POST_FEATURE_KEYS.map((key) => <button className={`feature-chip ${draft.features.includes(key) ? "active" : ""}`} key={key} type="button" onClick={() => updateDraft({ features: draft.features.includes(key) ? draft.features.filter((item) => item !== key) : [...draft.features, key] })} aria-pressed={draft.features.includes(key)}><span className="chip-mark" aria-hidden="true">{draft.features.includes(key) ? <CheckIcon size={12} /> : ""}</span>{t[key]}</button>)}</div></div>
                 </div>
               )}
@@ -2967,6 +3336,36 @@ export default function HomePage() {
         </div>
       )}
 
+      {shareListing && (
+        <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShareListing(null); }}>
+          <aside className="drawer share-drawer" role="dialog" aria-modal="true" aria-labelledby="share-title">
+            <div className="drawer-content">
+              <div className="drawer-heading"><span className="section-label">SHARE DESK</span><button className="drawer-close" type="button" onClick={() => setShareListing(null)} aria-label={t.close}><CloseIcon /></button></div>
+              <h2 id="share-title">{locale === "zh" ? "房源已发布，发给朋友" : "Your listing is live — share it"}</h2>
+              <p className="drawer-intro">{locale === "zh" ? "我们已经准备好房源链接和一段可直接使用的文案。选择一种方式，就可以发到微信、TikTok 或手机的系统分享菜单。" : "Your listing link and a ready-to-use caption are prepared. Choose a route for WeChat, TikTok, or your phone’s system share menu."}</p>
+              <div className="share-preview">
+                <div className="share-preview-photo">{listingPhotos(shareListing)[0] ? <Image src={listingPhotos(shareListing)[0]} alt="" fill sizes="150px" unoptimized /> : <div className="image-fallback" aria-hidden="true" />}</div>
+                <div className="share-preview-copy"><span className="listing-type">{listingType(shareListing)}</span><h3>{listingTitle(shareListing)}</h3><p className="listing-area"><PinIcon size={14} />{listingArea(shareListing)}</p><strong>{formatPrice(shareListing)}<span className="share-preview-month">{t.month}</span></strong></div>
+              </div>
+              <div className="share-link-preview">
+                <div className="share-link-copy"><LinkIcon size={15} /><span><small>{locale === "zh" ? "房源链接" : "Listing link"}</small><strong>{shareUrl}</strong></span></div>
+                <button className="text-button" type="button" onClick={() => { void copySharePayload(shareUrl, locale === "zh" ? "房源链接已复制。" : "Listing link copied."); }}>{locale === "zh" ? "复制" : "Copy"}</button>
+              </div>
+              <div className="share-actions">
+                <button className="share-action share-action-primary" type="button" onClick={() => { void handleWeChatMomentsShare(); }}><ShareIcon /><span><strong>{locale === "zh" ? "分享到微信朋友圈" : "Share to WeChat Moments"}</strong><small>{locale === "zh" ? "准备标题、首图和链接，由你在微信中确认发布" : "Prepare the title, first photo, and link; confirm the post in WeChat"}</small></span></button>
+                <button className="share-action" type="button" onClick={() => { void handleNativeShare(); }}><ShareIcon /><span><strong>{locale === "zh" ? "打开系统分享" : "Open system share"}</strong><small>{locale === "zh" ? "手机上可直接选择微信等应用" : "Choose an app directly on mobile"}</small></span></button>
+                <button className="share-action" type="button" onClick={() => { void handleChannelShare("tiktok"); }}><ShareIcon /><span><strong>TikTok</strong><small>{locale === "zh" ? "复制发布文案和链接，配合照片发布" : "Copy the caption and link, then add your photo"}</small></span></button>
+                <button className="share-action" type="button" onClick={() => { void copySharePayload(shareUrl, locale === "zh" ? "房源链接已复制。" : "Listing link copied."); }}><LinkIcon /><span><strong>{locale === "zh" ? "只复制房源链接" : "Copy listing link only"}</strong><small>{locale === "zh" ? "方便粘贴到聊天或群组" : "Paste it into a chat or group"}</small></span></button>
+              </div>
+              <label className="share-caption-label" htmlFor="share-caption">{locale === "zh" ? "可直接发布的文案" : "Ready-to-post caption"}<textarea id="share-caption" className="share-caption" rows={8} readOnly value={shareText} /></label>
+              {shareFeedback && <p className="share-feedback" role="status"><CheckIcon size={15} />{shareFeedback}</p>}
+              <p className="share-note">{locale === "zh" ? "微信朋友圈：在微信中打开房源页后，点击右上角分享。TikTok：当前会复制文案和链接；如果以后需要真正一键发布，还需要接入并通过对应平台的官方 API 审核。" : "WeChat Moments: open the listing in WeChat, then use the top-right share menu. TikTok: this first version copies the caption and link; true one-tap posting requires an approved official platform API integration."}</p>
+              <div className="share-footer"><button className="outline-button" type="button" onClick={() => setShareListing(null)}>{t.close}</button><button className="primary-button" type="button" onClick={() => { void copySharePayload(shareText, locale === "zh" ? "发布文案已复制。" : "Ready-to-post caption copied."); }}><LinkIcon size={15} />{locale === "zh" ? "复制发布文案" : "Copy caption"}</button></div>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {selectedListing && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedListing(null); }}>
           <aside className="drawer detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title">
@@ -3007,7 +3406,10 @@ export default function HomePage() {
               <div className="tag-row drawer-tags">{listingTags(selectedListing).map((tag) => <span className="listing-tag" key={tag}>{tag}</span>)}</div>
               <div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>{listingPrivacy(selectedListing)}</p></div></div>
               <div className="detail-action-dock">
-                <button className="primary-button full-button" type="button" onClick={() => { setSelectedListing(null); openContact(selectedListing); }}><ChatIcon />{t.requestTour}</button>
+                <div className="detail-action-row">
+                  <button className="primary-button full-button" type="button" onClick={() => { setSelectedListing(null); openContact(selectedListing); }}><ChatIcon />{t.requestTour}</button>
+                  <button className="outline-button full-button detail-share-button" type="button" onClick={() => openShare(selectedListing)}><ShareIcon />{locale === "zh" ? "分享到朋友圈" : "Share to Moments"}</button>
+                </div>
               </div>
               <button className="text-button detail-report-button" type="button" onClick={openReportForListing}>{locale === "zh" ? "举报此房源" : "Report this listing"}</button>
             </div>

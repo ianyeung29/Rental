@@ -22,6 +22,15 @@ const ALLOWED_FEATURES = new Set([
   "gym",
   "doorman",
   "storage",
+  "naturalLight",
+  "privateEntrance",
+  "privateBathroom",
+  "walkInCloset",
+  "hardwoodFloors",
+  "packageRoom",
+  "roofDeck",
+  "nearTransit",
+  "shortTerm",
 ]);
 
 function snapshotFromRow(row: Record<string, unknown>) {
