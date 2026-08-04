@@ -341,18 +341,18 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .feature-field-label { min-height: 75px; }
 .post-features { margin-top: 8px; }
 .field-help { display: block; margin-top: 6px; color: var(--soft-muted); font-size: 10px; font-weight: 400; line-height: 1.4; }
-.agent-service-panel { min-inline-size: 0; margin: 0; padding: 15px; border: 1px solid var(--line-strong); background: #fdfefc; }
-.agent-service-panel legend { width: auto; padding: 0; }
-.agent-service-panel > .field-help { max-width: 64ch; margin: 2px 0 11px; }
-.agent-service-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.agent-service-option { display: flex; align-items: flex-start; gap: 9px; min-height: 76px; padding: 11px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); cursor: pointer; transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease; }
+.agent-service-panel { min-inline-size: 0; margin: 0; padding: 20px; border: 1px solid var(--line-strong); background: #fdfefc; }
+.agent-service-panel legend { width: auto; padding: 0 8px 0 0; font-size: 15px; font-weight: 700; line-height: 1.3; }
+.agent-service-panel > .field-help { max-width: 64ch; margin: 4px 0 16px; font-size: 12px; line-height: 1.6; }
+.agent-service-options { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.agent-service-option { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: 12px; min-height: 0; padding: 16px; border: 1px solid var(--line-strong); color: var(--muted); background: var(--panel); cursor: pointer; transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease, box-shadow 160ms ease; }
 .agent-service-option:hover { border-color: var(--blue); color: var(--blue-dark); }
-.agent-service-option.active { border-color: var(--blue); color: var(--ink); background: var(--blue-wash); }
+.agent-service-option.active { border-color: var(--blue); color: var(--ink); background: var(--blue-wash); box-shadow: inset 4px 0 0 var(--blue); }
 .agent-service-option:focus-within, .agent-fee-option:focus-within { outline: 2px solid #b9cafc; outline-offset: 2px; }
-.agent-service-option input, .agent-fee-option input { flex-shrink: 0; margin: 3px 0 0; accent-color: var(--blue); }
-.agent-service-option-copy { display: grid; gap: 5px; }
-.agent-service-option-copy strong { font-size: 11px; line-height: 1.25; }
-.agent-service-option-copy small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.agent-service-option input, .agent-profile-option input, .agent-fee-option input { width: auto; height: auto; flex-shrink: 0; margin: 4px 0 0; accent-color: var(--blue); }
+.agent-service-option-copy { display: grid; min-width: 0; gap: 6px; }
+.agent-service-option-copy strong { font-size: 14px; line-height: 1.3; }
+.agent-service-option-copy small { color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .agent-assistance-details { margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--line); }
 .agent-profile-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .agent-profile-heading strong { font-size: 11px; }
@@ -363,7 +363,7 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .agent-profile-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 11px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); cursor: pointer; transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease; }
 .agent-profile-option:hover { border-color: var(--blue); color: var(--blue-dark); }
 .agent-profile-option.active { border-color: var(--blue); color: var(--ink); background: var(--blue-wash); }
-.agent-profile-option input { flex-shrink: 0; margin: 3px 0 0; accent-color: var(--blue); }
+.agent-profile-option input { margin-top: 4px; }
 .agent-profile-copy { display: grid; gap: 4px; min-width: 0; }
 .agent-profile-topline { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .agent-profile-topline strong { font-size: 11px; line-height: 1.25; }
