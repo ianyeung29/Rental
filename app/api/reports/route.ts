@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const details = text(body.details, 1_000);
     if (!listingId || !REASONS.has(reason)) return NextResponse.json({ error: "Choose a report reason first." }, { status: 400 });
     await ensureDatabaseSchema();
-    const listings = await sql.query("SELECT id, owner_id FROM rental_listings WHERE id = $1 AND status = 'published' LIMIT 1", [listingId]);
+    const listings = await sql.query("SELECT id, owner_id FROM rental_listings WHERE id = $1 AND status = 'published' AND (expires_on IS NULL OR expires_on >= CURRENT_DATE) LIMIT 1", [listingId]);
     const listing = listings[0] as Record<string, unknown> | undefined;
     if (!listing) return NextResponse.json({ error: "This listing is no longer available." }, { status: 404 });
     if (String(listing.owner_id || "") === user.id) return NextResponse.json({ error: "You cannot report your own listing." }, { status: 400 });

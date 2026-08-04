@@ -19,7 +19,8 @@ This is a browser-first MVP slice of the Chinese-first North American rental mar
 - AI-assisted bilingual listing polish in Step 3. The server route sends only public listing facts to OpenAI, keeps the exact address out of the request, and falls back to a labeled local formatter when no API key is configured.
 - Cloud-published listings are stored in Neon, listing images are uploaded to Cloudflare R2, and published listings reappear in search results for other browser sessions.
 - Email/password accounts use server-side sessions. Listing writes, R2 upload presigning, owner dashboards, and received inquiries are authorization-protected by account ownership.
-- Owners can review and edit their own listings, view private address details, reorder or remove photos, publish or unpublish listings, and reply to received inquiries by email.
+- Owners can review and edit their own listings, view private address details, reorder or remove photos, pause or republish listings, set an optional public expiration date, renew expired listings for 30 days, and reply to received inquiries by email.
+- Listing lifecycle is enforced server-side: paused and expired listings are removed from public search and cannot receive new inquiries or reports; existing legacy `unpublished` rows are treated as paused.
 - Signed-in renters can report remote listings; admin-role API routes expose a small moderation queue with report status updates.
 - Listing inquiries remain in the renter and owner dashboards and can send Resend notifications and confirmation emails when email delivery is configured.
 - Responsive desktop/mobile composition with reduced-motion and keyboard-focus handling.
@@ -46,6 +47,16 @@ npm run db:seed
 ```
 
 The seed creates four clearly labeled sample listings, their private demo details, and local demo-image metadata. It is safe to run again; it does not create user accounts or real rental inventory.
+
+The database bootstrap applies the listing lifecycle columns automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql` after the earlier migration files.
+
+To load synthetic agent profiles for testing the owner’s agent-selection flow:
+
+```bash
+npm run db:seed:agents
+```
+
+These profiles are explicitly marked as sample profiles and are not verified professionals. Replace them with reviewed agent records before production use.
 
 ## Enable AI listing polish
 

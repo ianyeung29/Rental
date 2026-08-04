@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:seed": "node scripts/seed-sample-data.mjs"
+    "db:seed": "node scripts/seed-sample-data.mjs",
+    "db:seed:agents": "node scripts/seed-agent-directory.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",
