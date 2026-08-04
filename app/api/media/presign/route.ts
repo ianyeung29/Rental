@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { ALLOWED_IMAGE_TYPES, createImageUpload, MAX_IMAGE_BYTES } from "../../../lib/r2";
 import { getCurrentUser } from "../../../lib/auth";
+import { demoModeEnabled } from "../../../lib/demo";
 
 const MAX_BODY_LENGTH = 2_000;
 
 export async function POST(request: Request) {
   try {
-    const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: "Sign in before uploading listing images." }, { status: 401 });
-    if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before uploading listing images." }, { status: 403 });
+    const demoMode = demoModeEnabled();
+    const user = demoMode ? null : await getCurrentUser();
+    if (!user && !demoMode) return NextResponse.json({ error: "Sign in before uploading listing images." }, { status: 401 });
+    if (user && !user.emailVerified) return NextResponse.json({ error: "Verify your email before uploading listing images." }, { status: 403 });
     const rawBody = await request.text();
     if (rawBody.length > MAX_BODY_LENGTH) return NextResponse.json({ error: "Upload request is too large." }, { status: 413 });
     const body = JSON.parse(rawBody) as { filename?: unknown; contentType?: unknown; size?: unknown };

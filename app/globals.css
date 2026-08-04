@@ -320,6 +320,9 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .form-safety { display: flex; align-items: flex-start; gap: 7px; margin: 10px 0 8px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .form-safety svg { flex-shrink: 0; color: var(--blue); }
 .post-drawer .drawer-content h2 { max-width: 18ch; }
+.demo-mode-notice { display: grid; gap: 3px; margin: 14px 0 0; padding: 11px 12px; border: 1px solid #cdddfc; color: var(--ink); background: var(--blue-wash); }
+.demo-mode-notice strong { color: var(--blue-dark); font-size: 11px; }
+.demo-mode-notice span { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .post-progress { display: flex; justify-content: space-between; gap: 12px; margin: 18px 0 0; color: var(--soft-muted); font-size: 10px; font-weight: 700; }
 .stage-list { display: flex; flex-direction: column; margin: 24px 0; border-top: 1px solid var(--line); }
 .stage-row { display: grid; grid-template-columns: 27px 1fr auto; align-items: center; gap: 10px; min-height: 54px; border-bottom: 1px solid var(--line); font-size: 12px; }
