@@ -8,7 +8,7 @@ import ReportDrawer from "./components/ReportDrawer";
 
 type Locale = "zh" | "en";
 type RentalType = "all" | "entire" | "privateRoom" | "sublet";
-type SortMode = "fit" | "price" | "fresh";
+type SortMode = "fit" | "price" | "fresh" | "moveIn" | "verified";
 
 type Listing = {
   id: string;
@@ -205,6 +205,15 @@ const EMPTY_DRAFT: ListingDraft = {
   expiresOn: "",
 };
 
+function draftHasContent(value: ListingDraft) {
+  return Boolean(
+    value.titleEn || value.titleZh || value.areaEn || value.areaZh || value.privateAddress || value.price ||
+      value.moveInDate || value.lease !== EMPTY_DRAFT.lease || value.descriptionEn || value.descriptionZh ||
+      value.photos.length || value.photoKeys.length || value.contactName || value.contactEmail || value.agentProfileId || value.expiresOn ||
+      value.features.length || value.agentService !== EMPTY_DRAFT.agentService || value.agentFeePlan !== EMPTY_DRAFT.agentFeePlan || value.agentFeeAmount,
+  );
+}
+
 const STORAGE_KEYS = {
   locale: "rental-marketplace.locale",
   savedIds: "rental-marketplace.saved-ids",
@@ -230,6 +239,15 @@ const POST_FEATURE_KEYS = [
   "gym",
   "doorman",
   "storage",
+] as const;
+
+const POPULAR_LOCATION_SHORTCUTS = [
+  { zh: "皇后区 / Queens", en: "Queens", value: "Queens" },
+  { zh: "森林小丘 / Forest Hills", en: "Forest Hills", value: "Forest Hills" },
+  { zh: "法拉盛 / Flushing", en: "Flushing", value: "Flushing" },
+  { zh: "长岛市 / Long Island City", en: "Long Island City", value: "Long Island City" },
+  { zh: "拿骚县 / Nassau", en: "Nassau", value: "Nassau" },
+  { zh: "萨福克县 / Suffolk", en: "Suffolk", value: "Suffolk" },
 ] as const;
 
 const INQUIRY_COMMENT_OPTIONS = [
@@ -674,6 +692,11 @@ const copy = {
     bestFit: "最匹配",
     lowest: "租金从低到高",
     fresh: "最近更新",
+    soonest: "最快入住",
+    verifiedFirst: "优先已验证",
+    popularAreas: "热门区域",
+    loadMore: "加载更多房源",
+    loadingMore: "正在加载…",
     compare: "比较",
     comparing: "正在比较",
     view: "查看房源",
@@ -795,6 +818,11 @@ const copy = {
     bestFit: "Best fit",
     lowest: "Lowest rent",
     fresh: "Recently updated",
+    soonest: "Soonest move-in",
+    verifiedFirst: "Verified first",
+    popularAreas: "Popular areas",
+    loadMore: "Load more listings",
+    loadingMore: "Loading more…",
     compare: "Compare",
     comparing: "Comparing",
     view: "View listing",
@@ -1027,8 +1055,12 @@ export default function HomePage() {
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [savedSearch, setSavedSearch] = useState(false);
   const [savedSearchSnapshot, setSavedSearchSnapshot] = useState<SearchSnapshot | null>(null);
+  const [accountSyncReady, setAccountSyncReady] = useState(false);
+  const accountSyncUserIdRef = useRef<string | null>(null);
   const [customListings, setCustomListings] = useState<Listing[]>([]);
   const [remoteListings, setRemoteListings] = useState<Listing[]>([]);
+  const [remoteHasMore, setRemoteHasMore] = useState(false);
+  const [remoteLoadingMore, setRemoteLoadingMore] = useState(false);
   const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
   const [agentProfilesLoading, setAgentProfilesLoading] = useState(false);
   const [agentProfilesError, setAgentProfilesError] = useState("");
@@ -1060,6 +1092,7 @@ export default function HomePage() {
   const [editingListingId, setEditingListingId] = useState<string | null>(null);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [visibleResultCount, setVisibleResultCount] = useState(6);
   const [contactListing, setContactListing] = useState<Listing | null>(null);
   const [selectedInquiryComments, setSelectedInquiryComments] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -1095,7 +1128,6 @@ export default function HomePage() {
       try {
         const storedLocale = window.localStorage.getItem(STORAGE_KEYS.locale);
         const storedSavedIds = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.savedIds) || "[]");
-        const storedListings = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.customListings) || "[]");
         const storedInquiries = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.inquiries) || "[]");
         const storedDraft = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.draft) || "null");
         const storedSearchSnapshot = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.savedSearchSnapshot) || "null");
@@ -1111,7 +1143,7 @@ export default function HomePage() {
           rentalType: urlType === "entire" || urlType === "privateRoom" || urlType === "sublet" ? urlType : "all",
           moveIn: params.get("move") === "august" || params.get("move") === "september" || params.get("move") === "october" ? params.get("move") || "" : "",
           activeFeatures: (params.get("features") || "").split(",").filter((feature): feature is string => POST_FEATURE_KEYS.includes(feature as typeof POST_FEATURE_KEYS[number])),
-          sortMode: urlSort === "price" || urlSort === "fresh" ? urlSort : "fit",
+          sortMode: urlSort === "price" || urlSort === "fresh" || urlSort === "moveIn" || urlSort === "verified" ? urlSort : "fit",
         };
         const storedSnapshotRecord = storedSearchSnapshot && typeof storedSearchSnapshot === "object" ? storedSearchSnapshot as Partial<SearchSnapshot> : null;
         const localSnapshot: SearchSnapshot | null = storedSnapshotRecord ? {
@@ -1120,12 +1152,11 @@ export default function HomePage() {
           rentalType: storedSnapshotRecord.rentalType === "entire" || storedSnapshotRecord.rentalType === "privateRoom" || storedSnapshotRecord.rentalType === "sublet" ? storedSnapshotRecord.rentalType : "all",
           moveIn: storedSnapshotRecord.moveIn === "august" || storedSnapshotRecord.moveIn === "september" || storedSnapshotRecord.moveIn === "october" ? storedSnapshotRecord.moveIn : "",
           activeFeatures: Array.isArray(storedSnapshotRecord.activeFeatures) ? storedSnapshotRecord.activeFeatures.filter((feature): feature is string => typeof feature === "string" && POST_FEATURE_KEYS.includes(feature as typeof POST_FEATURE_KEYS[number])) : [],
-          sortMode: storedSnapshotRecord.sortMode === "price" || storedSnapshotRecord.sortMode === "fresh" ? storedSnapshotRecord.sortMode : "fit",
+          sortMode: storedSnapshotRecord.sortMode === "price" || storedSnapshotRecord.sortMode === "fresh" || storedSnapshotRecord.sortMode === "moveIn" || storedSnapshotRecord.sortMode === "verified" ? storedSnapshotRecord.sortMode : "fit",
         } : null;
         const initialSearch = hasUrlSearch ? urlSnapshot : localSnapshot;
         if (storedLocale === "zh" || storedLocale === "en") setLocale(storedLocale);
         if (Array.isArray(storedSavedIds)) setSavedIds(new Set(storedSavedIds.filter((id): id is string => typeof id === "string")));
-        if (Array.isArray(storedListings)) setCustomListings(storedListings);
         if (Array.isArray(storedInquiries)) setInquiries(storedInquiries);
         if (storedEditingListingId) setEditingListingId(storedEditingListingId);
         if (storedDraft && typeof storedDraft === "object") {
@@ -1205,6 +1236,122 @@ export default function HomePage() {
   }, [hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
+    if (!currentUser?.emailVerified) {
+      return;
+    }
+    if (accountSyncUserIdRef.current === currentUser.id) return;
+    accountSyncUserIdRef.current = currentUser.id;
+    let cancelled = false;
+    const syncAccountState = async () => {
+      let syncComplete = true;
+      let localDraft: ListingDraft | null = null;
+      let localEditingListingId: string | null = null;
+      try {
+        const storedDraft = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.draft) || "null");
+        if (storedDraft && typeof storedDraft === "object") localDraft = storedDraft as ListingDraft;
+        localEditingListingId = window.localStorage.getItem(STORAGE_KEYS.editingListingId);
+      } catch {
+        // Local state is optional; the account state remains authoritative.
+      }
+
+      try {
+        const [savedResponse, draftResponse, searchResponse, inquiryResponse] = await Promise.all([
+          fetch("/api/saved-listings", { cache: "no-store" }),
+          fetch("/api/my/draft", { cache: "no-store" }),
+          fetch("/api/saved-search", { cache: "no-store" }),
+          fetch("/api/inquiries", { cache: "no-store" }),
+        ]);
+        if (cancelled) return;
+        syncComplete = savedResponse.ok && draftResponse.ok && searchResponse.ok && inquiryResponse.ok;
+
+        if (savedResponse.ok) {
+          const savedResult = await savedResponse.json() as { listingIds?: unknown[] };
+          const serverSavedIds = Array.isArray(savedResult.listingIds) ? savedResult.listingIds.filter((id): id is string => typeof id === "string") : [];
+          if ([...savedIds].length > 0) {
+            const migrationResponse = await fetch("/api/saved-listings", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ listingIds: [...new Set([...serverSavedIds, ...savedIds])] }),
+            });
+            if (migrationResponse.ok) {
+              const migrated = await migrationResponse.json() as { listingIds?: unknown[] };
+              setSavedIds(new Set(Array.isArray(migrated.listingIds) ? migrated.listingIds.filter((id): id is string => typeof id === "string") : serverSavedIds));
+            } else {
+              syncComplete = false;
+              setSavedIds(new Set([...serverSavedIds, ...savedIds]));
+            }
+          } else {
+            setSavedIds(new Set(serverSavedIds));
+          }
+        }
+
+        if (draftResponse.ok) {
+          const draftResult = await draftResponse.json() as { draft?: unknown; editingListingId?: unknown } | null;
+          if (draftResult?.draft && typeof draftResult.draft === "object") {
+            setDraft({ ...EMPTY_DRAFT, ...(draftResult.draft as Partial<ListingDraft>), currency: "USD" });
+            setEditingListingId(typeof draftResult.editingListingId === "string" ? draftResult.editingListingId : null);
+          } else if (localDraft && draftHasContent(localDraft)) {
+            const migrationResponse = await fetch("/api/my/draft", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ draft: localDraft, editingListingId: localEditingListingId }),
+            });
+            if (migrationResponse.ok) {
+              const migrated = await migrationResponse.json() as { draft?: unknown; editingListingId?: unknown };
+              if (migrated.draft && typeof migrated.draft === "object") setDraft({ ...EMPTY_DRAFT, ...(migrated.draft as Partial<ListingDraft>), currency: "USD" });
+              setEditingListingId(typeof migrated.editingListingId === "string" ? migrated.editingListingId : localEditingListingId);
+            }
+          }
+        }
+
+        if (inquiryResponse.ok) {
+          const inquiryResult = await inquiryResponse.json();
+          if (Array.isArray(inquiryResult)) setServerInquiries(inquiryResult as DashboardInquiry[]);
+        }
+
+        if (searchResponse.ok) {
+          const searchResult = await searchResponse.json() as (SearchSnapshot & { updatedAt?: string }) | null;
+          if (searchResult) {
+            const snapshot: SearchSnapshot = {
+              location: searchResult.location || "",
+              maxPrice: searchResult.maxPrice || "",
+              rentalType: searchResult.rentalType || "all",
+              moveIn: searchResult.moveIn || "",
+              activeFeatures: Array.isArray(searchResult.activeFeatures) ? searchResult.activeFeatures : [],
+              sortMode: searchResult.sortMode || "fit",
+            };
+            setLocationInput(snapshot.location);
+            setAppliedLocation(snapshot.location);
+            setMaxPrice(snapshot.maxPrice);
+            setRentalType(snapshot.rentalType);
+            setMoveIn(snapshot.moveIn);
+            setActiveFeatures(snapshot.activeFeatures);
+            setSortMode(snapshot.sortMode);
+            setSavedSearchSnapshot(snapshot);
+            setSavedSearch(true);
+          } else if (savedSearch && savedSearchSnapshot) {
+            const migrationResponse = await fetch("/api/saved-search", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(savedSearchSnapshot),
+            });
+            if (!migrationResponse.ok) syncComplete = false;
+          }
+        }
+      } catch {
+        // The browser remains usable if an account sync is temporarily unavailable.
+      } finally {
+        if (!cancelled) setAccountSyncReady(syncComplete);
+      }
+    };
+    void syncAccountState();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, hydrated, savedIds, savedSearch, savedSearchSnapshot]);
+
+  useEffect(() => {
     if (!postOpen || draft.agentService !== "agentMatch" || !currentUser?.emailVerified) {
       return;
     }
@@ -1233,19 +1380,41 @@ export default function HomePage() {
     if (!hydrated) return;
     try {
       window.localStorage.setItem(STORAGE_KEYS.locale, locale);
-      window.localStorage.setItem(STORAGE_KEYS.savedIds, JSON.stringify([...savedIds]));
-      window.localStorage.setItem(STORAGE_KEYS.savedSearch, String(savedSearch));
-      if (savedSearchSnapshot) window.localStorage.setItem(STORAGE_KEYS.savedSearchSnapshot, JSON.stringify(savedSearchSnapshot));
-      else window.localStorage.removeItem(STORAGE_KEYS.savedSearchSnapshot);
-      window.localStorage.setItem(STORAGE_KEYS.customListings, JSON.stringify(customListings));
-      window.localStorage.setItem(STORAGE_KEYS.inquiries, JSON.stringify(inquiries));
-      window.localStorage.setItem(STORAGE_KEYS.draft, JSON.stringify(draft));
-      if (editingListingId) window.localStorage.setItem(STORAGE_KEYS.editingListingId, editingListingId);
-      else window.localStorage.removeItem(STORAGE_KEYS.editingListingId);
+      window.localStorage.removeItem(STORAGE_KEYS.customListings);
+      if (!currentUser?.emailVerified || !accountSyncReady) {
+        window.localStorage.setItem(STORAGE_KEYS.savedIds, JSON.stringify([...savedIds]));
+        window.localStorage.setItem(STORAGE_KEYS.savedSearch, String(savedSearch));
+        if (savedSearchSnapshot) window.localStorage.setItem(STORAGE_KEYS.savedSearchSnapshot, JSON.stringify(savedSearchSnapshot));
+        else window.localStorage.removeItem(STORAGE_KEYS.savedSearchSnapshot);
+        window.localStorage.setItem(STORAGE_KEYS.inquiries, JSON.stringify(inquiries));
+        if (draftHasContent(draft) || editingListingId) window.localStorage.setItem(STORAGE_KEYS.draft, JSON.stringify(draft));
+        else window.localStorage.removeItem(STORAGE_KEYS.draft);
+        if (editingListingId) window.localStorage.setItem(STORAGE_KEYS.editingListingId, editingListingId);
+        else window.localStorage.removeItem(STORAGE_KEYS.editingListingId);
+      } else {
+        window.localStorage.removeItem(STORAGE_KEYS.savedIds);
+        window.localStorage.removeItem(STORAGE_KEYS.savedSearch);
+        window.localStorage.removeItem(STORAGE_KEYS.savedSearchSnapshot);
+        window.localStorage.removeItem(STORAGE_KEYS.inquiries);
+        window.localStorage.removeItem(STORAGE_KEYS.draft);
+        window.localStorage.removeItem(STORAGE_KEYS.editingListingId);
+      }
     } catch {
       // A full local storage quota should not block browsing or searching.
     }
-  }, [customListings, draft, editingListingId, hydrated, inquiries, locale, savedIds, savedSearch, savedSearchSnapshot]);
+  }, [accountSyncReady, currentUser, draft, editingListingId, hydrated, inquiries, locale, savedIds, savedSearch, savedSearchSnapshot]);
+
+  useEffect(() => {
+    if (!accountSyncReady || !currentUser?.emailVerified || (!draftHasContent(draft) && !editingListingId)) return;
+    const saveTimer = window.setTimeout(() => {
+      void fetch("/api/my/draft", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft, editingListingId }),
+      }).catch(() => undefined);
+    }, 700);
+    return () => window.clearTimeout(saveTimer);
+  }, [accountSyncReady, currentUser, draft, editingListingId]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1302,11 +1471,14 @@ export default function HomePage() {
   useEffect(() => {
     if (!hydrated) return;
     let cancelled = false;
-    fetch("/api/listings", { cache: "no-store" })
+    fetch("/api/listings?limit=24&offset=0", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) return;
         const result = await response.json() as unknown;
-        if (!cancelled && Array.isArray(result)) setRemoteListings(result as Listing[]);
+        if (!cancelled && Array.isArray(result)) {
+          setRemoteListings(result as Listing[]);
+          setRemoteHasMore(response.headers.get("X-Has-More") === "true");
+        }
       })
       .catch(() => {
         // The local sample inventory remains available when the database is offline.
@@ -1399,13 +1571,19 @@ export default function HomePage() {
 
     return [...filtered].sort((a, b) => {
       if (sortMode === "price") return a.price - b.price;
+      if (sortMode === "verified") return Number(Boolean(b.posterVerified)) - Number(Boolean(a.posterVerified)) || allListings.indexOf(a) - allListings.indexOf(b);
+      if (sortMode === "moveIn") {
+        const moveInValue = (value: string) => value === "immediate" ? 0 : isDateOnly(value) ? new Date(`${value}T00:00:00.000Z`).getTime() : Number.POSITIVE_INFINITY;
+        return moveInValue(a.moveIn) - moveInValue(b.moveIn) || allListings.indexOf(a) - allListings.indexOf(b);
+      }
       return allListings.indexOf(a) - allListings.indexOf(b);
     });
   }, [activeFeatures, allListings, appliedLocation, maxPrice, moveIn, rentalType, sortMode]);
 
   const compareListings = allListings.filter((listing) => compareIds.includes(listing.id));
   const savedListings = allListings.filter((listing) => savedIds.has(listing.id));
-  const messageInquiries = [...serverInquiries, ...inquiries];
+  const messageInquiries = currentUser?.emailVerified ? serverInquiries : inquiries;
+  const visibleListings = filteredListings.slice(0, visibleResultCount);
 
   const updateDraft = (updates: Partial<ListingDraft>) => {
     setDraft((current) => ({ ...current, ...updates }));
@@ -1467,6 +1645,8 @@ export default function HomePage() {
       });
       const result = await response.json() as { user?: AuthUser; verificationSent?: boolean; error?: string };
       if (!response.ok || !result.user) throw new Error(result.error || (locale === "zh" ? "账户操作失败。" : "Account action failed."));
+      setAccountSyncReady(false);
+      accountSyncUserIdRef.current = null;
       setCurrentUser(result.user);
       setAuthOpen(false);
       setAuthError("");
@@ -1483,6 +1663,14 @@ export default function HomePage() {
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     setCurrentUser(null);
+    accountSyncUserIdRef.current = null;
+    setSavedIds(new Set());
+    setSavedSearch(false);
+    setSavedSearchSnapshot(null);
+    setDraft(EMPTY_DRAFT);
+    setEditingListingId(null);
+    setInquiries([]);
+    setAccountSyncReady(false);
     setAccountOpen(false);
     setServerInquiries([]);
     setDashboardListings([]);
@@ -1528,7 +1716,10 @@ export default function HomePage() {
       const listingResponse = await fetch("/api/listings", { cache: "no-store" });
       if (listingResponse.ok) {
         const listings = await listingResponse.json();
-        if (Array.isArray(listings)) setRemoteListings(listings as Listing[]);
+        if (Array.isArray(listings)) {
+          setRemoteListings(listings as Listing[]);
+          setRemoteHasMore(listingResponse.headers.get("X-Has-More") === "true");
+        }
       }
       showToast(status === "published" ? (locale === "zh" ? "房源已重新发布" : "Listing republished") : (locale === "zh" ? "房源已暂停" : "Listing paused"));
     } catch (error) {
@@ -1553,7 +1744,10 @@ export default function HomePage() {
       const listingResponse = await fetch("/api/listings", { cache: "no-store" });
       if (listingResponse.ok) {
         const listings = await listingResponse.json();
-        if (Array.isArray(listings)) setRemoteListings(listings as Listing[]);
+        if (Array.isArray(listings)) {
+          setRemoteListings(listings as Listing[]);
+          setRemoteHasMore(listingResponse.headers.get("X-Has-More") === "true");
+        }
       }
       showToast(locale === "zh" ? "房源已续期 30 天" : "Listing renewed for 30 days");
     } catch (error) {
@@ -1635,13 +1829,33 @@ export default function HomePage() {
     setPostOpen(true);
   };
 
-  const toggleSaved = (id: string) => {
+  const toggleSaved = async (id: string) => {
+    const wasSaved = savedIds.has(id);
     setSavedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (!currentUser?.emailVerified) return;
+    try {
+      const response = wasSaved
+        ? await fetch(`/api/saved-listings?listingId=${encodeURIComponent(id)}`, { method: "DELETE" })
+        : await fetch("/api/saved-listings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listingId: id }),
+        });
+      if (!response.ok) throw new Error("Saved listing sync failed");
+    } catch {
+      setSavedIds((current) => {
+        const next = new Set(current);
+        if (wasSaved) next.add(id);
+        else next.delete(id);
+        return next;
+      });
+      showToast(locale === "zh" ? "收藏同步失败，请稍后重试" : "Saved listing sync failed; try again shortly");
+    }
   };
 
   const toggleCompare = (id: string) => {
@@ -1673,6 +1887,28 @@ export default function HomePage() {
     event.preventDefault();
     setAppliedLocation(locationInput);
     showToast(locale === "zh" ? "筛选已应用" : "Filters applied");
+  };
+
+  const loadMoreListings = async () => {
+    if (remoteLoadingMore) return;
+    if (visibleListings.length < filteredListings.length) {
+      setVisibleResultCount((current) => current + 6);
+      return;
+    }
+    if (!remoteHasMore) return;
+    setRemoteLoadingMore(true);
+    try {
+      const response = await fetch(`/api/listings?limit=24&offset=${remoteListings.length}&sort=${encodeURIComponent(sortMode)}`, { cache: "no-store" });
+      const result = await response.json() as unknown;
+      if (!response.ok || !Array.isArray(result)) throw new Error("Listings could not be loaded.");
+      setRemoteListings((current) => [...current, ...(result as Listing[])]);
+      setRemoteHasMore(response.headers.get("X-Has-More") === "true");
+      setVisibleResultCount((current) => current + 6);
+    } catch {
+      showToast(locale === "zh" ? "更多房源暂时无法加载" : "More listings could not be loaded right now");
+    } finally {
+      setRemoteLoadingMore(false);
+    }
   };
 
   const toggleSavedSearch = async () => {
@@ -1738,7 +1974,7 @@ export default function HomePage() {
       message,
       status: "sent",
     };
-    if (contactListing.source === "remote") {
+    if (contactListing.source === "remote" || contactListing.source === "sample") {
       if (!currentUser) {
         setAuthMode("login");
         setAuthError(locale === "zh" ? "请先登录，再发送咨询。" : "Sign in before sending an inquiry.");
@@ -1971,11 +2207,15 @@ export default function HomePage() {
         const listingResponse = await fetch("/api/listings", { cache: "no-store" });
         if (listingResponse.ok) {
           const listings = await listingResponse.json();
-          if (Array.isArray(listings)) setRemoteListings(listings as Listing[]);
+          if (Array.isArray(listings)) {
+            setRemoteListings(listings as Listing[]);
+            setRemoteHasMore(listingResponse.headers.get("X-Has-More") === "true");
+          }
         }
       } else {
         setRemoteListings((current) => [result, ...current]);
       }
+      if (currentUser?.emailVerified) await fetch("/api/my/draft", { method: "DELETE" }).catch(() => undefined);
       setDraft(EMPTY_DRAFT);
       setDraftSavedAt(null);
       setEditingListingId(null);
@@ -2056,10 +2296,38 @@ export default function HomePage() {
     showToast(locale === "zh" ? "房源已发布到本地预览" : "Listing published to this local preview");
   };
 
-  const saveDraftAndClose = () => {
+  const persistDraftNow = async () => {
+    if (!currentUser?.emailVerified) return true;
+    const response = await fetch("/api/my/draft", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ draft, editingListingId }),
+    }).catch(() => null);
+    return Boolean(response?.ok);
+  };
+
+  const clearDraft = async () => {
+    setDraft(EMPTY_DRAFT);
+    setEditingListingId(null);
+    setPostStep(1);
+    setPostError("");
+    setAiPolishError("");
+    setAiPolishSource(null);
+    setAiPolishNotes([]);
+    setDraftSavedAt(null);
+    if (currentUser?.emailVerified) await fetch("/api/my/draft", { method: "DELETE" }).catch(() => undefined);
+    showToast(locale === "zh" ? "草稿已清除" : "Draft cleared");
+  };
+
+  const saveDraftAndClose = async () => {
     setDraftSavedAt(1);
+    const synced = await persistDraftNow();
     setPostOpen(false);
-    showToast(editingListingId ? (locale === "zh" ? "编辑草稿已保存" : "Edit draft saved") : (locale === "zh" ? "草稿已保存" : "Draft saved"));
+    showToast(!currentUser?.emailVerified
+      ? (editingListingId ? (locale === "zh" ? "编辑草稿已保存在此浏览器" : "Edit draft saved in this browser") : (locale === "zh" ? "草稿已保存在此浏览器" : "Draft saved in this browser"))
+      : synced
+        ? (editingListingId ? (locale === "zh" ? "编辑草稿已同步到账号" : "Edit draft synced to your account") : (locale === "zh" ? "草稿已同步到账号" : "Draft synced to your account"))
+        : (locale === "zh" ? "草稿暂时保存在本地，稍后会重试同步" : "Draft saved locally; account sync will retry"));
   };
 
   const listingTitle = (listing: Listing) => (locale === "zh" ? listing.titleZh : listing.titleEn);
@@ -2142,7 +2410,20 @@ export default function HomePage() {
               <label className="field-label" htmlFor="location">{t.location}</label>
               <div className="input-shell search-input-shell">
                 <SearchIcon />
-                <input id="location" value={locationInput} onChange={(event) => setLocationInput(event.target.value)} placeholder={t.locationPlaceholder} />
+                <input id="location" list="location-options" value={locationInput} onChange={(event) => setLocationInput(event.target.value)} placeholder={t.locationPlaceholder} />
+              </div>
+              <datalist id="location-options">
+                {POPULAR_LOCATION_SHORTCUTS.map((shortcut) => <option key={shortcut.value} value={shortcut.value}>{shortcut.zh}</option>)}
+              </datalist>
+              <div className="location-shortcuts" aria-label={t.popularAreas}>
+                <span>{t.popularAreas}</span>
+                <div>
+                  {POPULAR_LOCATION_SHORTCUTS.map((shortcut) => (
+                    <button className={`location-shortcut ${locationInput === shortcut.value ? "active" : ""}`} type="button" key={shortcut.value} onClick={() => { setLocationInput(shortcut.value); setAppliedLocation(shortcut.value); }}>
+                      {locale === "zh" ? shortcut.zh : shortcut.en}
+                    </button>
+                  ))}
+                </div>
               </div>
               <p className="field-note"><LockIcon size={14} />{t.approximate}</p>
 
@@ -2204,6 +2485,8 @@ export default function HomePage() {
                   <option value="fit">{t.bestFit}</option>
                   <option value="price">{t.lowest}</option>
                   <option value="fresh">{t.fresh}</option>
+                  <option value="moveIn">{t.soonest}</option>
+                  <option value="verified">{t.verifiedFirst}</option>
                 </select>
               </label>
             </div>
@@ -2222,15 +2505,15 @@ export default function HomePage() {
                   <p>{t.noResultsBody}</p>
                   <button className="outline-button" type="button" onClick={resetFilters}>{t.clearAndTry}</button>
                 </div>
-              ) : filteredListings.map((listing) => {
+              ) : visibleListings.map((listing) => {
                 const saved = savedIds.has(listing.id);
                 const comparing = compareIds.includes(listing.id);
                 const photoCount = listingPhotos(listing).length;
                 const tags = listingTags(listing);
                 return (
-                  <article className="listing-card" key={listing.id}>
+                  <article className={`listing-card ${visibleListings[0]?.id === listing.id ? "listing-card-featured" : ""}`} key={listing.id}>
                     <div className="listing-image-wrap">
-                      <Image src={listing.image} alt={locale === "zh" ? `${listing.titleZh} 房源照片` : `${listing.titleEn} listing photo`} fill sizes="(max-width: 600px) 100vw, (max-width: 1080px) 40vw, 31vw" priority={filteredListings[0]?.id === listing.id} loading={filteredListings[0]?.id === listing.id ? "eager" : "lazy"} unoptimized={listing.source !== "sample"} />
+                      <Image src={listing.image} alt={locale === "zh" ? `${listing.titleZh} 房源照片` : `${listing.titleEn} listing photo`} fill sizes="(max-width: 600px) 100vw, (max-width: 1080px) 40vw, 31vw" priority={visibleListings[0]?.id === listing.id} loading={visibleListings[0]?.id === listing.id ? "eager" : "lazy"} unoptimized={listing.source !== "sample"} />
                       <span className="image-label"><span className="image-label-dot" aria-hidden="true" />{listingFreshness(listing)}</span>
                       {photoCount > 1 && <span className="image-photo-count"><GalleryIcon size={13} />{photoCount} {t.photoCount}</span>}
                       <button className={`save-button ${saved ? "is-saved" : ""}`} type="button" onClick={() => toggleSaved(listing.id)} aria-label={saved ? (locale === "zh" ? "取消收藏" : "Remove from saved") : (locale === "zh" ? "收藏房源" : "Save listing")} aria-pressed={saved}>
@@ -2279,6 +2562,8 @@ export default function HomePage() {
               })}
             </div>
 
+            {(visibleListings.length < filteredListings.length || remoteHasMore) && <button className="outline-button load-more-button" type="button" onClick={() => { void loadMoreListings(); }} disabled={remoteLoadingMore}>{remoteLoadingMore ? t.loadingMore : t.loadMore}<ArrowIcon size={15} /></button>}
+
             {compareListings.length > 0 && (
               <aside className="compare-bar" aria-label={t.comparing}>
                 <div className="compare-heading">
@@ -2316,7 +2601,7 @@ export default function HomePage() {
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">SAVED DESK</span><button className="drawer-close" type="button" onClick={() => setSavedOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="saved-title">{locale === "zh" ? "我保存的房源" : "Saved listings"}</h2>
-              <p className="drawer-intro">{currentUser ? (locale === "zh" ? "收藏保存在这个浏览器中；登录后可以继续同步搜索偏好。" : "Saved listings stay in this browser; signed-in search preferences can sync to your account.") : (locale === "zh" ? "收藏会保存在这个浏览器中，方便你继续比较。" : "Your saved listings stay in this browser so you can keep comparing.")}</p>
+              <p className="drawer-intro">{currentUser?.emailVerified ? (locale === "zh" ? "收藏已同步到你的账号，可以在其他设备继续查看。" : "Saved listings sync to your account so you can continue on another device.") : (locale === "zh" ? "登录并验证邮箱后，收藏会同步到你的账号；未登录时保存在此浏览器。" : "Verify your account to sync saved listings; signed-out saves stay in this browser.")}</p>
               {savedListings.length === 0 ? (
                 <div className="drawer-empty"><div className="empty-icon" aria-hidden="true"><HeartIcon /></div><h3>{locale === "zh" ? "还没有收藏" : "Nothing saved yet"}</h3><p>{locale === "zh" ? "在房源照片上点击心形按钮，收藏会出现在这里。" : "Use the heart button on a listing photo to save it here."}</p></div>
               ) : (
@@ -2341,7 +2626,7 @@ export default function HomePage() {
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">MESSAGE DESK</span><button className="drawer-close" type="button" onClick={() => setMessagesOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="messages-title">{locale === "zh" ? "我的咨询" : "My inquiries"}</h2>
-              <p className="drawer-intro">{locale === "zh" ? "这里记录你在本地预览中发送的咨询和看房偏好。" : "Your inquiries and tour preferences are recorded here in this local preview."}</p>
+              <p className="drawer-intro">{currentUser?.emailVerified ? (locale === "zh" ? "咨询和看房偏好已保存在你的账号中。" : "Your inquiries and tour preferences are saved to your account.") : (locale === "zh" ? "登录并验证邮箱后，咨询会保存到你的账号；未登录时仅保存在此浏览器。" : "Verify your account to save inquiries to your account; signed-out history stays in this browser.")}</p>
               {messageInquiries.length === 0 ? (
                 <div className="drawer-empty"><div className="empty-icon" aria-hidden="true"><ChatIcon /></div><h3>{locale === "zh" ? "还没有消息" : "No inquiries yet"}</h3><p>{locale === "zh" ? "打开一个房源并发送结构化咨询，就会在这里看到记录。" : "Open a listing and send a structured inquiry to see it here."}</p></div>
               ) : (
@@ -2390,7 +2675,7 @@ export default function HomePage() {
               <div className="drawer-heading"><span className="section-label">POSTER WORKFLOW</span><button className="drawer-close" type="button" onClick={() => setPostOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="post-title">{editingListingId ? (locale === "zh" ? "编辑房源" : "Edit listing") : t.postTitle}</h2>
               <p className="drawer-intro">{t.postIntro}</p>
-              <div className="post-progress"><span>{locale === "zh" ? `第 ${postStep} 步，共 5 步` : `Step ${postStep} of 5`}</span><span>{editingListingId ? (locale === "zh" ? "编辑模式" : "Editing") : draftSavedAt ? (locale === "zh" ? "草稿已自动保存" : "Draft autosaved") : (locale === "zh" ? "本地草稿" : "Local draft")}</span></div>
+                <div className="post-progress"><span>{locale === "zh" ? `第 ${postStep} 步，共 5 步` : `Step ${postStep} of 5`}</span><span>{editingListingId ? (locale === "zh" ? "编辑模式" : "Editing") : draftSavedAt ? (locale === "zh" ? (currentUser?.emailVerified ? "草稿已同步" : "草稿已自动保存") : (currentUser?.emailVerified ? "Draft synced" : "Draft autosaved")) : (currentUser?.emailVerified ? (locale === "zh" ? "账号草稿" : "Account draft") : (locale === "zh" ? "本地草稿" : "Local draft"))}</span></div>
               <div className="stage-list">
                 {[t.stageProperty, t.stageTerms, t.stageStory, t.stageContact, t.stagePublish].map((stage, index) => <div className="stage-row" key={stage}><span className={`stage-index ${index + 1 <= postStep ? "current" : ""}`}>{index + 1}</span><span>{stage}</span><span className="stage-state">{index + 1 < postStep ? (locale === "zh" ? "完成" : "Done") : index + 1 === postStep ? (locale === "zh" ? "当前" : "Current") : (locale === "zh" ? "待开始" : "Next")}</span></div>)}
               </div>
@@ -2498,7 +2783,7 @@ export default function HomePage() {
               <div className="post-footer-actions">
                 <button className="outline-button" type="button" onClick={() => { if (postStep === 1) setPostOpen(false); else setPostStep((current) => (current - 1) as PostStep); }}>{postStep === 1 ? t.close : (locale === "zh" ? "上一步" : "Back")}</button>
                 <button className="text-button" type="button" onClick={saveDraftAndClose}>{locale === "zh" ? "保存草稿" : "Save draft"}</button>
-                <button className="text-button" type="button" onClick={() => { setDraft(EMPTY_DRAFT); setEditingListingId(null); setPostStep(1); setPostError(""); setAiPolishError(""); setAiPolishSource(null); setAiPolishNotes([]); setDraftSavedAt(null); showToast(locale === "zh" ? "草稿已清除" : "Draft cleared"); }}>{locale === "zh" ? "清除草稿" : "Clear draft"}</button>
+                <button className="text-button" type="button" onClick={() => { void clearDraft(); }}>{locale === "zh" ? "清除草稿" : "Clear draft"}</button>
                 {postStep < 5 ? <button className="primary-button" type="button" onClick={handlePostNext}>{locale === "zh" ? "下一步" : "Next"}<ArrowIcon /></button> : <button className="primary-button" type="button" disabled={publishLoading || mediaUploading} onClick={publishLocalListing}>{publishLoading ? (locale === "zh" ? "保存中…" : "Saving…") : (editingListingId ? (locale === "zh" ? "保存房源修改" : "Save listing changes") : (locale === "zh" ? "发布云端房源" : "Publish to cloud"))}<CheckIcon /></button>}
               </div>
             </div>
