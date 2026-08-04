@@ -5,6 +5,7 @@ import Image from "next/image";
 import AccountDrawer from "./components/AccountDrawer";
 import AuthDrawer from "./components/AuthDrawer";
 import ReportDrawer from "./components/ReportDrawer";
+import { demoModeEnabled } from "./lib/demo";
 
 type Locale = "zh" | "en";
 type RentalType = "all" | "entire" | "privateRoom" | "sublet";
@@ -36,7 +37,7 @@ type Listing = {
   posterVerified?: boolean;
   privacyZh: string;
   privacyEn: string;
-  source?: "sample" | "local" | "remote";
+  source?: "sample" | "local" | "remote" | "demo";
   posterRole?: "owner" | "agent";
   descriptionZh?: string;
   descriptionEn?: string;
@@ -1042,6 +1043,7 @@ function addDaysToDateOnly(value: string, days: number) {
 }
 
 export default function HomePage() {
+  const demoMode = demoModeEnabled();
   const [locale, setLocale] = useState<Locale>("zh");
   const [locationInput, setLocationInput] = useState("");
   const [appliedLocation, setAppliedLocation] = useState("");
@@ -1352,7 +1354,7 @@ export default function HomePage() {
   }, [currentUser, hydrated, savedIds, savedSearch, savedSearchSnapshot]);
 
   useEffect(() => {
-    if (!postOpen || draft.agentService !== "agentMatch" || !currentUser?.emailVerified) {
+    if (!postOpen || draft.agentService !== "agentMatch" || (!demoMode && !currentUser?.emailVerified)) {
       return;
     }
     let cancelled = false;
@@ -1374,7 +1376,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, draft.agentService, postOpen]);
+  }, [currentUser, demoMode, draft.agentService, postOpen]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1593,13 +1595,13 @@ export default function HomePage() {
   };
 
   const openPostFlow = () => {
-    if (!currentUser) {
+    if (!demoMode && !currentUser) {
       setAuthMode("login");
       setAuthError(locale === "zh" ? "请先登录，再发布房源。" : "Sign in before publishing a listing.");
       setAuthOpen(true);
       return;
     }
-    if (!currentUser.emailVerified) {
+    if (!demoMode && currentUser && !currentUser.emailVerified) {
       setAccountOpen(true);
       setDashboardTab("listings");
       showToast(locale === "zh" ? "请先验证邮箱，再发布房源" : "Verify your email before publishing a listing");
@@ -1608,7 +1610,7 @@ export default function HomePage() {
     setPostOpen(true);
     setEditingListingId(null);
     setPostStep(1);
-    setDraft((current) => ({ ...current, contactName: current.contactName || currentUser.displayName, contactEmail: current.contactEmail || currentUser.email }));
+    setDraft((current) => ({ ...current, contactName: current.contactName || currentUser?.displayName || "", contactEmail: current.contactEmail || currentUser?.email || "" }));
     setPostError("");
     setAiPolishError("");
     setAiPolishSource(null);
@@ -1974,7 +1976,7 @@ export default function HomePage() {
       message,
       status: "sent",
     };
-    if (contactListing.source === "remote" || contactListing.source === "sample") {
+    if (contactListing.source === "remote" || contactListing.source === "sample" || contactListing.source === "demo") {
       if (!currentUser) {
         setAuthMode("login");
         setAuthError(locale === "zh" ? "请先登录，再发送咨询。" : "Sign in before sending an inquiry.");
@@ -2491,7 +2493,7 @@ export default function HomePage() {
               </label>
             </div>
 
-            {allListings.some((listing) => listing.source === "sample" || listing.source === "local") && <div className="synthetic-notice" role="note">
+            {allListings.some((listing) => listing.source === "sample" || listing.source === "local" || listing.source === "demo") && <div className="synthetic-notice" role="note">
               <span className="notice-mark" aria-hidden="true"><i /><i /></span>
               <p>{t.syntheticNotice}</p>
               <button className="notice-action" type="button" onClick={() => showToast(t.addressPrivate)}>{locale === "zh" ? "为什么" : "Why"}</button>
@@ -2523,7 +2525,7 @@ export default function HomePage() {
                     <div className="listing-body">
                       <div className="listing-topline">
                         <span className="listing-type">{listingType(listing)}</span>
-                        <span className="listing-source">{listing.source === "local" ? (locale === "zh" ? "你的本地房源" : "Your local listing") : listingPoster(listing)}</span>
+                        <span className="listing-source">{listing.source === "local" ? (locale === "zh" ? "你的本地房源" : "Your local listing") : listing.source === "demo" ? (locale === "zh" ? "演示房源" : "Demo listing") : listingPoster(listing)}</span>
                       </div>
                       <h3>{listingTitle(listing)}</h3>
                       <p className="listing-area"><PinIcon size={15} />{listingArea(listing)}</p>
@@ -2658,7 +2660,7 @@ export default function HomePage() {
                     <Image src={listing.image} alt="" width={180} height={120} unoptimized={listing.source !== "sample"} />
                     <strong>{listingTitle(listing)}</strong>
                     <span>{formatPrice(listing)} {t.month}</span>
-                    <dl><div><dt>{t.detailArea}</dt><dd>{listingArea(listing)}</dd></div><div><dt>{t.detailMoveIn}</dt><dd>{listingMoveIn(listing)}</dd></div><div><dt>{t.detailLease}</dt><dd>{listing.lease}</dd></div><div><dt>{t.detailPoster}</dt><dd>{listing.source === "local" ? (locale === "zh" ? "本地账号" : "Local account") : listingPoster(listing)}</dd></div></dl>
+                    <dl><div><dt>{t.detailArea}</dt><dd>{listingArea(listing)}</dd></div><div><dt>{t.detailMoveIn}</dt><dd>{listingMoveIn(listing)}</dd></div><div><dt>{t.detailLease}</dt><dd>{listing.lease}</dd></div><div><dt>{t.detailPoster}</dt><dd>{listing.source === "local" ? (locale === "zh" ? "本地账号" : "Local account") : listing.source === "demo" ? (locale === "zh" ? "演示发布" : "Demo post") : listingPoster(listing)}</dd></div></dl>
                     <button className="outline-button" type="button" onClick={() => { openListing(listing); setCompareOpen(false); }}>{t.view}</button>
                   </article>
                 ))}
@@ -2675,6 +2677,7 @@ export default function HomePage() {
               <div className="drawer-heading"><span className="section-label">POSTER WORKFLOW</span><button className="drawer-close" type="button" onClick={() => setPostOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="post-title">{editingListingId ? (locale === "zh" ? "编辑房源" : "Edit listing") : t.postTitle}</h2>
               <p className="drawer-intro">{t.postIntro}</p>
+                {demoMode && !currentUser && <div className="demo-mode-notice" role="note"><strong>{locale === "zh" ? "演示模式" : "Demo mode"}</strong><span>{locale === "zh" ? "无需登录即可发布；请填写联系人信息。" : "No sign-in is needed for this demonstration; enter contact details below."}</span></div>}
                 <div className="post-progress"><span>{locale === "zh" ? `第 ${postStep} 步，共 5 步` : `Step ${postStep} of 5`}</span><span>{editingListingId ? (locale === "zh" ? "编辑模式" : "Editing") : draftSavedAt ? (locale === "zh" ? (currentUser?.emailVerified ? "草稿已同步" : "草稿已自动保存") : (currentUser?.emailVerified ? "Draft synced" : "Draft autosaved")) : (currentUser?.emailVerified ? (locale === "zh" ? "账号草稿" : "Account draft") : (locale === "zh" ? "本地草稿" : "Local draft"))}</span></div>
               <div className="stage-list">
                 {[t.stageProperty, t.stageTerms, t.stageStory, t.stageContact, t.stagePublish].map((stage, index) => <div className="stage-row" key={stage}><span className={`stage-index ${index + 1 <= postStep ? "current" : ""}`}>{index + 1}</span><span>{stage}</span><span className="stage-state">{index + 1 < postStep ? (locale === "zh" ? "完成" : "Done") : index + 1 === postStep ? (locale === "zh" ? "当前" : "Current") : (locale === "zh" ? "待开始" : "Next")}</span></div>)}

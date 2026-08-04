@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { getCurrentUser } from "../../lib/auth";
+import { demoModeEnabled } from "../../lib/demo";
 
 function stringList(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -25,14 +26,16 @@ function toAgentProfile(row: Record<string, unknown>) {
 
 export async function GET() {
   if (!sql) return NextResponse.json({ error: "DATABASE_URL is not configured on the server yet." }, { status: 503 });
-  let user;
-  try {
-    user = await getCurrentUser();
-  } catch {
-    return NextResponse.json({ error: "Account authentication is unavailable right now." }, { status: 502 });
+  if (!demoModeEnabled()) {
+    let user;
+    try {
+      user = await getCurrentUser();
+    } catch {
+      return NextResponse.json({ error: "Account authentication is unavailable right now." }, { status: 502 });
+    }
+    if (!user) return NextResponse.json({ error: "Sign in before viewing agent profiles." }, { status: 401 });
+    if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before viewing agent profiles." }, { status: 403 });
   }
-  if (!user) return NextResponse.json({ error: "Sign in before viewing agent profiles." }, { status: 401 });
-  if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before viewing agent profiles." }, { status: 403 });
 
   try {
     await ensureDatabaseSchema();

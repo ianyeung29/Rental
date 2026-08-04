@@ -5,6 +5,7 @@ import { publicUrlForKey } from "../../lib/r2";
 import { getCurrentUser } from "../../lib/auth";
 import { listingSafetyError } from "../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../lib/email";
+import { demoModeEnabled } from "../../lib/demo";
 
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
@@ -127,9 +128,10 @@ function toClientListing(row: Record<string, unknown>) {
   const [typeZh, typeEn] = listingTypeLabels(String(row.rental_type || "entire"));
   const role = row.poster_role === "agent" ? ["房产经纪", "Agent"] : ["房主", "Owner"];
   const isSample = row.is_sample === true;
+  const isDemo = !isSample && !row.owner_id;
   return {
     id: String(row.id),
-    source: isSample ? "sample" as const : "remote" as const,
+    source: isSample ? "sample" as const : isDemo ? "demo" as const : "remote" as const,
     titleZh: String(row.title_zh || ""),
     titleEn: String(row.title_en || ""),
     areaZh: String(row.area_zh || ""),
@@ -148,11 +150,11 @@ function toClientListing(row: Record<string, unknown>) {
     features,
     tagsZh,
     tagsEn,
-    freshnessZh: isSample ? "示例房源 · 非真实库存" : "刚刚发布",
-    freshnessEn: isSample ? "Synthetic sample · not real inventory" : "Published recently",
-    posterZh: isSample ? "示例房源 · 仅用于体验" : `${role[0]} · 用户发布`,
-    posterEn: isSample ? "Synthetic sample · for testing only" : `${role[1]} · user posted`,
-    posterVerified: !isSample,
+    freshnessZh: isSample ? "示例房源 · 非真实库存" : isDemo ? "演示发布 · 仅供体验" : "刚刚发布",
+    freshnessEn: isSample ? "Synthetic sample · not real inventory" : isDemo ? "Demo post · for testing only" : "Published recently",
+    posterZh: isSample ? "示例房源 · 仅用于体验" : isDemo ? "演示房源 · 未登录发布" : `${role[0]} · 用户发布`,
+    posterEn: isSample ? "Synthetic sample · for testing only" : isDemo ? "Demo listing · signed-out post" : `${role[1]} · user posted`,
+    posterVerified: !isSample && !isDemo,
     privacyZh: "公开页面只显示大致区域",
     privacyEn: "Public page shows approximate area only",
     descriptionZh: String(row.description_zh || ""),
@@ -256,7 +258,7 @@ export async function GET(request: Request) {
           : "l.created_at DESC";
     const rows = await sql.query(`
       SELECT
-        l.id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type,
+        l.id, l.owner_id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type,
         l.price, l.bedrooms, l.bathrooms, l.move_in, l.lease, l.features,
         l.tags_zh, l.tags_en, l.description_zh, l.description_en, l.poster_role, l.is_sample,
         COALESCE(
@@ -281,14 +283,17 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (!sql) return NextResponse.json({ error: "DATABASE_URL is not configured on the server yet." }, { status: 503 });
-  let user;
-  try {
-    user = await getCurrentUser();
-  } catch {
-    return NextResponse.json({ error: "Account authentication is unavailable right now." }, { status: 502 });
+  const demoMode = demoModeEnabled();
+  let user = null;
+  if (!demoMode) {
+    try {
+      user = await getCurrentUser();
+    } catch {
+      return NextResponse.json({ error: "Account authentication is unavailable right now." }, { status: 502 });
+    }
+    if (!user) return NextResponse.json({ error: "Sign in before publishing a listing." }, { status: 401 });
+    if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before publishing a listing." }, { status: 403 });
   }
-  if (!user) return NextResponse.json({ error: "Sign in before publishing a listing." }, { status: 401 });
-  if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before publishing a listing." }, { status: 403 });
   let input: ReturnType<typeof normalizeBody>;
   try {
     const rawBody = await request.text();
@@ -297,7 +302,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Please send a valid listing." }, { status: 400 });
   }
-  input = { ...input, contactName: user.displayName, contactEmail: user.email };
+  if (user) input = { ...input, contactName: user.displayName, contactEmail: user.email };
   const validationError = validateListing(input);
   if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
   const safetyError = listingSafetyError([input.titleZh, input.titleEn, input.descriptionZh, input.descriptionEn]);
@@ -310,7 +315,8 @@ export async function POST(request: Request) {
       if (agentRows.length === 0) return NextResponse.json({ error: "Choose an active agent profile or submit a general matching request." }, { status: 400 });
     }
     const id = `listing-${randomUUID()}`;
-    const agentRequestId = input.agentService === "agentMatch" ? `agent-request-${randomUUID()}` : null;
+    const ownerId = user?.id || null;
+    const agentRequestId = input.agentService === "agentMatch" && ownerId ? `agent-request-${randomUUID()}` : null;
     await sql.transaction((tx) => [
       tx.query(`
         INSERT INTO rental_listings (
@@ -320,7 +326,7 @@ export async function POST(request: Request) {
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'USD', $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17, $18, $19, NOW())
       `, [
         id,
-        user.id,
+        ownerId,
         input.titleZh,
         input.titleEn,
         input.areaZh,
@@ -342,11 +348,11 @@ export async function POST(request: Request) {
       tx.query(`
         INSERT INTO rental_listing_private_details (listing_id, private_address, contact_name, contact_email, tour_preference, agent_service, agent_fee_plan, agent_fee_amount, agent_profile_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      `, [id, input.privateAddress, user.displayName, user.email, input.tourPreference, input.agentService, input.agentFeePlan, input.agentFeeAmount, input.agentProfileId]),
+      `, [id, input.privateAddress, input.contactName, input.contactEmail, input.tourPreference, input.agentService, input.agentFeePlan, input.agentFeeAmount, input.agentProfileId]),
       ...(agentRequestId ? [tx.query(`
         INSERT INTO rental_agent_requests (id, listing_id, owner_id, agent_profile_id, fee_plan, fee_amount, status)
         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
-      `, [agentRequestId, id, user.id, input.agentProfileId, input.agentFeePlan, input.agentFeeAmount])] : []),
+      `, [agentRequestId, id, ownerId, input.agentProfileId, input.agentFeePlan, input.agentFeeAmount])] : []),
       ...input.media.map((media) => tx.query(`
         INSERT INTO rental_listing_media (id, listing_id, object_key, public_url, content_type, sort_order)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -355,6 +361,7 @@ export async function POST(request: Request) {
 
     const row = {
       id,
+      owner_id: ownerId,
       title_zh: input.titleZh,
       title_en: input.titleEn,
       area_zh: input.areaZh,
@@ -392,8 +399,8 @@ export async function POST(request: Request) {
             recipientName: String(agent.recipient_name || agent.display_name_zh || "房产经纪"),
             listingTitle: input.titleZh,
             listingArea: input.areaZh,
-            ownerName: user.displayName,
-            ownerEmail: user.email,
+            ownerName: input.contactName,
+            ownerEmail: input.contactEmail,
             agentName: String(agent.display_name_zh || agent.display_name_en || "房产经纪"),
             feeLabel: agentFeeLabel(input),
           });
@@ -403,7 +410,7 @@ export async function POST(request: Request) {
         }
       }
     }
-    return NextResponse.json({ ...toClientListing(row), agentRequestStatus: agentRequestId ? "pending" : null, agentNotificationSent }, { status: 201 });
+    return NextResponse.json({ ...toClientListing(row), agentRequestStatus: agentRequestId ? "pending" : null, agentNotificationSent, demoMode }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "The listing could not be saved to the database." }, { status: 502 });
   }
