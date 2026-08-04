@@ -4,6 +4,7 @@ import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { publicUrlForKey } from "../../lib/r2";
 import { getCurrentUser } from "../../lib/auth";
 import { listingSafetyError } from "../../lib/safety";
+import { emailIsConfigured, sendAgentRequestNotification } from "../../lib/email";
 
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
@@ -23,6 +24,8 @@ const ALLOWED_FEATURES = new Set([
   "doorman",
   "storage",
 ]);
+const ALLOWED_AGENT_SERVICES = new Set(["selfManaged", "agentMatch"]);
+const ALLOWED_AGENT_FEE_PLANS = new Set(["agentQuote", "firstMonthRent", "flatFee"]);
 const FEATURE_LABELS: Record<string, [string, string]> = {
   furnished: ["家具齐全", "Furnished"],
   utilities: ["部分费用包含", "Utilities included"],
@@ -53,12 +56,17 @@ type ListingBody = {
   bathrooms?: unknown;
   moveIn?: unknown;
   lease?: unknown;
+  expiresOn?: unknown;
   features?: unknown;
   descriptionZh?: unknown;
   descriptionEn?: unknown;
   contactName?: unknown;
   contactEmail?: unknown;
   tourPreference?: unknown;
+  agentService?: unknown;
+  agentFeePlan?: unknown;
+  agentFeeAmount?: unknown;
+  agentProfileId?: unknown;
   media?: unknown;
 };
 
@@ -66,6 +74,17 @@ type NormalizedMedia = { key: string; contentType: string; publicUrl: string; so
 
 function text(value: unknown, max = MAX_TEXT_LENGTH) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function isDateOnly(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function dateOnly(value: unknown) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return typeof value === "string" && value ? value.slice(0, 10) : null;
 }
 
 function stringList(value: unknown, allowed?: Set<string>) {
@@ -138,6 +157,7 @@ function toClientListing(row: Record<string, unknown>) {
     privacyEn: "Public page shows approximate area only",
     descriptionZh: String(row.description_zh || ""),
     descriptionEn: String(row.description_en || ""),
+    expiresOn: dateOnly(row.expires_on),
   };
 }
 
@@ -155,12 +175,18 @@ function normalizeBody(body: ListingBody) {
   const bathrooms = text(body.bathrooms, 20) || "1";
   const moveIn = text(body.moveIn, 80) || "immediate";
   const leaseMonths = Number(body.lease);
+  const expiresOn = text(body.expiresOn, 10);
   const features = stringList(body.features, ALLOWED_FEATURES);
   const descriptionZh = text(body.descriptionZh);
   const descriptionEn = text(body.descriptionEn) || descriptionZh;
   const contactName = text(body.contactName, 180);
   const contactEmail = text(body.contactEmail, 240).toLowerCase();
   const tourPreference = text(body.tourPreference, 40) || "flexible";
+  const agentService = ALLOWED_AGENT_SERVICES.has(text(body.agentService, 40)) ? text(body.agentService, 40) : "selfManaged";
+  const requestedAgentFeePlan = text(body.agentFeePlan, 40);
+  const agentFeePlan = agentService === "agentMatch" && ALLOWED_AGENT_FEE_PLANS.has(requestedAgentFeePlan) ? requestedAgentFeePlan : "agentQuote";
+  const agentFeeAmount = agentService === "agentMatch" && agentFeePlan === "flatFee" ? Number(body.agentFeeAmount) : null;
+  const agentProfileId = agentService === "agentMatch" ? text(body.agentProfileId, 120) || null : null;
   const media = mediaList(body.media);
   return {
     titleZh,
@@ -177,6 +203,7 @@ function normalizeBody(body: ListingBody) {
     moveIn,
     leaseMonths,
     lease: `${leaseMonths} months`,
+    expiresOn,
     features,
     tagsZh: features.map((feature) => FEATURE_LABELS[feature][0]),
     tagsEn: features.map((feature) => FEATURE_LABELS[feature][1]),
@@ -185,6 +212,10 @@ function normalizeBody(body: ListingBody) {
     contactName,
     contactEmail,
     tourPreference,
+    agentService,
+    agentFeePlan,
+    agentFeeAmount: Number.isFinite(agentFeeAmount) ? agentFeeAmount : null,
+    agentProfileId,
     media,
   };
 }
@@ -194,8 +225,16 @@ function validateListing(input: ReturnType<typeof normalizeBody>) {
   if (!ALLOWED_RENTAL_TYPES.has(input.rentalType) || input.currency !== "USD" || !Number.isFinite(input.price) || input.price <= 0) return "Use a valid rental type, USD rent, and positive price.";
   if (!Number.isInteger(input.leaseMonths) || input.leaseMonths <= 0 || input.leaseMonths > 120) return "Use a lease term between 1 and 120 months.";
   if (input.moveIn !== "immediate" && !/^\d{4}-\d{2}-\d{2}$/.test(input.moveIn)) return "Choose immediate move-in or a valid move-in date.";
+  if (input.expiresOn && (!isDateOnly(input.expiresOn) || input.expiresOn < new Date().toISOString().slice(0, 10))) return "Choose today or a future listing expiration date.";
+  if (input.agentService === "agentMatch" && input.agentFeePlan === "flatFee" && (!input.agentFeeAmount || input.agentFeeAmount <= 0)) return "Add a valid agent flat fee or choose another fee preference.";
   if (input.media.length === 0) return "Upload at least one image before publishing.";
   return "";
+}
+
+function agentFeeLabel(input: ReturnType<typeof normalizeBody>) {
+  if (input.agentFeePlan === "firstMonthRent") return "成交后支付一个月租金";
+  if (input.agentFeePlan === "flatFee") return `固定 $${Number(input.agentFeeAmount || 0).toLocaleString("en-US")} USD`;
+  return "请经纪报价";
 }
 
 export async function GET() {
@@ -214,7 +253,7 @@ export async function GET() {
         ) AS media
       FROM rental_listings l
       LEFT JOIN rental_listing_media m ON m.listing_id = l.id
-      WHERE l.status = 'published'
+      WHERE l.status = 'published' AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
       GROUP BY l.id
       ORDER BY l.created_at DESC
       LIMIT 100
@@ -251,14 +290,19 @@ export async function POST(request: Request) {
 
   try {
     await ensureDatabaseSchema();
+    if (input.agentProfileId) {
+      const agentRows = await sql.query("SELECT id FROM rental_agent_profiles WHERE id = $1 AND is_active = TRUE LIMIT 1", [input.agentProfileId]);
+      if (agentRows.length === 0) return NextResponse.json({ error: "Choose an active agent profile or submit a general matching request." }, { status: 400 });
+    }
     const id = `listing-${randomUUID()}`;
+    const agentRequestId = input.agentService === "agentMatch" ? `agent-request-${randomUUID()}` : null;
     await sql.transaction((tx) => [
       tx.query(`
         INSERT INTO rental_listings (
           id, owner_id, title_zh, title_en, area_zh, area_en, rental_type, price, currency,
           bedrooms, bathrooms, move_in, lease, features, tags_zh, tags_en,
-          description_zh, description_en, poster_role
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'USD', $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17, $18)
+          description_zh, description_en, poster_role, expires_on, published_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'USD', $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17, $18, $19, NOW())
       `, [
         id,
         user.id,
@@ -278,11 +322,16 @@ export async function POST(request: Request) {
         input.descriptionZh,
         input.descriptionEn,
         input.posterRole,
+        input.expiresOn || null,
       ]),
       tx.query(`
-        INSERT INTO rental_listing_private_details (listing_id, private_address, contact_name, contact_email, tour_preference)
-        VALUES ($1, $2, $3, $4, $5)
-      `, [id, input.privateAddress, user.displayName, user.email, input.tourPreference]),
+        INSERT INTO rental_listing_private_details (listing_id, private_address, contact_name, contact_email, tour_preference, agent_service, agent_fee_plan, agent_fee_amount, agent_profile_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `, [id, input.privateAddress, user.displayName, user.email, input.tourPreference, input.agentService, input.agentFeePlan, input.agentFeeAmount, input.agentProfileId]),
+      ...(agentRequestId ? [tx.query(`
+        INSERT INTO rental_agent_requests (id, listing_id, owner_id, agent_profile_id, fee_plan, fee_amount, status)
+        VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+      `, [agentRequestId, id, user.id, input.agentProfileId, input.agentFeePlan, input.agentFeeAmount])] : []),
       ...input.media.map((media) => tx.query(`
         INSERT INTO rental_listing_media (id, listing_id, object_key, public_url, content_type, sort_order)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -307,9 +356,39 @@ export async function POST(request: Request) {
       description_zh: input.descriptionZh,
       description_en: input.descriptionEn,
       poster_role: input.posterRole,
+      expires_on: input.expiresOn || null,
       media: input.media.map((media) => ({ key: media.key, url: media.publicUrl })),
     };
-    return NextResponse.json(toClientListing(row), { status: 201 });
+    let agentNotificationSent = false;
+    if (agentRequestId && input.agentProfileId && emailIsConfigured()) {
+      const agentRows = await sql.query(`
+        SELECT ap.display_name_zh, ap.display_name_en, u.display_name AS recipient_name, u.email AS recipient_email
+        FROM rental_agent_profiles ap
+        JOIN rental_users u ON u.id = ap.user_id
+        WHERE ap.id = $1 AND ap.is_active = TRUE
+        LIMIT 1
+      `, [input.agentProfileId]);
+      const agent = agentRows[0] as Record<string, unknown> | undefined;
+      const recipientEmail = String(agent?.recipient_email || "");
+      if (agent && recipientEmail && !recipientEmail.endsWith(".invalid")) {
+        try {
+          await sendAgentRequestNotification({
+            recipientEmail,
+            recipientName: String(agent.recipient_name || agent.display_name_zh || "房产经纪"),
+            listingTitle: input.titleZh,
+            listingArea: input.areaZh,
+            ownerName: user.displayName,
+            ownerEmail: user.email,
+            agentName: String(agent.display_name_zh || agent.display_name_en || "房产经纪"),
+            feeLabel: agentFeeLabel(input),
+          });
+          agentNotificationSent = true;
+        } catch {
+          // The request is already stored; the notification can be retried after email configuration is fixed.
+        }
+      }
+    }
+    return NextResponse.json({ ...toClientListing(row), agentRequestStatus: agentRequestId ? "pending" : null, agentNotificationSent }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "The listing could not be saved to the database." }, { status: 502 });
   }

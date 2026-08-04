@@ -92,7 +92,7 @@ export async function POST(request: Request) {
       SELECT l.id, l.owner_id, l.title_zh, l.title_en, pd.contact_name, pd.contact_email
       FROM rental_listings l
       LEFT JOIN rental_listing_private_details pd ON pd.listing_id = l.id
-      WHERE l.id = $1 AND l.status = 'published'
+      WHERE l.id = $1 AND l.status = 'published' AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
       LIMIT 1
     `, [listingId]);
     const listing = listingRows[0] as Record<string, unknown> | undefined;

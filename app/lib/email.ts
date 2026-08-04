@@ -106,3 +106,58 @@ export async function sendInquiryConfirmation(input: InquiryEmailInput) {
   });
   if (error) throw new EmailError("Resend could not send the inquiry confirmation.", 502);
 }
+
+type AgentRequestNotificationInput = {
+  recipientEmail: string;
+  recipientName: string;
+  listingTitle: string;
+  listingArea: string;
+  ownerName: string;
+  ownerEmail: string;
+  agentName: string;
+  feeLabel: string;
+};
+
+export async function sendAgentRequestNotification(input: AgentRequestNotificationInput) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const recipientName = escapeHtml(input.recipientName || "房产经纪");
+  const listingTitle = escapeHtml(input.listingTitle);
+  const listingArea = escapeHtml(input.listingArea);
+  const ownerName = escapeHtml(input.ownerName);
+  const ownerEmail = escapeHtml(input.ownerEmail);
+  const agentName = escapeHtml(input.agentName);
+  const feeLabel = escapeHtml(input.feeLabel);
+  const accountUrl = `${appUrl}/#top`;
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.recipientEmail],
+    replyTo: input.ownerEmail,
+    subject: `新的经纪协助请求 · ${input.listingTitle}`,
+    text: `你好 ${input.recipientName || "房产经纪"}，\n\n${input.ownerName} 为「${input.listingTitle}」请求经纪协助。\n大致区域：${input.listingArea}\n费用意向：${input.feeLabel}\n\n请登录租住账户查看并接受或拒绝：${accountUrl}`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">租住 · RENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">你收到一项经纪协助请求</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${ownerName} 正在为「${listingTitle}」请求你的协助。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7"><strong>${agentName}</strong><br>房源区域：${listingArea}<br>费用意向：${feeLabel}<br>房主邮箱：${ownerEmail}</p><p style="margin:28px 0"><a href="${accountUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看请求</a></p><p style="color:#637384;font-size:12px;line-height:1.6">请先在租住账户中确认，再与房主沟通合作细节。</p></main></body></html>`,
+  });
+  if (error) throw new EmailError("Resend could not send the agent request notification.", 502);
+}
+
+export async function sendAgentRequestResponse(input: AgentRequestNotificationInput & { status: "accepted" | "declined"; agentNote: string }) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const recipientName = escapeHtml(input.recipientName || "房主");
+  const listingTitle = escapeHtml(input.listingTitle);
+  const listingArea = escapeHtml(input.listingArea);
+  const agentName = escapeHtml(input.agentName);
+  const feeLabel = escapeHtml(input.feeLabel);
+  const agentNote = escapeHtml(input.agentNote || "无补充留言");
+  const statusText = input.status === "accepted" ? "经纪已接受你的请求" : "经纪暂时无法接受你的请求";
+  const accountUrl = `${appUrl}/#top`;
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.recipientEmail],
+    replyTo: input.ownerEmail,
+    subject: `${statusText} · ${input.listingTitle}`,
+    text: `你好 ${input.recipientName || "房主"}，\n\n${input.agentName} ${input.status === "accepted" ? "已接受" : "暂时无法接受"}你对「${input.listingTitle}」的经纪协助请求。\n大致区域：${input.listingArea}\n费用意向：${input.feeLabel}\n经纪留言：${input.agentNote || "无补充留言"}\n\n登录租住账户查看详情：${accountUrl}`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">租住 · RENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">${statusText}</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${agentName} 已更新「${listingTitle}」的协助请求。</p><p style="padding:16px;background:${input.status === "accepted" ? "#f4f8d4" : "#fff3ee"};font-size:13px;line-height:1.7">房源区域：${listingArea}<br>费用意向：${feeLabel}<br>经纪留言：${agentNote}</p><p style="margin:28px 0"><a href="${accountUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看房源工作台</a></p></main></body></html>`,
+  });
+  if (error) throw new EmailError("Resend could not send the agent request response.", 502);
+}

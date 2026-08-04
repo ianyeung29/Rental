@@ -6,6 +6,11 @@ function list(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function dateOnly(value: unknown) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return typeof value === "string" && value ? value.slice(0, 10) : null;
+}
+
 function ownerListing(row: Record<string, unknown>) {
   const media = Array.isArray(row.media) ? row.media : [];
   const photos = media.flatMap((item) => {
@@ -55,7 +60,18 @@ function ownerListing(row: Record<string, unknown>) {
     contactName: String(row.contact_name || ""),
     contactEmail: String(row.contact_email || ""),
     tourPreference: String(row.tour_preference || "flexible"),
+    agentService: row.agent_service === "agentMatch" ? "agentMatch" as const : "selfManaged" as const,
+    agentFeePlan: row.agent_fee_plan === "firstMonthRent" ? "firstMonthRent" as const : row.agent_fee_plan === "flatFee" ? "flatFee" as const : "agentQuote" as const,
+    agentFeeAmount: row.agent_fee_amount == null ? null : Number(row.agent_fee_amount),
+    agentProfileId: row.agent_profile_id ? String(row.agent_profile_id) : null,
+    agentProfileNameZh: row.agent_profile_name_zh ? String(row.agent_profile_name_zh) : null,
+    agentProfileNameEn: row.agent_profile_name_en ? String(row.agent_profile_name_en) : null,
+    agentRequestId: row.agent_request_id ? String(row.agent_request_id) : null,
+    agentRequestStatus: row.agent_request_status ? String(row.agent_request_status) : null,
+    agentRequestNote: row.agent_request_note ? String(row.agent_request_note) : "",
     status: String(row.status || "published"),
+    expiresOn: dateOnly(row.expires_on),
+    publishedAt: row.published_at instanceof Date ? row.published_at.toISOString() : row.published_at ? String(row.published_at) : null,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at || ""),
   };
 }
@@ -75,8 +91,11 @@ export async function GET() {
       SELECT
         l.id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type, l.price,
         l.bedrooms, l.bathrooms, l.move_in, l.lease, l.features, l.tags_zh, l.tags_en,
-        l.description_zh, l.description_en, l.poster_role, l.status, l.created_at,
+        l.description_zh, l.description_en, l.poster_role, l.status, l.expires_on, l.published_at, l.created_at,
         p.private_address, p.contact_name, p.contact_email, p.tour_preference,
+        p.agent_service, p.agent_fee_plan, p.agent_fee_amount, p.agent_profile_id,
+        a.display_name_zh AS agent_profile_name_zh, a.display_name_en AS agent_profile_name_en,
+        ar.id AS agent_request_id, ar.status AS agent_request_status, ar.agent_note AS agent_request_note,
         COALESCE(
           jsonb_agg(jsonb_build_object('key', m.object_key, 'url', m.public_url) ORDER BY m.sort_order)
           FILTER (WHERE m.id IS NOT NULL),
@@ -85,8 +104,10 @@ export async function GET() {
       FROM rental_listings l
       JOIN rental_listing_private_details p ON p.listing_id = l.id
       LEFT JOIN rental_listing_media m ON m.listing_id = l.id
+      LEFT JOIN rental_agent_profiles a ON a.id = p.agent_profile_id
+      LEFT JOIN rental_agent_requests ar ON ar.listing_id = l.id
       WHERE l.owner_id = $1
-      GROUP BY l.id, p.listing_id
+      GROUP BY l.id, p.listing_id, a.id, ar.id
       ORDER BY l.created_at DESC
     `, [user.id]);
     return NextResponse.json(rows.map((row) => ownerListing(row as Record<string, unknown>)));
