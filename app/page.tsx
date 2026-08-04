@@ -49,7 +49,10 @@ type Listing = {
 
 type SearchSnapshot = {
   location: string;
+  minPrice: string;
   maxPrice: string;
+  bedrooms: string;
+  bathrooms: string;
   rentalType: RentalType;
   moveIn: string;
   activeFeatures: string[];
@@ -473,6 +476,27 @@ function normalizeSearchText(value: string) {
 
 const NORMALIZED_LOCATION_ALIAS_GROUPS = LOCATION_ALIAS_GROUPS.map((group) => group.map(normalizeSearchText));
 
+const BEDROOM_FILTER_VALUES = new Set(["", "0", "1", "2", "3+"]);
+const BATHROOM_FILTER_VALUES = new Set(["", "1", "1.5", "2", "3+"]);
+
+function normalizePriceFilter(value: unknown) {
+  const candidate = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  return candidate && Number.isFinite(Number(candidate)) && Number(candidate) > 0 ? candidate : "";
+}
+
+function normalizeCountFilter(value: unknown, allowedValues: Set<string>) {
+  const candidate = typeof value === "string" ? value : "";
+  return allowedValues.has(candidate) ? candidate : "";
+}
+
+function matchesCountFilter(value: string, selected: string) {
+  if (!selected) return true;
+  const target = Number(selected.replace("+", ""));
+  const actual = Number(value.replace("+", ""));
+  if (!Number.isFinite(target) || !Number.isFinite(actual)) return value === selected;
+  return selected.endsWith("+") ? actual >= target : actual === target;
+}
+
 function locationSearchVariants(value: string) {
   const normalized = normalizeSearchText(value);
   if (!normalized) return [];
@@ -487,49 +511,120 @@ function listingLocationSearchText(listing: Listing) {
   return locationSearchVariants([listing.titleZh, listing.titleEn, listing.areaZh, listing.areaEn].join(" ")).join(" ");
 }
 
+type PhotoUploadErrorCode = "unsupported" | "decode" | "prepare" | "presign" | "auth" | "size" | "storage" | "network";
+
+class PhotoUploadError extends Error {
+  code: PhotoUploadErrorCode;
+
+  constructor(code: PhotoUploadErrorCode, message = "") {
+    super(message || code);
+    this.name = "PhotoUploadError";
+    this.code = code;
+  }
+}
+
+const SUPPORTED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function isSupportedPhoto(file: File) {
+  return SUPPORTED_PHOTO_TYPES.has(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name);
+}
+
 function compressPhoto(file: File) {
+  if (!isSupportedPhoto(file)) return Promise.reject(new PhotoUploadError("unsupported"));
   return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const image = new window.Image();
-      image.onload = () => {
+    const image = new window.Image();
+    const objectUrl = URL.createObjectURL(file);
+    const cleanup = () => URL.revokeObjectURL(objectUrl);
+    image.onload = () => {
+      try {
+        if (!image.width || !image.height) throw new PhotoUploadError("decode");
         const maxDimension = 1400;
         const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.round(image.width * scale));
         canvas.height = Math.max(1, Math.round(image.height * scale));
         const context = canvas.getContext("2d");
-        if (!context) {
-          reject(new Error("Could not prepare image"));
-          return;
-        }
+        if (!context) throw new PhotoUploadError("prepare");
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.78));
-      };
-      image.onerror = () => reject(new Error("Could not read image"));
-      image.src = String(reader.result);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+        cleanup();
+        resolve(dataUrl);
+      } catch (error) {
+        cleanup();
+        reject(error instanceof PhotoUploadError ? error : new PhotoUploadError("prepare"));
+      }
     };
-    reader.onerror = () => reject(new Error("Could not read file"));
-    reader.readAsDataURL(file);
+    image.onerror = () => {
+      cleanup();
+      reject(new PhotoUploadError("decode"));
+    };
+    image.src = objectUrl;
   });
 }
 
 async function uploadPhotoToR2(photoDataUrl: string, filename: string) {
-  const blob = await fetch(photoDataUrl).then((response) => response.blob());
-  const presignResponse = await fetch("/api/media/presign", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, contentType: blob.type || "image/jpeg", size: blob.size }),
-  });
+  let blob: Blob;
+  try {
+    const response = await fetch(photoDataUrl);
+    if (!response.ok) throw new PhotoUploadError("prepare");
+    blob = await response.blob();
+  } catch (error) {
+    if (error instanceof PhotoUploadError) throw error;
+    throw new PhotoUploadError("prepare");
+  }
+
+  let presignResponse: Response;
+  try {
+    presignResponse = await fetch("/api/media/presign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, contentType: blob.type || "image/jpeg", size: blob.size }),
+    });
+  } catch {
+    throw new PhotoUploadError("network");
+  }
   const presignResult = await presignResponse.json() as { key?: string; uploadUrl?: string; publicUrl?: string; error?: string };
-  if (!presignResponse.ok || !presignResult.key || !presignResult.uploadUrl || !presignResult.publicUrl) throw new Error(presignResult.error || "The image upload service is unavailable right now.");
-  const uploadResponse = await fetch(presignResult.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": blob.type || "image/jpeg" },
-    body: blob,
-  });
-  if (!uploadResponse.ok) throw new Error("The image could not be uploaded to storage. Check the R2 bucket CORS settings.");
+  if (!presignResponse.ok || !presignResult.key || !presignResult.uploadUrl || !presignResult.publicUrl) {
+    const errorCode = presignResponse.status === 401 || presignResponse.status === 403
+      ? "auth"
+      : presignResponse.status === 413 || presignResponse.status === 400 && presignResult.error?.includes("8 MB")
+        ? "size"
+        : "presign";
+    throw new PhotoUploadError(errorCode, presignResult.error || "The image upload service is unavailable right now.");
+  }
+
+  let uploadResponse: Response;
+  try {
+    uploadResponse = await fetch(presignResult.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": blob.type || "image/jpeg" },
+      body: blob,
+    });
+  } catch {
+    throw new PhotoUploadError("storage");
+  }
+  if (!uploadResponse.ok) throw new PhotoUploadError("storage");
   return { key: presignResult.key, url: presignResult.publicUrl };
+}
+
+function photoUploadMessage(error: unknown, locale: Locale) {
+  const code = error instanceof PhotoUploadError ? error.code : "network";
+  if (locale === "zh") {
+    if (code === "unsupported") return "目前支持 JPG、PNG 或 WebP 图片；iPhone 的 HEIC/HEIF 请先转换为 JPG。";
+    if (code === "decode") return "图片无法读取，可能是格式不受支持或文件已损坏。请换用 JPG、PNG 或 WebP。";
+    if (code === "auth") return "请先登录并验证邮箱，然后再上传房源照片。";
+    if (code === "size") return "图片文件太大，请换一张较小的图片后重试。";
+    if (code === "presign") return "云端图片服务暂时不可用，请检查 R2 配置。";
+    if (code === "storage") return "图片上传到 R2 失败，请检查 R2 的 CORS 和公开访问设置。";
+    return "图片上传失败，请检查网络连接后重试。";
+  }
+  if (code === "unsupported") return "JPG, PNG, and WebP are supported. Convert iPhone HEIC/HEIF photos to JPG first.";
+  if (code === "decode") return "This image could not be decoded. Try a JPG, PNG, or WebP file.";
+  if (code === "auth") return "Sign in and verify your email before uploading listing photos.";
+  if (code === "size") return "This image is too large. Choose a smaller file and try again.";
+  if (code === "presign") return "Cloud image storage is unavailable. Check the R2 configuration.";
+  if (code === "storage") return "The image could not be uploaded to R2. Check R2 CORS and public access settings.";
+  return "The image upload failed. Check your network connection and try again.";
 }
 
 const LISTINGS: Listing[] = [
@@ -656,8 +751,14 @@ const copy = {
     reset: "重置",
     location: "位置、大学或地标",
     locationPlaceholder: "例如 皇后区 / Queens",
+    minPrice: "最低月租",
     maxPrice: "最高月租",
     anyPrice: "不限",
+    bedrooms: "卧室",
+    anyBedrooms: "不限卧室",
+    studio: "单间",
+    bathrooms: "卫生间",
+    anyBathrooms: "不限卫生间",
     type: "房源类型",
     allTypes: "全部类型",
     entire: "整套住房",
@@ -782,8 +883,14 @@ const copy = {
     reset: "Reset",
     location: "Location, university, or landmark",
     locationPlaceholder: "Try 皇后区 / Queens",
+    minPrice: "Minimum monthly rent",
     maxPrice: "Maximum monthly rent",
     anyPrice: "Any price",
+    bedrooms: "Bedrooms",
+    anyBedrooms: "Any bedrooms",
+    studio: "Studio",
+    bathrooms: "Bathrooms",
+    anyBathrooms: "Any bathrooms",
     type: "Rental type",
     allTypes: "All types",
     entire: "Entire home",
@@ -1047,7 +1154,10 @@ export default function HomePage() {
   const [locale, setLocale] = useState<Locale>("zh");
   const [locationInput, setLocationInput] = useState("");
   const [appliedLocation, setAppliedLocation] = useState("");
+  const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
+  const [bedrooms, setBedrooms] = useState("");
+  const [bathrooms, setBathrooms] = useState("");
   const [rentalType, setRentalType] = useState<RentalType>("all");
   const [sortMode, setSortMode] = useState<SortMode>("fit");
   const [moveIn, setMoveIn] = useState("");
@@ -1117,12 +1227,15 @@ export default function HomePage() {
   const selectedAgentProfile = agentProfiles.find((profile) => profile.id === draft.agentProfileId) || null;
   const searchSnapshot = useMemo<SearchSnapshot>(() => ({
     location: appliedLocation,
+    minPrice,
     maxPrice,
+    bedrooms,
+    bathrooms,
     rentalType,
     moveIn,
     activeFeatures,
     sortMode,
-  }), [activeFeatures, appliedLocation, maxPrice, moveIn, rentalType, sortMode]);
+  }), [activeFeatures, appliedLocation, bathrooms, bedrooms, maxPrice, minPrice, moveIn, rentalType, sortMode]);
   const savedSearchIsCurrent = Boolean(savedSearch && savedSearchSnapshot && JSON.stringify(searchSnapshot) === JSON.stringify(savedSearchSnapshot));
 
   useEffect(() => {
@@ -1135,13 +1248,19 @@ export default function HomePage() {
         const storedSearchSnapshot = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.savedSearchSnapshot) || "null");
         const storedEditingListingId = window.localStorage.getItem(STORAGE_KEYS.editingListingId);
         const params = new URLSearchParams(window.location.search);
-        const hasUrlSearch = ["location", "max", "type", "move", "features", "sort"].some((key) => params.has(key));
+        const hasUrlSearch = ["location", "min", "max", "beds", "baths", "type", "move", "features", "sort"].some((key) => params.has(key));
+        const urlMin = params.get("min");
         const urlMax = params.get("max");
+        const urlBedrooms = params.get("beds");
+        const urlBathrooms = params.get("baths");
         const urlType = params.get("type");
         const urlSort = params.get("sort");
         const urlSnapshot: SearchSnapshot = {
           location: params.get("location") || "",
-          maxPrice: urlMax === "1800" || urlMax === "2400" || urlMax === "3000" || urlMax === "3500" ? urlMax : "",
+          minPrice: normalizePriceFilter(urlMin),
+          maxPrice: normalizePriceFilter(urlMax),
+          bedrooms: normalizeCountFilter(urlBedrooms, BEDROOM_FILTER_VALUES),
+          bathrooms: normalizeCountFilter(urlBathrooms, BATHROOM_FILTER_VALUES),
           rentalType: urlType === "entire" || urlType === "privateRoom" || urlType === "sublet" ? urlType : "all",
           moveIn: params.get("move") === "august" || params.get("move") === "september" || params.get("move") === "october" ? params.get("move") || "" : "",
           activeFeatures: (params.get("features") || "").split(",").filter((feature): feature is string => POST_FEATURE_KEYS.includes(feature as typeof POST_FEATURE_KEYS[number])),
@@ -1150,7 +1269,10 @@ export default function HomePage() {
         const storedSnapshotRecord = storedSearchSnapshot && typeof storedSearchSnapshot === "object" ? storedSearchSnapshot as Partial<SearchSnapshot> : null;
         const localSnapshot: SearchSnapshot | null = storedSnapshotRecord ? {
           location: typeof storedSnapshotRecord.location === "string" ? storedSnapshotRecord.location : "",
-          maxPrice: typeof storedSnapshotRecord.maxPrice === "string" ? storedSnapshotRecord.maxPrice : "",
+          minPrice: normalizePriceFilter(storedSnapshotRecord.minPrice),
+          maxPrice: normalizePriceFilter(storedSnapshotRecord.maxPrice),
+          bedrooms: normalizeCountFilter(storedSnapshotRecord.bedrooms, BEDROOM_FILTER_VALUES),
+          bathrooms: normalizeCountFilter(storedSnapshotRecord.bathrooms, BATHROOM_FILTER_VALUES),
           rentalType: storedSnapshotRecord.rentalType === "entire" || storedSnapshotRecord.rentalType === "privateRoom" || storedSnapshotRecord.rentalType === "sublet" ? storedSnapshotRecord.rentalType : "all",
           moveIn: storedSnapshotRecord.moveIn === "august" || storedSnapshotRecord.moveIn === "september" || storedSnapshotRecord.moveIn === "october" ? storedSnapshotRecord.moveIn : "",
           activeFeatures: Array.isArray(storedSnapshotRecord.activeFeatures) ? storedSnapshotRecord.activeFeatures.filter((feature): feature is string => typeof feature === "string" && POST_FEATURE_KEYS.includes(feature as typeof POST_FEATURE_KEYS[number])) : [],
@@ -1181,7 +1303,10 @@ export default function HomePage() {
         if (initialSearch) {
           setLocationInput(initialSearch.location);
           setAppliedLocation(initialSearch.location);
+          setMinPrice(initialSearch.minPrice);
           setMaxPrice(initialSearch.maxPrice);
+          setBedrooms(initialSearch.bedrooms);
+          setBathrooms(initialSearch.bathrooms);
           setRentalType(initialSearch.rentalType);
           setMoveIn(initialSearch.moveIn);
           setActiveFeatures(initialSearch.activeFeatures);
@@ -1317,7 +1442,10 @@ export default function HomePage() {
           if (searchResult) {
             const snapshot: SearchSnapshot = {
               location: searchResult.location || "",
-              maxPrice: searchResult.maxPrice || "",
+              minPrice: normalizePriceFilter(searchResult.minPrice),
+              maxPrice: normalizePriceFilter(searchResult.maxPrice),
+              bedrooms: normalizeCountFilter(searchResult.bedrooms, BEDROOM_FILTER_VALUES),
+              bathrooms: normalizeCountFilter(searchResult.bathrooms, BATHROOM_FILTER_VALUES),
               rentalType: searchResult.rentalType || "all",
               moveIn: searchResult.moveIn || "",
               activeFeatures: Array.isArray(searchResult.activeFeatures) ? searchResult.activeFeatures : [],
@@ -1325,7 +1453,10 @@ export default function HomePage() {
             };
             setLocationInput(snapshot.location);
             setAppliedLocation(snapshot.location);
+            setMinPrice(snapshot.minPrice);
             setMaxPrice(snapshot.maxPrice);
+            setBedrooms(snapshot.bedrooms);
+            setBathrooms(snapshot.bathrooms);
             setRentalType(snapshot.rentalType);
             setMoveIn(snapshot.moveIn);
             setActiveFeatures(snapshot.activeFeatures);
@@ -1426,7 +1557,10 @@ export default function HomePage() {
       else params.delete(key);
     };
     setOrDelete("location", searchSnapshot.location);
+    setOrDelete("min", searchSnapshot.minPrice);
     setOrDelete("max", searchSnapshot.maxPrice);
+    setOrDelete("beds", searchSnapshot.bedrooms);
+    setOrDelete("baths", searchSnapshot.bathrooms);
     setOrDelete("type", searchSnapshot.rentalType, "all");
     setOrDelete("move", searchSnapshot.moveIn);
     setOrDelete("features", searchSnapshot.activeFeatures.join(","));
@@ -1438,7 +1572,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!hydrated || !currentUser || !currentUser.emailVerified || savedSearchSnapshot) return;
     const params = new URLSearchParams(window.location.search);
-    if (["location", "max", "type", "move", "features", "sort"].some((key) => params.has(key))) return;
+    if (["location", "min", "max", "beds", "baths", "type", "move", "features", "sort"].some((key) => params.has(key))) return;
     let cancelled = false;
     fetch("/api/saved-search", { cache: "no-store" })
       .then(async (response) => {
@@ -1447,7 +1581,10 @@ export default function HomePage() {
         if (!cancelled && result) {
           const snapshot: SearchSnapshot = {
             location: result.location || "",
-            maxPrice: result.maxPrice || "",
+            minPrice: normalizePriceFilter(result.minPrice),
+            maxPrice: normalizePriceFilter(result.maxPrice),
+            bedrooms: normalizeCountFilter(result.bedrooms, BEDROOM_FILTER_VALUES),
+            bathrooms: normalizeCountFilter(result.bathrooms, BATHROOM_FILTER_VALUES),
             rentalType: result.rentalType || "all",
             moveIn: result.moveIn || "",
             activeFeatures: Array.isArray(result.activeFeatures) ? result.activeFeatures : [],
@@ -1455,7 +1592,10 @@ export default function HomePage() {
           };
           setLocationInput(snapshot.location);
           setAppliedLocation(snapshot.location);
+          setMinPrice(snapshot.minPrice);
           setMaxPrice(snapshot.maxPrice);
+          setBedrooms(snapshot.bedrooms);
+          setBathrooms(snapshot.bathrooms);
           setRentalType(snapshot.rentalType);
           setMoveIn(snapshot.moveIn);
           setActiveFeatures(snapshot.activeFeatures);
@@ -1560,15 +1700,20 @@ export default function HomePage() {
 
   const filteredListings = useMemo(() => {
     const queryVariants = locationSearchVariants(appliedLocation);
-    const ceiling = maxPrice ? Number(maxPrice) : Number.POSITIVE_INFINITY;
+    const floorValue = Number(minPrice);
+    const ceilingValue = Number(maxPrice);
+    const floor = Number.isFinite(floorValue) && floorValue > 0 ? floorValue : 0;
+    const ceiling = Number.isFinite(ceilingValue) && ceilingValue > 0 ? ceilingValue : Number.POSITIVE_INFINITY;
     const filtered = allListings.filter((listing) => {
       const searchable = listingLocationSearchText(listing);
       const matchesLocation = queryVariants.length === 0 || queryVariants.some((variant) => searchable.includes(variant));
-      const matchesPrice = listing.price <= ceiling;
+      const matchesPrice = listing.price >= floor && listing.price <= ceiling;
+      const matchesBedrooms = matchesCountFilter(listing.bedrooms, bedrooms);
+      const matchesBathrooms = matchesCountFilter(listing.bathrooms, bathrooms);
       const matchesType = rentalType === "all" || listing.type === rentalType;
       const matchesMoveIn = !moveIn || listing.moveIn === "immediate" || moveInMonth(listing.moveIn) === moveIn;
       const matchesFeatures = activeFeatures.every((feature) => listing.features.includes(feature));
-      return matchesLocation && matchesPrice && matchesType && matchesMoveIn && matchesFeatures;
+      return matchesLocation && matchesPrice && matchesBedrooms && matchesBathrooms && matchesType && matchesMoveIn && matchesFeatures;
     });
 
     return [...filtered].sort((a, b) => {
@@ -1580,7 +1725,7 @@ export default function HomePage() {
       }
       return allListings.indexOf(a) - allListings.indexOf(b);
     });
-  }, [activeFeatures, allListings, appliedLocation, maxPrice, moveIn, rentalType, sortMode]);
+  }, [activeFeatures, allListings, appliedLocation, bathrooms, bedrooms, maxPrice, minPrice, moveIn, rentalType, sortMode]);
 
   const compareListings = allListings.filter((listing) => compareIds.includes(listing.id));
   const savedListings = allListings.filter((listing) => savedIds.has(listing.id));
@@ -1878,7 +2023,10 @@ export default function HomePage() {
   const resetFilters = () => {
     setLocationInput("");
     setAppliedLocation("");
+    setMinPrice("");
     setMaxPrice("");
+    setBedrooms("");
+    setBathrooms("");
     setRentalType("all");
     setMoveIn("");
     setActiveFeatures([]);
@@ -1887,6 +2035,12 @@ export default function HomePage() {
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const minimum = Number(minPrice);
+    const maximum = Number(maxPrice);
+    if (minPrice && maxPrice && Number.isFinite(minimum) && Number.isFinite(maximum) && minimum > maximum) {
+      showToast(locale === "zh" ? "最低月租不能高于最高月租" : "Minimum rent cannot exceed maximum rent");
+      return;
+    }
     setAppliedLocation(locationInput);
     showToast(locale === "zh" ? "筛选已应用" : "Filters applied");
   };
@@ -2097,6 +2251,7 @@ export default function HomePage() {
     const files = Array.from(event.target.files || []).slice(0, 4 - draft.photos.length);
     if (files.length === 0) return;
     setMediaUploading(true);
+    setPostError("");
     try {
       const nextPhotos = [...draft.photos];
       const nextPhotoKeys = [...draft.photoKeys];
@@ -2107,8 +2262,9 @@ export default function HomePage() {
         nextPhotoKeys.push(uploaded.key);
         updateDraft({ photos: nextPhotos.slice(0, 4), photoKeys: nextPhotoKeys.slice(0, 4) });
       }
-    } catch {
-      setPostError(locale === "zh" ? "照片读取失败，请换一张图片重试。" : "The photo could not be read. Try another image.");
+    } catch (error) {
+      console.error("[photo-upload]", error);
+      setPostError(photoUploadMessage(error, locale));
     } finally {
       setMediaUploading(false);
       event.target.value = "";
@@ -2429,13 +2585,31 @@ export default function HomePage() {
               </div>
               <p className="field-note"><LockIcon size={14} />{t.approximate}</p>
 
-              <label className="field-label" htmlFor="price">{t.maxPrice}</label>
-              <select id="price" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)}>
-                <option value="">{t.anyPrice}</option>
-                <option value="1800">$1,800</option>
-                <option value="2400">$2,400</option>
-                <option value="3000">$3,000</option>
-                <option value="3500">$3,500</option>
+              <div className="price-range-fields" aria-label={locale === "zh" ? "月租范围" : "Monthly rent range"}>
+                <label className="field-label" htmlFor="min-price">{t.minPrice}
+                  <input className="price-input" id="min-price" type="number" min="0" step="50" inputMode="numeric" value={minPrice} onChange={(event) => setMinPrice(event.target.value)} placeholder="$1,500" />
+                </label>
+                <label className="field-label" htmlFor="max-price">{t.maxPrice}
+                  <input className="price-input" id="max-price" type="number" min="0" step="50" inputMode="numeric" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} placeholder="$3,500" />
+                </label>
+              </div>
+
+              <label className="field-label" htmlFor="bedrooms">{t.bedrooms}</label>
+              <select id="bedrooms" value={bedrooms} onChange={(event) => setBedrooms(event.target.value)}>
+                <option value="">{t.anyBedrooms}</option>
+                <option value="0">{t.studio}</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3+">3+</option>
+              </select>
+
+              <label className="field-label" htmlFor="bathrooms">{t.bathrooms}</label>
+              <select id="bathrooms" value={bathrooms} onChange={(event) => setBathrooms(event.target.value)}>
+                <option value="">{t.anyBathrooms}</option>
+                <option value="1">1</option>
+                <option value="1.5">1.5</option>
+                <option value="2">2</option>
+                <option value="3+">3+</option>
               </select>
 
               <label className="field-label" htmlFor="type">{t.type}</label>
@@ -2697,7 +2871,6 @@ export default function HomePage() {
                 <div className="post-form-grid">
                   <label className="field-label" htmlFor="post-type">{t.type}<select id="post-type" value={draft.rentalType} onChange={(event) => updateDraft({ rentalType: event.target.value as ListingDraft["rentalType"] })}><option value="entire">{t.entire}</option><option value="privateRoom">{t.privateRoom}</option><option value="sublet">{t.sublet}</option></select></label>
                   <label className="field-label" htmlFor="post-price">{t.maxPrice}<input id="post-price" type="number" min="1" value={draft.price} onChange={(event) => updateDraft({ price: event.target.value })} placeholder="2400" /></label>
-                  <label className="field-label" htmlFor="post-currency">货币<select id="post-currency" value="USD" onChange={() => updateDraft({ currency: "USD" })}><option value="USD">USD</option></select></label>
                   <label className="field-label" htmlFor="post-bedrooms">{locale === "zh" ? "卧室" : "Bedrooms"}<select id="post-bedrooms" value={draft.bedrooms} onChange={(event) => updateDraft({ bedrooms: event.target.value })}><option value="0">Studio</option><option value="1">1</option><option value="2">2</option><option value="3">3+</option></select></label>
                   <label className="field-label" htmlFor="post-bathrooms">{locale === "zh" ? "卫生间" : "Bathrooms"}<select id="post-bathrooms" value={draft.bathrooms} onChange={(event) => updateDraft({ bathrooms: event.target.value })}><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3+</option></select></label>
                   <label className="field-label" htmlFor="post-move-in-mode">可入住时间<select id="post-move-in-mode" value={draft.moveInMode} onChange={(event) => updateDraft({ moveInMode: event.target.value as ListingDraft["moveInMode"] })}><option value="immediate">{t.immediate}</option><option value="date">{t.chooseDate}</option></select></label>
@@ -2709,7 +2882,7 @@ export default function HomePage() {
 
               {postStep === 3 && (
                 <div className="post-form-grid">
-                  <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/*" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 4 张，当前 ${draft.photos.length} 张。照片会上传到云端。` : `Up to 4 photos, ${draft.photos.length} selected. Photos upload to cloud storage.`}</span></label>
+                  <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 4 张，当前 ${draft.photos.length} 张。支持 JPG、PNG、WebP，照片会上传到云端。` : `Up to 4 photos, ${draft.photos.length} selected. JPG, PNG, and WebP upload to cloud storage.`}</span></label>
                   {draft.photos.length > 0 && <div className="photo-preview field-span-2">{draft.photos.map((photo, index) => <div className="photo-preview-item" key={`${photo.slice(0, 24)}-${index}`}><Image src={photo} alt={`${locale === "zh" ? "房源照片" : "Listing photo"} ${index + 1}`} width={112} height={82} unoptimized /><span className="photo-order">{index === 0 ? (locale === "zh" ? "首图" : "Cover") : index + 1}</span><div className="photo-preview-actions"><button className="photo-action" type="button" onClick={() => movePhoto(index, "up")} disabled={index === 0} aria-label={locale === "zh" ? "设为首图" : "Move photo up"}><ChevronIcon direction="up" /></button><button className="photo-action" type="button" onClick={() => movePhoto(index, "down")} disabled={index === draft.photos.length - 1} aria-label={locale === "zh" ? "照片后移" : "Move photo down"}><ChevronIcon direction="down" /></button><button className="photo-action photo-remove" type="button" onClick={() => updateDraft({ photos: draft.photos.filter((_, photoIndex) => photoIndex !== index), photoKeys: draft.photoKeys.filter((_, photoIndex) => photoIndex !== index) })} aria-label={locale === "zh" ? `删除照片 ${index + 1}` : `Remove photo ${index + 1}`}><CloseIcon size={14} /></button></div></div>)}</div>}
                   <div className="ai-polish-panel field-span-2" role="note">
                     <div className="ai-polish-copy"><span className="ai-polish-mark" aria-hidden="true"><ShieldIcon size={16} /></span><div><strong>{t.polishTitle}</strong><p>{t.polishIntro}</p></div></div>

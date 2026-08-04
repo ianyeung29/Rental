@@ -86,12 +86,13 @@ async function createVerificationToken(userId: string) {
 }
 
 async function sendVerificationIfConfigured(email: string, displayName: string, token: string) {
-  if (!emailIsConfigured()) return false;
+  if (!emailIsConfigured()) return { sent: false, error: "Resend is not configured: set RESEND_API_KEY and RESEND_FROM_EMAIL on the server." };
   try {
     await sendVerificationEmail({ email, displayName, token });
-    return true;
-  } catch {
-    return false;
+    return { sent: true };
+  } catch (error) {
+    console.error("[auth] verification email failed", error);
+    return { sent: false, error: error instanceof Error ? error.message : "Resend could not send the verification email." };
   }
 }
 
@@ -137,9 +138,9 @@ export async function registerUser(input: { email: string; password: string; dis
     [userId, email, displayName, await hashPassword(input.password)],
   );
   const verificationToken = await createVerificationToken(userId);
-  const verificationSent = await sendVerificationIfConfigured(email, displayName, verificationToken);
+  const verification = await sendVerificationIfConfigured(email, displayName, verificationToken);
   const token = await createSession(userId);
-  return { token, verificationSent, user: { id: userId, email, displayName, role: "user", emailVerified: false } satisfies AuthUser };
+  return { token, verificationSent: verification.sent, verificationError: verification.error, user: { id: userId, email, displayName, role: "user", emailVerified: false } satisfies AuthUser };
 }
 
 export async function loginUser(input: { email: string; password: string }) {
@@ -223,8 +224,9 @@ export async function resendVerificationEmail(userId: string) {
   if (!row) throw new AuthError("Account not found.", 404);
   if (row.email_verified_at) return { sent: false, alreadyVerified: true };
   const token = await createVerificationToken(userId);
-  const sent = await sendVerificationIfConfigured(String(row.email), String(row.display_name), token);
-  return { sent, alreadyVerified: false };
+  const verification = await sendVerificationIfConfigured(String(row.email), String(row.display_name), token);
+  if (!verification.sent) throw new AuthError(verification.error || "Resend could not send the verification email.", 502);
+  return { sent: true, alreadyVerified: false };
 }
 
 export async function destroyCurrentSession() {

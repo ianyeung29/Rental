@@ -49,7 +49,10 @@ export async function ensureDatabaseSchema() {
       CREATE TABLE IF NOT EXISTS rental_saved_searches (
         user_id TEXT PRIMARY KEY REFERENCES rental_users(id) ON DELETE CASCADE,
         location TEXT NOT NULL DEFAULT '',
+        min_price NUMERIC(12, 2),
         max_price NUMERIC(12, 2),
+        bedrooms TEXT NOT NULL DEFAULT '',
+        bathrooms TEXT NOT NULL DEFAULT '',
         rental_type TEXT NOT NULL DEFAULT 'all',
         move_in TEXT NOT NULL DEFAULT '',
         features JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -58,6 +61,9 @@ export async function ensureDatabaseSchema() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS min_price NUMERIC(12, 2)");
+    await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS bedrooms TEXT NOT NULL DEFAULT ''");
+    await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS bathrooms TEXT NOT NULL DEFAULT ''");
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_listing_drafts (
         user_id TEXT PRIMARY KEY REFERENCES rental_users(id) ON DELETE CASCADE,
