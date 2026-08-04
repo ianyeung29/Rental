@@ -1341,6 +1341,187 @@ function formatMoveIn(value: string, locale: Locale) {
     : date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function loadSharePosterImage(source: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new window.Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("The listing photo could not be loaded for the share poster."));
+    image.src = source;
+  });
+}
+
+function drawCoverImage(context: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, width: number, height: number) {
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+  const sourceWidth = width / scale;
+  const sourceHeight = height / scale;
+  const sourceX = (image.naturalWidth - sourceWidth) / 2;
+  const sourceY = (image.naturalHeight - sourceHeight) / 2;
+  context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
+}
+
+function wrapSharePosterLines(context: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number) {
+  const lines: string[] = [];
+  let current = "";
+  for (const character of Array.from(text || "")) {
+    const candidate = current + character;
+    if (current && context.measureText(candidate).width > maxWidth) {
+      lines.push(current.trim());
+      current = character.trimStart();
+      if (lines.length === maxLines - 1) break;
+    } else {
+      current = candidate;
+    }
+  }
+  if (lines.length < maxLines && current) lines.push(current.trim());
+  if (lines.length === maxLines && Array.from(text || "").join("").length > lines.join("").length) {
+    lines[maxLines - 1] = `${lines[maxLines - 1].replace(/[。.!！?？,，;；:：\s]+$/u, "")}…`;
+  }
+  return lines.filter(Boolean);
+}
+
+function drawSharePosterText(context: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number) {
+  const lines = wrapSharePosterLines(context, text, maxWidth, maxLines);
+  lines.forEach((line, index) => context.fillText(line, x, y + index * lineHeight));
+  return y + lines.length * lineHeight;
+}
+
+async function canvasToSharePosterBlob(canvas: HTMLCanvasElement) {
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+  const response = await fetch(dataUrl);
+  return response.blob();
+}
+
+async function renderSharePoster(options: {
+  listing: Listing;
+  locale: Locale;
+  title: string;
+  area: string;
+  type: string;
+  tags: string[];
+  description: string;
+  moveIn: string;
+  price: string;
+  url: string;
+}) {
+  const { listing, locale, title, area, type, tags, description, moveIn, price, url } = options;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1080;
+  canvas.height = 1350;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas is unavailable in this browser.");
+
+  const photoHeight = 610;
+  let posterImage: HTMLImageElement | null = null;
+  const photoSource = listingPhotos(listing)[0];
+  if (photoSource) {
+    try {
+      posterImage = await loadSharePosterImage(photoSource);
+    } catch {
+      posterImage = null;
+    }
+  }
+
+  const paint = (includePhoto: boolean) => {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#F6F4EF";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#DEDFD9";
+    context.fillRect(0, 0, canvas.width, photoHeight);
+    if (includePhoto && posterImage) {
+      drawCoverImage(context, posterImage, 0, 0, canvas.width, photoHeight);
+    } else {
+      context.fillStyle = "#EDF2F8";
+      context.fillRect(0, 0, canvas.width, photoHeight);
+      context.fillStyle = "#637384";
+      context.font = "700 28px DM Sans, Noto Sans SC, sans-serif";
+      context.fillText(locale === "zh" ? "房源分享卡" : "LISTING SHARE CARD", 64, 318);
+      context.font = "400 20px DM Sans, Noto Sans SC, sans-serif";
+      context.fillText(locale === "zh" ? "图片暂时无法嵌入，请打开链接查看照片" : "Open the link to view the listing photo", 64, 356);
+    }
+
+    context.fillStyle = "rgba(20, 42, 68, 0.82)";
+    context.fillRect(0, 0, canvas.width, 84);
+    context.fillStyle = "#FFFDF9";
+    context.font = "700 22px DM Sans, Noto Sans SC, sans-serif";
+    context.fillText("租住", 64, 52);
+    context.fillStyle = "#D7E85D";
+    context.fillRect(156, 27, 6, 30);
+    context.fillStyle = "#FFFDF9";
+    context.font = "700 15px DM Sans, Noto Sans SC, sans-serif";
+    context.fillText("RENTALS · MOMENTS SHARE", 180, 49);
+    context.fillStyle = "#D7E85D";
+    context.fillRect(0, photoHeight - 10, canvas.width, 10);
+
+    const x = 64;
+    const contentWidth = canvas.width - 128;
+    let y = photoHeight + 76;
+    context.fillStyle = "#637384";
+    context.font = "700 17px DM Sans, Noto Sans SC, sans-serif";
+    context.fillText(type.toUpperCase(), x, y);
+    y += 55;
+    context.fillStyle = "#142A44";
+    context.font = "700 49px DM Sans, Noto Sans SC, sans-serif";
+    y = drawSharePosterText(context, title || (locale === "zh" ? "未命名房源" : "Untitled listing"), x, y, contentWidth, 58, 2);
+    y += 21;
+    context.fillStyle = "#2768F0";
+    context.font = "700 22px DM Sans, Noto Sans SC, sans-serif";
+    context.fillText(area, x, y);
+    y += 52;
+    context.fillStyle = "#142A44";
+    context.font = "700 38px DM Sans, Noto Sans SC, sans-serif";
+    context.fillText(price, x, y);
+    context.fillStyle = "#637384";
+    context.font = "400 18px DM Sans, Noto Sans SC, sans-serif";
+    context.fillText(locale === "zh" ? " / 月" : " / month", x + context.measureText(price).width + 10, y);
+    y += 36;
+
+    context.strokeStyle = "#DEDFD9";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(x, y);
+    context.lineTo(canvas.width - x, y);
+    context.stroke();
+    y += 42;
+
+    const facts = locale === "zh"
+      ? [`${listing.bedrooms === "0" ? "单间" : `${listing.bedrooms} 卧`}`, `${listing.bathrooms} 卫`, moveIn]
+      : [`${listing.bedrooms === "0" ? "Studio" : `${listing.bedrooms} bed`}`, `${listing.bathrooms} bath`, moveIn];
+    const factWidth = contentWidth / facts.length;
+    context.font = "700 21px DM Sans, Noto Sans SC, sans-serif";
+    context.fillStyle = "#142A44";
+    facts.forEach((fact, index) => context.fillText(fact, x + factWidth * index, y));
+    y += 42;
+
+    context.fillStyle = "#637384";
+    context.font = "400 18px DM Sans, Noto Sans SC, sans-serif";
+    y = drawSharePosterText(context, description || (locale === "zh" ? "打开链接查看完整房源详情。" : "Open the link for the full listing details."), x, y, contentWidth, 28, 2);
+    y += 20;
+    context.fillStyle = "#2768F0";
+    context.font = "700 18px DM Sans, Noto Sans SC, sans-serif";
+    const featureText = tags.length > 0 ? tags.slice(0, 4).join(" · ") : (locale === "zh" ? "房源详情已整理" : "Listing details available");
+    drawSharePosterText(context, featureText, x, y, contentWidth, 28, 2);
+
+    context.fillStyle = "#2768F0";
+    context.fillRect(x, 1198, 260, 8);
+    context.fillStyle = "#142A44";
+    context.font = "700 20px DM Sans, Noto Sans SC, sans-serif";
+    context.fillText(locale === "zh" ? "打开链接查看完整房源" : "Open the link for the full listing", x, 1246);
+    context.fillStyle = "#637384";
+    context.font = "400 16px DM Sans, Noto Sans SC, sans-serif";
+    drawSharePosterText(context, url || (locale === "zh" ? "房源链接将在发布后显示" : "Listing link available after publishing"), x, 1281, contentWidth, 24, 2);
+  };
+
+  paint(Boolean(posterImage));
+  try {
+    return await canvasToSharePosterBlob(canvas);
+  } catch (error) {
+    if (!posterImage) throw error;
+    paint(false);
+    return canvasToSharePosterBlob(canvas);
+  }
+}
+
 function isDateOnly(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -1415,6 +1596,9 @@ export default function HomePage() {
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [shareListing, setShareListing] = useState<Listing | null>(null);
   const [shareFeedback, setShareFeedback] = useState("");
+  const [sharePosterUrl, setSharePosterUrl] = useState("");
+  const [sharePosterBlob, setSharePosterBlob] = useState<Blob | null>(null);
+  const [sharePosterLoading, setSharePosterLoading] = useState(false);
   const [visibleResultCount, setVisibleResultCount] = useState(6);
   const [contactListing, setContactListing] = useState<Listing | null>(null);
   const [selectedInquiryComments, setSelectedInquiryComments] = useState<string[]>([]);
@@ -1450,6 +1634,11 @@ export default function HomePage() {
     sortMode,
   }), [activeFeatures, appliedLocation, bathrooms, bedrooms, maxPrice, minPrice, moveIn, rentalType, sortMode]);
   const savedSearchIsCurrent = Boolean(savedSearch && savedSearchSnapshot && JSON.stringify(searchSnapshot) === JSON.stringify(savedSearchSnapshot));
+
+  useEffect(() => {
+    if (!sharePosterUrl) return;
+    return () => URL.revokeObjectURL(sharePosterUrl);
+  }, [sharePosterUrl]);
 
   useEffect(() => {
     const hydrationTimer = window.setTimeout(() => {
@@ -1906,10 +2095,17 @@ export default function HomePage() {
     setSelectedListing(listing);
   };
 
+  const resetSharePoster = () => {
+    setSharePosterBlob(null);
+    setSharePosterUrl("");
+    setSharePosterLoading(false);
+  };
+
   const openShare = (listing: Listing) => {
     setSelectedListing(null);
     setShareListing(listing);
     setShareFeedback("");
+    resetSharePoster();
   };
 
   const allListings = useMemo(
@@ -2798,6 +2994,70 @@ export default function HomePage() {
       setShareFeedback(locale === "zh" ? "复制失败，请手动选择下方文案。" : "Copy failed. Select the caption below.");
     }
   };
+  const prepareSharePoster = async () => {
+    if (!shareListing) return null;
+    if (sharePosterBlob && sharePosterUrl) return { blob: sharePosterBlob, url: sharePosterUrl };
+    setSharePosterLoading(true);
+    try {
+      const blob = await renderSharePoster({
+        listing: shareListing,
+        locale,
+        title: listingTitle(shareListing),
+        area: listingArea(shareListing),
+        type: listingType(shareListing),
+        tags: listingTags(shareListing),
+        description: listingDescription(shareListing),
+        moveIn: listingMoveIn(shareListing),
+        price: formatPrice(shareListing),
+        url: shareUrl,
+      });
+      const url = URL.createObjectURL(blob);
+      setSharePosterBlob(blob);
+      setSharePosterUrl(url);
+      setShareFeedback(locale === "zh" ? "朋友圈海报已生成，可以保存或分享。" : "Your Moments poster is ready to save or share.");
+      return { blob, url };
+    } catch {
+      setShareFeedback(locale === "zh" ? "海报生成失败，请先保存房源图片或直接复制下方文案。" : "The poster could not be generated. Copy the caption below or save the listing photo directly.");
+      return null;
+    } finally {
+      setSharePosterLoading(false);
+    }
+  };
+  const downloadSharePoster = async () => {
+    const poster = await prepareSharePoster();
+    if (!poster || !shareListing) return;
+    const filename = `${shareListing.id.replace(/[^a-z0-9-_]/gi, "-")}-moments-share.jpg`;
+    const downloadLink = document.createElement("a");
+    downloadLink.href = poster.url;
+    downloadLink.download = filename;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    setShareFeedback(locale === "zh" ? "海报已准备好，请在照片中选择并发布到朋友圈。" : "The poster is ready. Select it from Photos when creating your Moments post.");
+  };
+  const handlePosterShare = async () => {
+    const poster = await prepareSharePoster();
+    if (!poster || !shareListing) return;
+    const filename = `${shareListing.id.replace(/[^a-z0-9-_]/gi, "-")}-moments-share.jpg`;
+    const file = new File([poster.blob], filename, { type: poster.blob.type || "image/jpeg" });
+    let canShareFile = false;
+    try {
+      canShareFile = typeof navigator.share === "function" && typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
+    } catch {
+      canShareFile = false;
+    }
+    if (canShareFile) {
+      try {
+        await navigator.share({ files: [file], title: listingTitle(shareListing), text: shareText, url: shareUrl });
+        setShareFeedback(locale === "zh" ? "海报已交给系统分享菜单，请选择微信并完成发布。" : "The poster is in the system share menu. Choose WeChat and finish publishing.");
+        return;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+      }
+    }
+    await downloadSharePoster();
+    await copySharePayload(shareText, locale === "zh" ? "海报已下载，发布文案也已复制。请在微信朋友圈中选择海报并粘贴文案。" : "The poster was downloaded and the caption was copied. Select the poster in Moments and paste the caption.");
+  };
   const handleNativeShare = async () => {
     if (!shareListing) return;
     if (typeof navigator.share === "function") {
@@ -3347,6 +3607,19 @@ export default function HomePage() {
                 <div className="share-preview-photo">{listingPhotos(shareListing)[0] ? <Image src={listingPhotos(shareListing)[0]} alt="" fill sizes="150px" unoptimized /> : <div className="image-fallback" aria-hidden="true" />}</div>
                 <div className="share-preview-copy"><span className="listing-type">{listingType(shareListing)}</span><h3>{listingTitle(shareListing)}</h3><p className="listing-area"><PinIcon size={14} />{listingArea(shareListing)}</p><strong>{formatPrice(shareListing)}<span className="share-preview-month">{t.month}</span></strong></div>
               </div>
+              <section className="share-poster-panel" aria-labelledby="share-poster-title">
+                <div className="share-poster-heading">
+                  <div><span className="section-label">MOMENTS CARD</span><h3 id="share-poster-title">{locale === "zh" ? "生成朋友圈分享海报" : "Create a Moments share poster"}</h3></div>
+                  <span className="share-poster-status">{sharePosterUrl ? <><CheckIcon size={13} />{locale === "zh" ? "已生成" : "Ready"}</> : (locale === "zh" ? "一张图，带走重点" : "One image, key details")}</span>
+                </div>
+                <p className="share-poster-intro">{locale === "zh" ? "把首图、标题、租金、入住信息和房源链接整理成一张图片；再复制文案，就能在微信朋友圈中快速发布。" : "Combine the first photo, title, rent, move-in details, and listing link into one image, then post it with the copied caption."}</p>
+                {sharePosterUrl ? <div className="share-poster-preview"><Image src={sharePosterUrl} alt={locale === "zh" ? "房源朋友圈分享海报预览" : "Listing Moments share poster preview"} width={300} height={375} unoptimized /></div> : <div className="share-poster-placeholder"><ShareIcon size={22} /><strong>{locale === "zh" ? "点击生成海报" : "Tap to generate the poster"}</strong><span>{locale === "zh" ? "图片内含可见房源链接" : "The image includes a visible listing link"}</span></div>}
+                <div className="share-poster-actions">
+                  <button className="primary-button" type="button" onClick={() => { void handlePosterShare(); }} disabled={sharePosterLoading}><ShareIcon size={15} />{sharePosterLoading ? (locale === "zh" ? "生成中…" : "Preparing…") : (locale === "zh" ? "生成并分享海报" : "Create & share poster")}</button>
+                  <button className="outline-button" type="button" onClick={() => { void downloadSharePoster(); }} disabled={sharePosterLoading}><LinkIcon size={15} />{locale === "zh" ? "保存海报" : "Save poster"}</button>
+                </div>
+                <p className="share-poster-note">{locale === "zh" ? "如果手机没有提供文件分享选项，系统会下载海报并复制文案；打开微信朋友圈后选择海报即可。" : "If file sharing is unavailable, the poster will download and the caption will be copied for Moments."}</p>
+              </section>
               <div className="share-link-preview">
                 <div className="share-link-copy"><LinkIcon size={15} /><span><small>{locale === "zh" ? "房源链接" : "Listing link"}</small><strong>{shareUrl}</strong></span></div>
                 <button className="text-button" type="button" onClick={() => { void copySharePayload(shareUrl, locale === "zh" ? "房源链接已复制。" : "Listing link copied."); }}>{locale === "zh" ? "复制" : "Copy"}</button>
