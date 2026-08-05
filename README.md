@@ -1,4 +1,4 @@
-# 租住 · Rental marketplace pilot
+# 安居 · Anjurentals rental marketplace pilot
 
 This is a browser-first MVP slice of the Chinese-first North American rental marketplace described in `../PRODUCT.md` and `../RENTAL_MARKETPLACE_PROPOSAL.md`.
 
@@ -76,11 +76,17 @@ Add these server-side values to `.env.local`:
 
 ```bash
 RESEND_API_KEY=re_your_sending_only_key
-RESEND_FROM_EMAIL="Rentals <noreply@your-verified-domain.com>"
+RESEND_FROM_EMAIL="Anjurentals <noreply@your-verified-domain.com>"
+SITE_CONTACT_EMAIL=your-inbox@example.com
+# Optional overrides when contact and feedback use different inboxes
+CONTACT_RECIPIENT_EMAIL=your-inbox@example.com
+FEEDBACK_RECIPIENT_EMAIL=your-inbox@example.com
 APP_URL=http://localhost:3010
 ```
 
 Registration creates a 24-hour verification token and sends it through Resend. Users can resend the message from the account drawer. Publishing listings, uploading images, polishing copy, sending inquiries, and reporting listings require a verified email. Use a Resend `sending_access` key and verify the sending domain before sending to users; see Resend’s [Next.js guide](https://resend.com/docs/send-with-nextjs), [send API](https://resend.com/docs/api-reference/emails/send-email), and [API-key permissions](https://resend.com/docs/api-reference/api-keys/create-api-key).
+
+The public `/contact` and `/feedback` forms also send through Resend. Keep the recipient addresses server-side; the browser can only choose a validated topic and message. `SITE_CONTACT_EMAIL` is the shared fallback, while `CONTACT_RECIPIENT_EMAIL` and `FEEDBACK_RECIPIENT_EMAIL` can route the two forms separately. The sender must be a verified Resend domain, and the user’s valid email is added as `replyTo` so you can answer directly.
 
 ## Enable Google login
 
@@ -126,6 +132,7 @@ In the Official Account admin console, add the exact production hostname under t
 ## Production checklist
 
 - Configure R2 CORS for the exact production origin and verify the public bucket policy; do not expose the S3 credentials to the browser.
+- Set `SITE_CONTACT_EMAIL` (or both recipient overrides) in Vercel so `/contact` and `/feedback` can deliver through Resend.
 - Add password reset, login throttling, and session revocation before opening registration publicly.
 - Extend the basic moderation queue with admin UI, rate limits, audit logging, and documented response procedures before accepting public supply.
 - Replace sample inventory with reviewed seed listings for the selected pilot metro.
@@ -141,5 +148,7 @@ npm run build
 ```
 
 The authenticated API surface is organized as `/api/auth/*`, `/api/my/listings`, `/api/inquiries`, `/api/listings`, and `/api/media/presign`. The browser client never receives `DATABASE_URL`, R2 access keys, or the private listing table directly.
+
+Public information pages are available at `/about`, `/contact`, `/feedback`, `/legal`, and `/sitemap`; Next.js also generates `/sitemap.xml` and `/robots.txt` from the public route list.
 
 The brand, pilot geography, supply policy, and external vendors remain open decisions from the proposal.

@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "租住 · Rental marketplace pilot",
+  title: "安居 · Anjurentals rental marketplace",
   description:
     "A bilingual rental marketplace prototype with structured listings and privacy-first address reveal.",
+  icons: {
+    icon: "/brand/anjurentals-mark.svg",
+    shortcut: "/brand/anjurentals-mark.svg",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

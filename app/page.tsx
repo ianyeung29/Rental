@@ -5,6 +5,7 @@ import Image from "next/image";
 import AccountDrawer from "./components/AccountDrawer";
 import AuthDrawer from "./components/AuthDrawer";
 import ReportDrawer from "./components/ReportDrawer";
+import SiteFooter from "./components/SiteFooter";
 import { demoModeEnabled } from "./lib/demo";
 import { configureWeChatShare, isWeChatBrowser, toAbsoluteUrl } from "./lib/wechat-client";
 
@@ -902,12 +903,10 @@ const LISTINGS: Listing[] = [
 
 const copy = {
   zh: {
-    workingTitle: "工作名称 · 未定品牌",
     findRentals: "找房",
     saved: "收藏",
     messages: "消息",
     post: "发布房源",
-    pilot: "示例库存 · synthetic pilot inventory",
     heading: "先把住处看明白",
     subheading:
       "比较租金、租期和房源信号。精确地址不会出现在公开页面，发布者会在合适的看房流程中决定是否透露。",
@@ -1046,12 +1045,10 @@ const copy = {
     account: "账户",
   },
   en: {
-    workingTitle: "Working name · brand TBD",
     findRentals: "Find rentals",
     saved: "Saved",
     messages: "Messages",
     post: "Post a listing",
-    pilot: "Synthetic pilot inventory",
     heading: "Make the next move clear",
     subheading:
       "Compare rent, terms, and listing signals in one place. Exact addresses stay off public pages until the poster chooses to reveal one in the tour flow.",
@@ -1447,12 +1444,12 @@ async function renderSharePoster(options: {
     context.fillRect(0, 0, canvas.width, 84);
     context.fillStyle = "#FFFDF9";
     context.font = "700 22px DM Sans, Noto Sans SC, sans-serif";
-    context.fillText("租住", 64, 52);
+    context.fillText("安居", 64, 52);
     context.fillStyle = "#D7E85D";
     context.fillRect(156, 27, 6, 30);
     context.fillStyle = "#FFFDF9";
     context.font = "700 15px DM Sans, Noto Sans SC, sans-serif";
-    context.fillText("RENTALS · MOMENTS SHARE", 180, 49);
+    context.fillText("ANJURENTALS · MOMENTS SHARE", 180, 49);
     context.fillStyle = "#D7E85D";
     context.fillRect(0, photoHeight - 10, canvas.width, 10);
 
@@ -3164,25 +3161,20 @@ export default function HomePage() {
   };
 
   return (
-    <main className="app-shell">
+    <div className="app-shell">
       <a className="skip-link" href="#rentals">
         {locale === "zh" ? "跳到房源列表" : "Skip to rentals"}
       </a>
 
       <header className="topbar">
         <div className="topbar-inner">
-          <a className="brand" href="#top" aria-label="Rental marketplace home">
-            <span className="brand-mark" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
+          <a className="brand" href="#top" aria-label="Anjurentals home">
+            <Image className="brand-logo" src="/brand/anjurentals-mark.svg" alt="" width={30} height={30} aria-hidden="true" priority />
             <span className="brand-wordmark">
-              <strong>租住</strong>
-              <small>RENTALS</small>
+              <strong>安居</strong>
+              <small>ANJURENTALS</small>
             </span>
           </a>
-          <span className="working-title">{t.workingTitle}</span>
           <nav className="primary-nav" aria-label={locale === "zh" ? "主要导航" : "Primary navigation"}>
             <a className="active" href="#rentals">{t.findRentals}</a>
             <a href="#saved" onClick={(event) => { event.preventDefault(); setSavedOpen(true); }}>{t.saved}{savedIds.size > 0 ? ` ${savedIds.size}` : ""}</a>
@@ -3201,7 +3193,6 @@ export default function HomePage() {
       <div className="page-content" id="top">
         <section className="workspace-heading" aria-labelledby="page-title">
           <div className="heading-copy">
-            <p className="status-line"><span className="status-lamp" aria-hidden="true" />{t.pilot}</p>
             <h1 id="page-title">{t.heading}</h1>
             <p className="heading-subtitle">{t.subheading}</p>
           </div>
@@ -3830,6 +3821,8 @@ export default function HomePage() {
       {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} agentRequests={agentRequests} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} />}
 
       {(toast || verificationNotice) && <div className="toast" role="status"><span className="toast-mark"><CheckIcon size={13} /></span>{toast || verificationNotice}</div>}
-    </main>
+
+      <SiteFooter />
+    </div>
   );
 }

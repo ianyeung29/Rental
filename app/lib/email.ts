@@ -45,9 +45,9 @@ export async function sendVerificationEmail(input: { email: string; displayName:
   const { error } = await resend.emails.send({
     from,
     to: [input.email],
-    subject: "验证你的租住账户",
-    text: `你好 ${input.displayName}，\n\n请打开以下链接验证你的租住账户：\n${verifyUrl}\n\n此链接将在 24 小时后失效。`,
-    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">租住 · RENTALS</p><h1 style="font-size:30px;line-height:1.15;margin:24px 0 12px">验证你的租住账户</h1><p style="font-size:15px;line-height:1.7">你好 ${name}，请点击下面的按钮完成邮箱验证。</p><p style="margin:28px 0"><a href="${verifyUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">验证邮箱</a></p><p style="color:#637384;font-size:12px;line-height:1.6">如果按钮无法打开，请复制此链接：<br>${verifyUrl}<br><br>链接将在 24 小时后失效。</p></main></body></html>`,
+    subject: "验证你的安居账户",
+    text: `你好 ${input.displayName}，\n\n请打开以下链接验证你的安居账户：\n${verifyUrl}\n\n此链接将在 24 小时后失效。`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:30px;line-height:1.15;margin:24px 0 12px">验证你的安居账户</h1><p style="font-size:15px;line-height:1.7">你好 ${name}，请点击下面的按钮完成邮箱验证。</p><p style="margin:28px 0"><a href="${verifyUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">验证邮箱</a></p><p style="color:#637384;font-size:12px;line-height:1.6">如果按钮无法打开，请复制此链接：<br>${verifyUrl}<br><br>链接将在 24 小时后失效。</p></main></body></html>`,
   });
   if (error) throw resendFailure(error, "Resend could not send the verification email.");
 }
@@ -93,7 +93,7 @@ export async function sendInquiryNotification(input: InquiryEmailInput) {
     replyTo: input.requesterEmail,
     subject: `有人咨询你的房源 · ${input.listingTitle}`,
     text: `你好 ${input.recipientName || "房源发布者"}，\n\n${inquiryText(input)}\n\n你可以直接回复这封邮件联系咨询人。`,
-    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">租住 · RENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">你收到一条房源咨询</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${requesterName} 正在咨询「${listingTitle}」。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${details}</p><p style="color:#637384;font-size:12px;line-height:1.6">直接回复此邮件即可联系咨询人：${requesterEmail}</p></main></body></html>`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">你收到一条房源咨询</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${requesterName} 正在咨询「${listingTitle}」。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${details}</p><p style="color:#637384;font-size:12px;line-height:1.6">直接回复此邮件即可联系咨询人：${requesterEmail}</p></main></body></html>`,
   });
   if (error) throw new EmailError("Resend could not send the inquiry notification.", 502);
 }
@@ -108,7 +108,7 @@ export async function sendInquiryConfirmation(input: InquiryEmailInput) {
     to: [input.requesterEmail],
     subject: `咨询已发送 · ${input.listingTitle}`,
     text: `你的咨询已发送给房源发布者。\n\n${inquiryText(input)}`,
-    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">租住 · RENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">咨询已发送</h1><p style="font-size:15px;line-height:1.7">你的咨询已发送给「${listingTitle}」的发布者。请等待对方回复。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${details}</p></main></body></html>`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">咨询已发送</h1><p style="font-size:15px;line-height:1.7">你的咨询已发送给「${listingTitle}」的发布者。请等待对方回复。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${details}</p></main></body></html>`,
   });
   if (error) throw new EmailError("Resend could not send the inquiry confirmation.", 502);
 }
@@ -140,8 +140,8 @@ export async function sendAgentRequestNotification(input: AgentRequestNotificati
     to: [input.recipientEmail],
     replyTo: input.ownerEmail,
     subject: `新的经纪协助请求 · ${input.listingTitle}`,
-    text: `你好 ${input.recipientName || "房产经纪"}，\n\n${input.ownerName} 为「${input.listingTitle}」请求经纪协助。\n大致区域：${input.listingArea}\n费用意向：${input.feeLabel}\n\n请登录租住账户查看并接受或拒绝：${accountUrl}`,
-    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">租住 · RENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">你收到一项经纪协助请求</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${ownerName} 正在为「${listingTitle}」请求你的协助。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7"><strong>${agentName}</strong><br>房源区域：${listingArea}<br>费用意向：${feeLabel}<br>房主邮箱：${ownerEmail}</p><p style="margin:28px 0"><a href="${accountUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看请求</a></p><p style="color:#637384;font-size:12px;line-height:1.6">请先在租住账户中确认，再与房主沟通合作细节。</p></main></body></html>`,
+    text: `你好 ${input.recipientName || "房产经纪"}，\n\n${input.ownerName} 为「${input.listingTitle}」请求经纪协助。\n大致区域：${input.listingArea}\n费用意向：${input.feeLabel}\n\n请登录安居账户查看并接受或拒绝：${accountUrl}`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">你收到一项经纪协助请求</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${ownerName} 正在为「${listingTitle}」请求你的协助。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7"><strong>${agentName}</strong><br>房源区域：${listingArea}<br>费用意向：${feeLabel}<br>房主邮箱：${ownerEmail}</p><p style="margin:28px 0"><a href="${accountUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看请求</a></p><p style="color:#637384;font-size:12px;line-height:1.6">请先在安居账户中确认，再与房主沟通合作细节。</p></main></body></html>`,
   });
   if (error) throw new EmailError("Resend could not send the agent request notification.", 502);
 }
@@ -162,8 +162,79 @@ export async function sendAgentRequestResponse(input: AgentRequestNotificationIn
     to: [input.recipientEmail],
     replyTo: input.ownerEmail,
     subject: `${statusText} · ${input.listingTitle}`,
-    text: `你好 ${input.recipientName || "房主"}，\n\n${input.agentName} ${input.status === "accepted" ? "已接受" : "暂时无法接受"}你对「${input.listingTitle}」的经纪协助请求。\n大致区域：${input.listingArea}\n费用意向：${input.feeLabel}\n经纪留言：${input.agentNote || "无补充留言"}\n\n登录租住账户查看详情：${accountUrl}`,
-    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">租住 · RENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">${statusText}</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${agentName} 已更新「${listingTitle}」的协助请求。</p><p style="padding:16px;background:${input.status === "accepted" ? "#f4f8d4" : "#fff3ee"};font-size:13px;line-height:1.7">房源区域：${listingArea}<br>费用意向：${feeLabel}<br>经纪留言：${agentNote}</p><p style="margin:28px 0"><a href="${accountUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看房源工作台</a></p></main></body></html>`,
+    text: `你好 ${input.recipientName || "房主"}，\n\n${input.agentName} ${input.status === "accepted" ? "已接受" : "暂时无法接受"}你对「${input.listingTitle}」的经纪协助请求。\n大致区域：${input.listingArea}\n费用意向：${input.feeLabel}\n经纪留言：${input.agentNote || "无补充留言"}\n\n登录安居账户查看详情：${accountUrl}`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">${statusText}</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${agentName} 已更新「${listingTitle}」的协助请求。</p><p style="padding:16px;background:${input.status === "accepted" ? "#f4f8d4" : "#fff3ee"};font-size:13px;line-height:1.7">房源区域：${listingArea}<br>费用意向：${feeLabel}<br>经纪留言：${agentNote}</p><p style="margin:28px 0"><a href="${accountUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看房源工作台</a></p></main></body></html>`,
   });
   if (error) throw new EmailError("Resend could not send the agent request response.", 502);
+}
+
+type PublicMessageInput = {
+  name: string;
+  email: string;
+  message: string;
+};
+
+type SiteContactEmailInput = PublicMessageInput & {
+  topic: string;
+};
+
+type SiteFeedbackEmailInput = {
+  name: string;
+  email: string;
+  type: string;
+  message: string;
+  pageUrl: string;
+};
+
+function publicRecipient(variable: "CONTACT_RECIPIENT_EMAIL" | "FEEDBACK_RECIPIENT_EMAIL") {
+  const recipient = process.env[variable]?.trim() || process.env.SITE_CONTACT_EMAIL?.trim();
+  if (!recipient) throw new EmailError(`Resend is not configured: ${variable} or SITE_CONTACT_EMAIL is missing.`);
+  if (/[\r\n]/.test(recipient)) throw new EmailError(`Resend is not configured: ${variable} is invalid.`);
+  return recipient;
+}
+
+function emailLooksValid(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function subjectText(value: string) {
+  return value.replace(/[\r\n]+/g, " ").trim().slice(0, 120);
+}
+
+function publicEmailHtml(title: string, intro: string, details: string, footer: string) {
+  return `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:600px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">${escapeHtml(title)}</h1><p style="font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="padding:18px;background:#edf3ff;font-size:13px;line-height:1.8">${escapeHtml(details).replace(/\n/g, "<br>")}</div><p style="color:#637384;font-size:12px;line-height:1.6">${escapeHtml(footer)}</p></main></body></html>`;
+}
+
+export async function sendSiteContactEmail(input: SiteContactEmailInput) {
+  const { apiKey, from } = config();
+  const to = publicRecipient("CONTACT_RECIPIENT_EMAIL");
+  const resend = new Resend(apiKey);
+  const replyTo = emailLooksValid(input.email) ? input.email : undefined;
+  const text = `姓名：${input.name}\n邮箱：${input.email}\n问题类型：${input.topic}\n\n${input.message}`;
+  const { error } = await resend.emails.send({
+    from,
+    to: [to],
+    ...(replyTo ? { replyTo } : {}),
+    subject: `[安居联系] ${input.topic} · ${subjectText(input.name)}`,
+    text,
+    html: publicEmailHtml("收到一条联系留言", `${input.name} 通过安居联系我们。`, text, "你可以直接回复此邮件联系留言者。"),
+  });
+  if (error) throw resendFailure(error, "Resend could not send the contact message.");
+}
+
+export async function sendSiteFeedbackEmail(input: SiteFeedbackEmailInput) {
+  const { apiKey, from } = config();
+  const to = publicRecipient("FEEDBACK_RECIPIENT_EMAIL");
+  const resend = new Resend(apiKey);
+  const replyTo = emailLooksValid(input.email) ? input.email : undefined;
+  const text = `姓名：${input.name || "未填写"}\n邮箱：${input.email || "未填写"}\n反馈类型：${input.type}\n页面：${input.pageUrl || "未提供"}\n\n${input.message}`;
+  const { error } = await resend.emails.send({
+    from,
+    to: [to],
+    ...(replyTo ? { replyTo } : {}),
+    subject: `[安居反馈] ${input.type}${input.name ? ` · ${subjectText(input.name)}` : ""}`,
+    text,
+    html: publicEmailHtml("收到一条产品反馈", `${input.name || "一位用户"} 通过安居提交了反馈。`, text, "如果用户留下邮箱，可以直接回复此邮件。"),
+  });
+  if (error) throw resendFailure(error, "Resend could not send the feedback message.");
 }
