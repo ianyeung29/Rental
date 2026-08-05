@@ -109,6 +109,20 @@ R2_PUBLIC_URL=https://your-public-bucket-url
 
 The R2 token should be limited to Object Read & Write for the selected bucket. Configure the bucket CORS policy to allow the local app origin and production app origin to use `PUT` for presigned browser uploads. Keep the R2 bucket public URL separate from the S3 API endpoint.
 
+## Enable WeChat JS-SDK sharing
+
+The website can customize the title, thumbnail, and link used by WeChat's built-in share menu when a listing is opened inside WeChat. It cannot open Moments or publish on the user's behalf, so the poster and copied-caption fallback remains available in Chrome, Safari, and when JS-SDK setup is unavailable.
+
+Create or use a WeChat Official Account and add these server-only values to `.env.local` and the Vercel production environment:
+
+```bash
+WECHAT_OFFICIAL_ACCOUNT_APP_ID=your_official_account_app_id
+WECHAT_OFFICIAL_ACCOUNT_APP_SECRET=your_official_account_app_secret
+APP_URL=https://your-production-domain.com
+```
+
+In the Official Account admin console, add the exact production hostname under the JS interface safe domain (`JS接口安全域名`). The site calls `/api/wechat/signature` to obtain a server-generated signature; the AppSecret never reaches the browser. Test by opening the listing URL in WeChat itself, not Chrome or Safari, then use the top-right `...` menu and choose `分享到朋友圈`.
+
 ## Production checklist
 
 - Configure R2 CORS for the exact production origin and verify the public bucket policy; do not expose the S3 credentials to the browser.
