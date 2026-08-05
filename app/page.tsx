@@ -6,10 +6,13 @@ import AccountDrawer from "./components/AccountDrawer";
 import AuthDrawer from "./components/AuthDrawer";
 import ReportDrawer from "./components/ReportDrawer";
 import { demoModeEnabled } from "./lib/demo";
+import { configureWeChatShare, isWeChatBrowser, toAbsoluteUrl } from "./lib/wechat-client";
 
 type Locale = "zh" | "en";
 type RentalType = "all" | "entire" | "privateRoom" | "sublet";
 type SortMode = "fit" | "price" | "fresh" | "moveIn" | "verified";
+type WeChatShareStatus = "idle" | "outside" | "loading" | "ready" | "error";
+type WeChatShareResolution = { key: string; status: Exclude<WeChatShareStatus, "idle" | "outside">; error: "" | "not-configured" | "unavailable" };
 
 type Listing = {
   id: string;
@@ -1599,6 +1602,7 @@ export default function HomePage() {
   const [sharePosterUrl, setSharePosterUrl] = useState("");
   const [sharePosterBlob, setSharePosterBlob] = useState<Blob | null>(null);
   const [sharePosterLoading, setSharePosterLoading] = useState(false);
+  const [wechatShareResolution, setWechatShareResolution] = useState<WeChatShareResolution>({ key: "", status: "loading", error: "" });
   const [visibleResultCount, setVisibleResultCount] = useState(6);
   const [contactListing, setContactListing] = useState<Listing | null>(null);
   const [selectedInquiryComments, setSelectedInquiryComments] = useState<string[]>([]);
@@ -1617,6 +1621,7 @@ export default function HomePage() {
   const [hydrated, setHydrated] = useState(false);
   const [toast, setToast] = useState("");
   const [verificationNotice, setVerificationNotice] = useState("");
+  const wechatBrowser = isWeChatBrowser();
   const inquirySequence = useRef(0);
   const sharedListingIdRef = useRef<string | null>(null);
   const t = copy[locale];
@@ -2981,6 +2986,57 @@ export default function HomePage() {
   };
   const shareUrl = shareListing ? buildListingShareUrl(shareListing) : "";
   const shareText = shareListing ? buildListingShareText(shareListing, shareUrl) : "";
+  const wechatShareDetails = useMemo(() => {
+    const listing = shareListing || selectedListing;
+    if (!listing) return null;
+    const title = locale === "zh" ? listing.titleZh : listing.titleEn;
+    const area = locale === "zh" ? listing.areaZh : listing.areaEn;
+    const moveIn = formatMoveIn(listing.moveIn, locale);
+    const description = locale === "zh"
+      ? `${area} · 月租 ${formatPrice(listing)} · ${moveIn}`
+      : `${area} · ${formatPrice(listing)} · ${moveIn}`;
+    const origin = typeof window === "undefined" ? "" : window.location.origin;
+    return {
+      title: title || (locale === "zh" ? "房源推荐" : "Rental listing"),
+      description,
+      link: origin ? `${origin}/?listing=${encodeURIComponent(listing.id)}` : "",
+      imageUrl: toAbsoluteUrl(listingPhotos(listing)[0] || "/listings/elmwood-light.png"),
+    };
+  }, [locale, selectedListing, shareListing]);
+  const wechatShareKey = wechatShareDetails ? `${wechatShareDetails.link}|${wechatShareDetails.title}|${wechatShareDetails.imageUrl}` : "";
+  const wechatShareStatus: WeChatShareStatus = !wechatShareDetails
+    ? "idle"
+    : !wechatBrowser
+      ? "outside"
+      : wechatShareResolution.key === wechatShareKey
+        ? wechatShareResolution.status
+        : "loading";
+  const wechatShareError = wechatShareResolution.key === wechatShareKey ? wechatShareResolution.error : "";
+
+  useEffect(() => {
+    const detected = isWeChatBrowser();
+    if (!wechatShareDetails || !detected) return;
+
+    let cancelled = false;
+    void Promise.resolve().then(() => configureWeChatShare({
+      currentUrl: window.location.href.split("#")[0],
+      ...wechatShareDetails,
+    })).then((result) => {
+      if (cancelled) return;
+      setWechatShareResolution({ key: wechatShareKey, status: result.configured ? "ready" : "error", error: result.configured ? "" : "unavailable" });
+    }).catch((error) => {
+      if (cancelled) return;
+      setWechatShareResolution({
+        key: wechatShareKey,
+        status: "error",
+        error: error instanceof Error && error.name === "WeChatNotConfigured" ? "not-configured" : "unavailable",
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [wechatShareDetails, wechatShareKey]);
+
   const copySharePayload = async (value: string, successMessage: string) => {
     if (!value) return;
     if (!navigator.clipboard?.writeText) {
@@ -3073,6 +3129,22 @@ export default function HomePage() {
   };
   const handleWeChatMomentsShare = async () => {
     if (!shareListing) return;
+    if (wechatBrowser || isWeChatBrowser()) {
+      if (wechatShareStatus === "ready") {
+        setShareFeedback(locale === "zh"
+          ? "微信分享已准备好，请点击右上角 ···，再选择分享到朋友圈。"
+          : "WeChat sharing is ready. Tap ··· in the top-right corner, then choose Moments.");
+        return;
+      }
+      if (wechatShareStatus === "loading") {
+        setShareFeedback(locale === "zh" ? "正在准备微信分享，请稍候。" : "WeChat sharing is still being prepared.");
+        return;
+      }
+      await copySharePayload(`${shareText}\n${shareUrl}`, locale === "zh"
+        ? (wechatShareError === "not-configured" ? "微信原生分享尚未配置，朋友圈文案和链接已复制；请使用海报发布。" : "微信原生分享暂不可用，朋友圈文案和链接已复制；请使用海报发布。")
+        : (wechatShareError === "not-configured" ? "Native WeChat sharing is not configured yet. The caption and link were copied; use the poster fallback." : "Native WeChat sharing is unavailable. The caption and link were copied; use the poster fallback."));
+      return;
+    }
     if (typeof navigator.share === "function") {
       try {
         await navigator.share({ title: listingTitle(shareListing), text: shareText, url: shareUrl });
@@ -3620,12 +3692,37 @@ export default function HomePage() {
                 </div>
                 <p className="share-poster-note">{locale === "zh" ? "如果手机没有提供文件分享选项，系统会下载海报并复制文案；打开微信朋友圈后选择海报即可。" : "If file sharing is unavailable, the poster will download and the caption will be copied for Moments."}</p>
               </section>
+              <section className={`wechat-share-status wechat-share-status-${wechatShareStatus}`} aria-live="polite">
+                <span className="wechat-share-status-icon" aria-hidden="true"><ShareIcon size={17} /></span>
+                <div>
+                  <strong>
+                    {wechatShareStatus === "ready"
+                      ? (locale === "zh" ? "微信分享已就绪" : "WeChat sharing is ready")
+                      : wechatShareStatus === "loading"
+                        ? (locale === "zh" ? "正在准备微信分享" : "Preparing WeChat sharing")
+                        : wechatShareStatus === "error"
+                          ? (locale === "zh" ? "微信原生分享暂不可用" : "Native WeChat sharing is unavailable")
+                          : (locale === "zh" ? "在微信内打开，分享更完整" : "Open inside WeChat for the native share card")}
+                  </strong>
+                  <p>
+                    {wechatShareStatus === "ready"
+                      ? (locale === "zh" ? "点击右上角 ···，再选择“分享到朋友圈”。房源标题、缩略图和链接会自动带上。" : "Tap ··· in the top-right corner, then choose Moments. The listing title, thumbnail, and link are ready.")
+                      : wechatShareStatus === "loading"
+                        ? (locale === "zh" ? "正在验证当前页面和微信分享权限。" : "Verifying this page and its WeChat share permission.")
+                        : wechatShareStatus === "error"
+                          ? (wechatShareError === "not-configured"
+                            ? (locale === "zh" ? "请先配置公众号 AppID、AppSecret 和 JS接口安全域名；仍可使用海报分享。" : "Add the Official Account AppID, AppSecret, and safe domain first. The poster fallback is still available.")
+                            : (locale === "zh" ? "微信服务暂时没有接受此页面；仍可使用海报和复制文案。" : "WeChat did not accept this page configuration. The poster and copied-caption fallback are still available."))
+                          : (locale === "zh" ? "当前使用外部浏览器；请保存海报并复制文案，或把房源链接发到微信后再打开。" : "You are in an external browser. Save the poster and copy the caption, or open the listing from inside WeChat.")}
+                  </p>
+                </div>
+              </section>
               <div className="share-link-preview">
                 <div className="share-link-copy"><LinkIcon size={15} /><span><small>{locale === "zh" ? "房源链接" : "Listing link"}</small><strong>{shareUrl}</strong></span></div>
                 <button className="text-button" type="button" onClick={() => { void copySharePayload(shareUrl, locale === "zh" ? "房源链接已复制。" : "Listing link copied."); }}>{locale === "zh" ? "复制" : "Copy"}</button>
               </div>
               <div className="share-actions">
-                <button className="share-action share-action-primary" type="button" onClick={() => { void handleWeChatMomentsShare(); }}><ShareIcon /><span><strong>{locale === "zh" ? "分享到微信朋友圈" : "Share to WeChat Moments"}</strong><small>{locale === "zh" ? "准备标题、首图和链接，由你在微信中确认发布" : "Prepare the title, first photo, and link; confirm the post in WeChat"}</small></span></button>
+                <button className="share-action share-action-primary" type="button" onClick={() => { void handleWeChatMomentsShare(); }}><ShareIcon /><span><strong>{wechatShareStatus === "ready" ? (locale === "zh" ? "分享到微信朋友圈" : "Share to WeChat Moments") : (locale === "zh" ? "准备微信朋友圈分享" : "Prepare WeChat Moments share")}</strong><small>{wechatShareStatus === "ready" ? (locale === "zh" ? "点击右上角 ···，再选择朋友圈" : "Tap ···, then choose Moments") : (locale === "zh" ? "在微信内打开时自动带上标题、缩略图和链接" : "The title, thumbnail, and link are prepared inside WeChat")}</small></span></button>
                 <button className="share-action" type="button" onClick={() => { void handleNativeShare(); }}><ShareIcon /><span><strong>{locale === "zh" ? "打开系统分享" : "Open system share"}</strong><small>{locale === "zh" ? "手机上可直接选择微信等应用" : "Choose an app directly on mobile"}</small></span></button>
                 <button className="share-action" type="button" onClick={() => { void handleChannelShare("tiktok"); }}><ShareIcon /><span><strong>TikTok</strong><small>{locale === "zh" ? "复制发布文案和链接，配合照片发布" : "Copy the caption and link, then add your photo"}</small></span></button>
                 <button className="share-action" type="button" onClick={() => { void copySharePayload(shareUrl, locale === "zh" ? "房源链接已复制。" : "Listing link copied."); }}><LinkIcon /><span><strong>{locale === "zh" ? "只复制房源链接" : "Copy listing link only"}</strong><small>{locale === "zh" ? "方便粘贴到聊天或群组" : "Paste it into a chat or group"}</small></span></button>
