@@ -58,6 +58,8 @@ export async function ensureDatabaseSchema() {
         location TEXT NOT NULL DEFAULT '',
         min_price NUMERIC(12, 2),
         max_price NUMERIC(12, 2),
+        min_sqft INTEGER,
+        max_sqft INTEGER,
         bedrooms TEXT NOT NULL DEFAULT '',
         bathrooms TEXT NOT NULL DEFAULT '',
         rental_type TEXT NOT NULL DEFAULT 'all',
@@ -71,6 +73,8 @@ export async function ensureDatabaseSchema() {
       )
     `);
     await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS min_price NUMERIC(12, 2)");
+    await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS min_sqft INTEGER");
+    await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS max_sqft INTEGER");
     await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS bedrooms TEXT NOT NULL DEFAULT ''");
     await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS bathrooms TEXT NOT NULL DEFAULT ''");
     await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '我的搜索'");
@@ -97,6 +101,7 @@ export async function ensureDatabaseSchema() {
         currency TEXT NOT NULL DEFAULT 'USD',
         bedrooms TEXT NOT NULL,
         bathrooms TEXT NOT NULL,
+        square_feet INTEGER,
         move_in TEXT NOT NULL,
         lease TEXT NOT NULL,
         features JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -115,6 +120,7 @@ export async function ensureDatabaseSchema() {
       )
     `);
     await sql.query("ALTER TABLE rental_listings ADD COLUMN IF NOT EXISTS owner_id TEXT REFERENCES rental_users(id) ON DELETE SET NULL");
+    await sql.query("ALTER TABLE rental_listings ADD COLUMN IF NOT EXISTS square_feet INTEGER");
     await sql.query("ALTER TABLE rental_listings ADD COLUMN IF NOT EXISTS expires_on DATE");
     await sql.query("ALTER TABLE rental_listings ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ");
     await sql.query("ALTER TABLE rental_listings ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ");

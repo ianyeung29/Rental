@@ -27,7 +27,8 @@ function countMatches(listingValue: unknown, filter: string) {
   const listingNumber = Number(listing);
   if (!Number.isFinite(listingNumber)) return false;
   if (filter.endsWith("+")) return listingNumber >= Number(filter.slice(0, -1));
-  return listingNumber >= Number(filter);
+  if (listing.endsWith("+") || String(listingValue || "").includes("+")) return false;
+  return listingNumber === Number(filter);
 }
 
 function moveInMatches(listingValue: unknown, filter: string) {
@@ -43,11 +44,15 @@ function matches(search: Record<string, unknown>, listing: Record<string, unknow
   const searchable = `${String(listing.title_zh || "")} ${String(listing.title_en || "")} ${String(listing.area_zh || "")} ${String(listing.area_en || "")}`.toLowerCase();
   const minPrice = search.min_price == null ? 0 : number(search.min_price);
   const maxPrice = search.max_price == null ? Number.POSITIVE_INFINITY : number(search.max_price);
+  const minSqft = search.min_sqft == null ? 0 : number(search.min_sqft);
+  const maxSqft = search.max_sqft == null ? Number.POSITIVE_INFINITY : number(search.max_sqft);
   const listingPrice = number(listing.price);
+  const listingSqft = number(listing.square_feet);
   const features = list(listing.features);
   const requiredFeatures = list(search.features);
   return (!location || searchable.includes(location)) &&
     listingPrice >= minPrice && listingPrice <= maxPrice &&
+    (!search.min_sqft && !search.max_sqft || listingSqft >= minSqft && listingSqft <= maxSqft) &&
     countMatches(listing.bedrooms, String(search.bedrooms || "")) &&
     countMatches(listing.bathrooms, String(search.bathrooms || "")) &&
     (String(search.rental_type || "all") === "all" || String(listing.rental_type || "") === String(search.rental_type)) &&
@@ -64,7 +69,7 @@ export async function GET(request: Request) {
   try {
     await ensureDatabaseSchema();
     const searches = await sql.query(`
-      SELECT s.user_id, s.location, s.min_price, s.max_price, s.bedrooms, s.bathrooms,
+      SELECT s.user_id, s.location, s.min_price, s.max_price, s.min_sqft, s.max_sqft, s.bedrooms, s.bathrooms,
              s.rental_type, s.move_in, s.features, s.last_alert_at,
              u.email, u.display_name
       FROM rental_saved_searches s
@@ -75,7 +80,7 @@ export async function GET(request: Request) {
       LIMIT 500
     `);
     const listings = await sql.query(`
-      SELECT id, title_zh, title_en, area_zh, area_en, price, bedrooms, bathrooms, rental_type, move_in, features
+      SELECT id, title_zh, title_en, area_zh, area_en, price, bedrooms, bathrooms, square_feet, rental_type, move_in, features
       FROM rental_listings
       WHERE status = 'published' AND (expires_on IS NULL OR expires_on >= CURRENT_DATE)
         AND created_at > NOW() - INTERVAL '30 days'

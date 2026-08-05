@@ -41,6 +41,7 @@ type Listing = {
   currency: "USD";
   bedrooms: string;
   bathrooms: string;
+  squareFeet?: number | null;
   moveIn: string;
   lease: string;
   image: string;
@@ -68,6 +69,8 @@ type SearchSnapshot = {
   location: string;
   minPrice: string;
   maxPrice: string;
+  minSqft: string;
+  maxSqft: string;
   bedrooms: string;
   bathrooms: string;
   rentalType: RentalType;
@@ -184,6 +187,7 @@ type ListingDraft = {
   currency: "USD";
   bedrooms: string;
   bathrooms: string;
+  squareFeet: string;
   moveInMode: "immediate" | "date";
   moveInDate: string;
   lease: string;
@@ -219,6 +223,7 @@ const EMPTY_DRAFT: ListingDraft = {
   currency: "USD",
   bedrooms: "1",
   bathrooms: "1",
+  squareFeet: "",
   moveInMode: "immediate",
   moveInDate: "",
   lease: "12",
@@ -241,7 +246,7 @@ const EMPTY_DRAFT: ListingDraft = {
 function draftHasContent(value: ListingDraft) {
   return Boolean(
     value.titleEn || value.titleZh || value.areaEn || value.areaZh || value.privateAddress || value.price ||
-      value.moveInDate || value.lease !== EMPTY_DRAFT.lease || value.descriptionEn || value.descriptionZh ||
+      value.moveInDate || value.lease !== EMPTY_DRAFT.lease || value.squareFeet || value.descriptionEn || value.descriptionZh ||
       value.photos.length || value.photoKeys.length || value.contactName || value.contactEmail || value.agentProfileId || value.expiresOn ||
       value.features.length || value.agentService !== EMPTY_DRAFT.agentService || value.agentFeePlan !== EMPTY_DRAFT.agentFeePlan || value.agentFeeAmount,
   );
@@ -418,7 +423,8 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
 ] as const;
 
 const LOCATION_LOOKUP_OPTION_COPY: Record<LocationLookupOption, { zh: string; en: string }> = {
-  grocery: { zh: "超市 / 杂货店", en: "Supermarkets / groceries" },
+  community: { zh: "华人生活圈", en: "Chinese community areas" },
+  grocery: { zh: "中文超市 / 亚洲超市", en: "Chinese / Asian supermarkets" },
   park: { zh: "公园", en: "Parks" },
   library: { zh: "图书馆", en: "Libraries" },
   pharmacy: { zh: "药房", en: "Pharmacies" },
@@ -679,11 +685,17 @@ function normalizeSearchText(value: string) {
 const NORMALIZED_LOCATION_ALIAS_GROUPS = LOCATION_ALIAS_GROUPS.map((group) => group.map(normalizeSearchText));
 
 const BEDROOM_FILTER_VALUES = new Set(["", "0", "1", "2", "3+"]);
-const BATHROOM_FILTER_VALUES = new Set(["", "1", "1.5", "2", "3+"]);
+const EXACT_BATHROOM_VALUES = ["0.5", "1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5"] as const;
+const BATHROOM_FILTER_VALUES = new Set(["", ...EXACT_BATHROOM_VALUES]);
 
 function normalizePriceFilter(value: unknown) {
   const candidate = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
   return candidate && Number.isFinite(Number(candidate)) && Number(candidate) > 0 ? candidate : "";
+}
+
+function normalizeSquareFeetFilter(value: unknown) {
+  const candidate = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  return candidate && Number.isInteger(Number(candidate)) && Number(candidate) > 0 ? candidate : "";
 }
 
 function normalizeCountFilter(value: unknown, allowedValues: Set<string>) {
@@ -696,6 +708,7 @@ function matchesCountFilter(value: string, selected: string) {
   const target = Number(selected.replace("+", ""));
   const actual = Number(value.replace("+", ""));
   if (!Number.isFinite(target) || !Number.isFinite(actual)) return value === selected;
+  if (value.endsWith("+") && !selected.endsWith("+")) return false;
   return selected.endsWith("+") ? actual >= target : actual === target;
 }
 
@@ -843,6 +856,7 @@ const LISTINGS: Listing[] = [
     currency: "USD",
     bedrooms: "2",
     bathrooms: "1",
+    squareFeet: 1100,
     moveIn: "Sep 01",
     lease: "12 months",
     image: "/listings/elmwood-light.png",
@@ -869,6 +883,7 @@ const LISTINGS: Listing[] = [
     currency: "USD",
     bedrooms: "1",
     bathrooms: "1",
+    squareFeet: 720,
     moveIn: "Aug 15",
     lease: "12 months",
     image: "/listings/harbor-window.png",
@@ -895,6 +910,7 @@ const LISTINGS: Listing[] = [
     currency: "USD",
     bedrooms: "1",
     bathrooms: "1",
+    squareFeet: 520,
     moveIn: "Sep 01",
     lease: "6 months",
     image: "/listings/cedar-room.png",
@@ -921,6 +937,7 @@ const LISTINGS: Listing[] = [
     currency: "USD",
     bedrooms: "1",
     bathrooms: "1",
+    squareFeet: 850,
     moveIn: "Sep 15",
     lease: "4 months",
     image: "/listings/sunset-sublet.png",
@@ -953,6 +970,8 @@ const copy = {
     locationPlaceholder: "例如 皇后区 / Queens",
     minPrice: "最低月租",
     maxPrice: "最高月租",
+    minSqft: "最小面积（平方英尺）",
+    maxSqft: "最大面积（平方英尺）",
     anyPrice: "不限",
     bedrooms: "卧室",
     anyBedrooms: "不限卧室",
@@ -1063,9 +1082,9 @@ const copy = {
     stageContact: "联系与看房",
     stagePublish: "核验、预览、发布",
     polishTitle: "AI 润色房源文案",
-    polishIntro: "根据你填写的事实和所选大致区域优化文案；配置地图服务后，可加入附近设施和步行到交通站点时间。精确地址不会发送给 AI。",
+    polishIntro: "根据你填写的事实和所选大致区域优化文案；可检查法拉盛市中心、布鲁克林八大道和附近中文超市的参考时间。精确地址不会发送给 AI。",
     lookupTitle: "选择要查找的附近信息（可选）",
-    lookupHelp: "只会查询你勾选的类别；最多选择 3 项。取消全部选择即可不调用地图服务。",
+    lookupHelp: "只会查询你勾选的类别；最多选择 3 项。生活圈和超市时间来自大致区域，发布前请复核。",
     lookupNone: "未选择附近查找；这次只润色房源文字，不产生 Google 地图查询。",
     lookupSelected: "已选择",
     lookupCached: "已使用缓存的附近参考，没有重复查询 Google。",
@@ -1101,6 +1120,8 @@ const copy = {
     locationPlaceholder: "Try 皇后区 / Queens",
     minPrice: "Minimum monthly rent",
     maxPrice: "Maximum monthly rent",
+    minSqft: "Minimum size (sq ft)",
+    maxSqft: "Maximum size (sq ft)",
     anyPrice: "Any price",
     bedrooms: "Bedrooms",
     anyBedrooms: "Any bedrooms",
@@ -1211,9 +1232,9 @@ const copy = {
     stageContact: "Contact and tours",
     stagePublish: "Verify, preview, publish",
     polishTitle: "AI listing polish",
-    polishIntro: "Polish the Chinese copy from your facts and selected approximate area. With map context configured, nearby places and walking time to stations can be added; the exact address never goes to AI.",
+    polishIntro: "Polish the Chinese copy from your facts and selected approximate area. You can check approximate travel time to Downtown Flushing, Brooklyn 8th Avenue, and a nearby Chinese/Asian supermarket; the exact address never goes to AI.",
     lookupTitle: "Choose nearby information to check (optional)",
-    lookupHelp: "Only checked categories are queried; choose up to 3. Clear all selections to skip Google Maps for this polish.",
+    lookupHelp: "Only checked categories are queried; choose up to 3. Community and supermarket times use the approximate area and should be reviewed before publishing.",
     lookupNone: "No nearby lookup selected; this polish uses only your listing text and makes no Google Maps request.",
     lookupSelected: "selected",
     lookupCached: "Used cached nearby facts; Google was not queried again.",
@@ -1540,9 +1561,12 @@ async function renderSharePoster(options: {
     context.stroke();
     y += 42;
 
+    const sizeFact = typeof listing.squareFeet === "number" && Number.isFinite(listing.squareFeet) && listing.squareFeet > 0
+      ? `${listing.squareFeet.toLocaleString("en-US")} ${locale === "zh" ? "平方英尺" : "sq ft"}`
+      : "";
     const facts = locale === "zh"
-      ? [`${listing.bedrooms === "0" ? "单间" : `${listing.bedrooms} 卧`}`, `${listing.bathrooms} 卫`, moveIn]
-      : [`${listing.bedrooms === "0" ? "Studio" : `${listing.bedrooms} bed`}`, `${listing.bathrooms} bath`, moveIn];
+      ? [`${listing.bedrooms === "0" ? "单间" : `${listing.bedrooms} 卧`}`, `${listing.bathrooms} 卫`, ...(sizeFact ? [sizeFact] : []), moveIn]
+      : [`${listing.bedrooms === "0" ? "Studio" : `${listing.bedrooms} bed`}`, `${listing.bathrooms} bath`, ...(sizeFact ? [sizeFact] : []), moveIn];
     const factWidth = contentWidth / facts.length;
     context.font = "700 21px DM Sans, Noto Sans SC, sans-serif";
     context.fillStyle = "#142A44";
@@ -1603,6 +1627,8 @@ export default function HomePage() {
   const [selectedPopularAreaId, setSelectedPopularAreaId] = useState("");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
+  const [minSqft, setMinSqft] = useState("");
+  const [maxSqft, setMaxSqft] = useState("");
   const [bedrooms, setBedrooms] = useState("");
   const [bathrooms, setBathrooms] = useState("");
   const [rentalType, setRentalType] = useState<RentalType>("all");
@@ -1695,13 +1721,15 @@ export default function HomePage() {
     location: appliedLocation,
     minPrice,
     maxPrice,
+    minSqft,
+    maxSqft,
     bedrooms,
     bathrooms,
     rentalType,
     moveIn,
     activeFeatures,
     sortMode,
-  }), [activeFeatures, appliedLocation, bathrooms, bedrooms, maxPrice, minPrice, moveIn, rentalType, sortMode]);
+  }), [activeFeatures, appliedLocation, bathrooms, bedrooms, maxPrice, maxSqft, minPrice, minSqft, moveIn, rentalType, sortMode]);
   const savedSearchIsCurrent = Boolean(savedSearch && savedSearchSnapshot && JSON.stringify(searchSnapshot) === JSON.stringify(savedSearchSnapshot));
   const listingQuality = useMemo(() => {
     const checks = [
@@ -1730,9 +1758,11 @@ export default function HomePage() {
         const storedSearchSnapshot = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.savedSearchSnapshot) || "null");
         const storedEditingListingId = window.localStorage.getItem(STORAGE_KEYS.editingListingId);
         const params = new URLSearchParams(window.location.search);
-        const hasUrlSearch = ["location", "min", "max", "beds", "baths", "type", "move", "features", "sort"].some((key) => params.has(key));
+        const hasUrlSearch = ["location", "min", "max", "sqftMin", "sqftMax", "beds", "baths", "type", "move", "features", "sort"].some((key) => params.has(key));
         const urlMin = params.get("min");
         const urlMax = params.get("max");
+        const urlMinSqft = params.get("sqftMin");
+        const urlMaxSqft = params.get("sqftMax");
         const urlBedrooms = params.get("beds");
         const urlBathrooms = params.get("baths");
         const urlType = params.get("type");
@@ -1741,6 +1771,8 @@ export default function HomePage() {
           location: params.get("location") || "",
           minPrice: normalizePriceFilter(urlMin),
           maxPrice: normalizePriceFilter(urlMax),
+          minSqft: normalizeSquareFeetFilter(urlMinSqft),
+          maxSqft: normalizeSquareFeetFilter(urlMaxSqft),
           bedrooms: normalizeCountFilter(urlBedrooms, BEDROOM_FILTER_VALUES),
           bathrooms: normalizeCountFilter(urlBathrooms, BATHROOM_FILTER_VALUES),
           rentalType: urlType === "entire" || urlType === "privateRoom" || urlType === "sublet" ? urlType : "all",
@@ -1753,6 +1785,8 @@ export default function HomePage() {
           location: typeof storedSnapshotRecord.location === "string" ? storedSnapshotRecord.location : "",
           minPrice: normalizePriceFilter(storedSnapshotRecord.minPrice),
           maxPrice: normalizePriceFilter(storedSnapshotRecord.maxPrice),
+          minSqft: normalizeSquareFeetFilter(storedSnapshotRecord.minSqft),
+          maxSqft: normalizeSquareFeetFilter(storedSnapshotRecord.maxSqft),
           bedrooms: normalizeCountFilter(storedSnapshotRecord.bedrooms, BEDROOM_FILTER_VALUES),
           bathrooms: normalizeCountFilter(storedSnapshotRecord.bathrooms, BATHROOM_FILTER_VALUES),
           rentalType: storedSnapshotRecord.rentalType === "entire" || storedSnapshotRecord.rentalType === "privateRoom" || storedSnapshotRecord.rentalType === "sublet" ? storedSnapshotRecord.rentalType : "all",
@@ -1790,6 +1824,8 @@ export default function HomePage() {
           setAppliedLocation(initialSearch.location);
           setMinPrice(initialSearch.minPrice);
           setMaxPrice(initialSearch.maxPrice);
+          setMinSqft(initialSearch.minSqft);
+          setMaxSqft(initialSearch.maxSqft);
           setBedrooms(initialSearch.bedrooms);
           setBathrooms(initialSearch.bathrooms);
           setRentalType(initialSearch.rentalType);
@@ -1929,6 +1965,8 @@ export default function HomePage() {
               location: searchResult.location || "",
               minPrice: normalizePriceFilter(searchResult.minPrice),
               maxPrice: normalizePriceFilter(searchResult.maxPrice),
+              minSqft: normalizeSquareFeetFilter(searchResult.minSqft),
+              maxSqft: normalizeSquareFeetFilter(searchResult.maxSqft),
               bedrooms: normalizeCountFilter(searchResult.bedrooms, BEDROOM_FILTER_VALUES),
               bathrooms: normalizeCountFilter(searchResult.bathrooms, BATHROOM_FILTER_VALUES),
               rentalType: searchResult.rentalType || "all",
@@ -1940,6 +1978,8 @@ export default function HomePage() {
             setAppliedLocation(snapshot.location);
             setMinPrice(snapshot.minPrice);
             setMaxPrice(snapshot.maxPrice);
+            setMinSqft(snapshot.minSqft);
+            setMaxSqft(snapshot.maxSqft);
             setBedrooms(snapshot.bedrooms);
             setBathrooms(snapshot.bathrooms);
             setRentalType(snapshot.rentalType);
@@ -2045,6 +2085,8 @@ export default function HomePage() {
     setOrDelete("location", searchSnapshot.location);
     setOrDelete("min", searchSnapshot.minPrice);
     setOrDelete("max", searchSnapshot.maxPrice);
+    setOrDelete("sqftMin", searchSnapshot.minSqft);
+    setOrDelete("sqftMax", searchSnapshot.maxSqft);
     setOrDelete("beds", searchSnapshot.bedrooms);
     setOrDelete("baths", searchSnapshot.bathrooms);
     setOrDelete("type", searchSnapshot.rentalType, "all");
@@ -2058,7 +2100,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!hydrated || !currentUser || !currentUser.emailVerified || savedSearchSnapshot) return;
     const params = new URLSearchParams(window.location.search);
-    if (["location", "min", "max", "beds", "baths", "type", "move", "features", "sort"].some((key) => params.has(key))) return;
+    if (["location", "min", "max", "sqftMin", "sqftMax", "beds", "baths", "type", "move", "features", "sort"].some((key) => params.has(key))) return;
     let cancelled = false;
     fetch("/api/saved-search", { cache: "no-store" })
       .then(async (response) => {
@@ -2069,6 +2111,8 @@ export default function HomePage() {
             location: result.location || "",
             minPrice: normalizePriceFilter(result.minPrice),
             maxPrice: normalizePriceFilter(result.maxPrice),
+            minSqft: normalizeSquareFeetFilter(result.minSqft),
+            maxSqft: normalizeSquareFeetFilter(result.maxSqft),
             bedrooms: normalizeCountFilter(result.bedrooms, BEDROOM_FILTER_VALUES),
             bathrooms: normalizeCountFilter(result.bathrooms, BATHROOM_FILTER_VALUES),
             rentalType: result.rentalType || "all",
@@ -2080,6 +2124,8 @@ export default function HomePage() {
           setAppliedLocation(snapshot.location);
           setMinPrice(snapshot.minPrice);
           setMaxPrice(snapshot.maxPrice);
+          setMinSqft(snapshot.minSqft);
+          setMaxSqft(snapshot.maxSqft);
           setBedrooms(snapshot.bedrooms);
           setBathrooms(snapshot.bathrooms);
           setRentalType(snapshot.rentalType);
@@ -2231,18 +2277,24 @@ export default function HomePage() {
     const queryVariants = locationSearchVariants(appliedLocation);
     const floorValue = Number(minPrice);
     const ceilingValue = Number(maxPrice);
+    const sqftFloorValue = Number(minSqft);
+    const sqftCeilingValue = Number(maxSqft);
     const floor = Number.isFinite(floorValue) && floorValue > 0 ? floorValue : 0;
     const ceiling = Number.isFinite(ceilingValue) && ceilingValue > 0 ? ceilingValue : Number.POSITIVE_INFINITY;
+    const sqftFloor = Number.isFinite(sqftFloorValue) && sqftFloorValue > 0 ? sqftFloorValue : 0;
+    const sqftCeiling = Number.isFinite(sqftCeilingValue) && sqftCeilingValue > 0 ? sqftCeilingValue : Number.POSITIVE_INFINITY;
+    const hasSqftFilter = Boolean(minSqft || maxSqft);
     const filtered = allListings.filter((listing) => {
       const searchable = listingLocationSearchText(listing);
       const matchesLocation = queryVariants.length === 0 || queryVariants.some((variant) => searchable.includes(variant));
       const matchesPrice = listing.price >= floor && listing.price <= ceiling;
       const matchesBedrooms = matchesCountFilter(listing.bedrooms, bedrooms);
       const matchesBathrooms = matchesCountFilter(listing.bathrooms, bathrooms);
+      const matchesSquareFeet = !hasSqftFilter || (typeof listing.squareFeet === "number" && Number.isFinite(listing.squareFeet) && listing.squareFeet >= sqftFloor && listing.squareFeet <= sqftCeiling);
       const matchesType = rentalType === "all" || listing.type === rentalType;
       const matchesMoveIn = !moveIn || listing.moveIn === "immediate" || moveInMonth(listing.moveIn) === moveIn;
       const matchesFeatures = activeFeatures.every((feature) => listing.features.includes(feature));
-      return matchesLocation && matchesPrice && matchesBedrooms && matchesBathrooms && matchesType && matchesMoveIn && matchesFeatures;
+      return matchesLocation && matchesPrice && matchesBedrooms && matchesBathrooms && matchesSquareFeet && matchesType && matchesMoveIn && matchesFeatures;
     });
 
     return [...filtered].sort((a, b) => {
@@ -2254,7 +2306,7 @@ export default function HomePage() {
       }
       return allListings.indexOf(a) - allListings.indexOf(b);
     });
-  }, [activeFeatures, allListings, appliedLocation, bathrooms, bedrooms, maxPrice, minPrice, moveIn, rentalType, sortMode]);
+  }, [activeFeatures, allListings, appliedLocation, bathrooms, bedrooms, maxPrice, maxSqft, minPrice, minSqft, moveIn, rentalType, sortMode]);
 
   const compareListings = allListings.filter((listing) => compareIds.includes(listing.id));
   const compareKey = compareListings.map((listing) => listing.id).join("|");
@@ -2503,6 +2555,7 @@ export default function HomePage() {
       currency: "USD",
       bedrooms: listing.bedrooms || "1",
       bathrooms: listing.bathrooms || "1",
+      squareFeet: listing.squareFeet ? String(listing.squareFeet) : "",
       moveInMode: moveInIsImmediate ? "immediate" : "date",
       moveInDate: moveInIsImmediate ? "" : listing.moveIn,
       lease: leaseMonths,
@@ -2602,6 +2655,8 @@ export default function HomePage() {
     setSelectedPopularAreaId("");
     setMinPrice("");
     setMaxPrice("");
+    setMinSqft("");
+    setMaxSqft("");
     setBedrooms("");
     setBathrooms("");
     setRentalType("all");
@@ -2615,8 +2670,14 @@ export default function HomePage() {
     event.preventDefault();
     const minimum = Number(minPrice);
     const maximum = Number(maxPrice);
+    const minimumSqft = Number(minSqft);
+    const maximumSqft = Number(maxSqft);
     if (minPrice && maxPrice && Number.isFinite(minimum) && Number.isFinite(maximum) && minimum > maximum) {
       showToast(locale === "zh" ? "最低月租不能高于最高月租" : "Minimum rent cannot exceed maximum rent");
+      return;
+    }
+    if (minSqft && maxSqft && Number.isFinite(minimumSqft) && Number.isFinite(maximumSqft) && minimumSqft > maximumSqft) {
+      showToast(locale === "zh" ? "最小面积不能大于最大面积" : "Minimum size cannot exceed maximum size");
       return;
     }
     setAppliedLocation(locationInput);
@@ -2801,6 +2862,7 @@ export default function HomePage() {
     if (step === 1 && (!draft.titleZh.trim() || !draft.areaZh.trim() || !draft.privateAddress.trim())) return required;
     if (step === 1 && draft.areaGroupId && !draft.areaLocationId) return locale === "zh" ? "请选择区域 / 城市，或选择手动输入后填写公开区域名称。" : "Choose an area or city, or select manual entry and add a public area label.";
     if (step === 2 && (!draft.price || Number(draft.price) <= 0 || !draft.lease || (draft.moveInMode === "date" && !draft.moveInDate))) return locale === "zh" ? "请填写有效租金、入住方式和租期。" : "Add a valid rent, move-in option, and lease term.";
+    if (step === 2 && draft.squareFeet && (!Number.isInteger(Number(draft.squareFeet)) || Number(draft.squareFeet) < 50 || Number(draft.squareFeet) > 100000)) return locale === "zh" ? "请输入 50 至 100,000 之间的建筑面积。" : "Use a square footage value between 50 and 100,000.";
     if (step === 3 && draft.photos.length === 0) return locale === "zh" ? "至少上传一张房源照片。" : "Upload at least one listing photo.";
     if (step === 4 && (!draft.contactName.trim() || !draft.contactEmail.trim() || !draft.contactEmail.includes("@"))) return locale === "zh" ? "请填写姓名和有效邮箱。" : "Add your name and a valid email address.";
     if (step === 4 && draft.agentService === "agentMatch" && draft.agentFeePlan === "flatFee" && (!draft.agentFeeAmount || Number(draft.agentFeeAmount) <= 0)) return locale === "zh" ? "请填写有效的经纪固定费用，或改选其他费用意向。" : "Add a valid agent flat fee or choose another fee preference.";
@@ -2874,6 +2936,7 @@ export default function HomePage() {
           rentalType: draft.rentalType,
           price: draft.price,
           currency: draft.currency,
+          squareFeet: draft.squareFeet,
           moveIn: draft.moveInMode === "immediate" ? "立即入住" : draft.moveInDate,
           lease: draft.lease,
           features: draft.features,
@@ -2945,6 +3008,7 @@ export default function HomePage() {
           currency: "USD",
           bedrooms: draft.bedrooms,
           bathrooms: draft.bathrooms,
+          squareFeet: draft.squareFeet,
           moveIn: draft.moveInMode === "immediate" ? "immediate" : draft.moveInDate,
           lease: draft.lease,
           expiresOn: draft.expiresOn || null,
@@ -3049,6 +3113,7 @@ export default function HomePage() {
       currency: draft.currency,
       bedrooms: draft.bedrooms,
       bathrooms: draft.bathrooms,
+      squareFeet: draft.squareFeet ? Number(draft.squareFeet) : null,
       moveIn: draft.moveInMode === "immediate" ? "immediate" : draft.moveInDate,
       lease: `${draft.lease} months`,
       image: draft.photos[0],
@@ -3130,6 +3195,8 @@ export default function HomePage() {
   if (appliedLocation) activeFilterLabels.push({ key: "location", label: appliedLocation });
   if (minPrice) activeFilterLabels.push({ key: "minPrice", label: `${locale === "zh" ? "最低" : "Min"} $${Number(minPrice).toLocaleString("en-US")}` });
   if (maxPrice) activeFilterLabels.push({ key: "maxPrice", label: `${locale === "zh" ? "最高" : "Max"} $${Number(maxPrice).toLocaleString("en-US")}` });
+  if (minSqft) activeFilterLabels.push({ key: "minSqft", label: `${locale === "zh" ? "最小面积" : "Min size"} ${Number(minSqft).toLocaleString("en-US")} sq ft` });
+  if (maxSqft) activeFilterLabels.push({ key: "maxSqft", label: `${locale === "zh" ? "最大面积" : "Max size"} ${Number(maxSqft).toLocaleString("en-US")} sq ft` });
   if (bedrooms) activeFilterLabels.push({ key: "bedrooms", label: `${bedrooms} ${locale === "zh" ? "卧室" : "bed"}` });
   if (bathrooms) activeFilterLabels.push({ key: "bathrooms", label: `${bathrooms} ${locale === "zh" ? "卫" : "bath"}` });
   if (rentalType !== "all") activeFilterLabels.push({ key: "rentalType", label: rentalType === "entire" ? t.entire : rentalType === "privateRoom" ? t.privateRoom : t.sublet });
@@ -3140,6 +3207,8 @@ export default function HomePage() {
     if (key === "location") { setLocationInput(""); setAppliedLocation(""); setSelectedPopularAreaId(""); }
     if (key === "minPrice") setMinPrice("");
     if (key === "maxPrice") setMaxPrice("");
+    if (key === "minSqft") setMinSqft("");
+    if (key === "maxSqft") setMaxSqft("");
     if (key === "bedrooms") setBedrooms("");
     if (key === "bathrooms") setBathrooms("");
     if (key === "rentalType") setRentalType("all");
@@ -3157,6 +3226,7 @@ export default function HomePage() {
     price: listing.price,
     bedrooms: listing.bedrooms,
     bathrooms: listing.bathrooms,
+    squareFeet: listing.squareFeet,
     moveIn: listingMoveIn(listing),
     lease: listing.lease,
     features: listingCompareFeatures(listing).slice(0, 8),
@@ -3169,7 +3239,6 @@ export default function HomePage() {
       setCompareSummaryError(locale === "zh" ? "请先选择两套房源。" : "Select two listings first.");
       return;
     }
-
     const localSummary = buildLocalCompareSummary(compareFacts, locale);
     setCompareSummary({ ...localSummary, key: compareKey, locale, source: "local" });
     setCompareSummaryLoading(true);
@@ -3222,7 +3291,7 @@ export default function HomePage() {
           `【房源推荐】${title || "房源"}`,
           `位置：${area}`,
           `月租：${formatPrice(listing)}`,
-          `户型：${listing.bedrooms === "0" ? "单间" : `${listing.bedrooms} 卧`} · ${listing.bathrooms} 卫 · ${type}`,
+          `户型：${listing.bedrooms === "0" ? "单间" : `${listing.bedrooms} 卧`} · ${listing.bathrooms} 卫${typeof listing.squareFeet === "number" && Number.isFinite(listing.squareFeet) && listing.squareFeet > 0 ? ` · ${listing.squareFeet.toLocaleString("en-US")} 平方英尺` : ""} · ${type}`,
           `入住：${listingMoveIn(listing)}`,
           tags.length > 0 ? `特点：${tags.join(" · ")}` : "",
           url ? `详情：${url}` : "",
@@ -3231,7 +3300,7 @@ export default function HomePage() {
           `${type}: ${title || "Rental listing"}`,
           `Area: ${area}`,
           `Rent: ${formatPrice(listing)}`,
-          `Layout: ${listing.bedrooms === "0" ? "Studio" : `${listing.bedrooms} bed`} · ${listing.bathrooms} bath`,
+          `Layout: ${listing.bedrooms === "0" ? "Studio" : `${listing.bedrooms} bed`} · ${listing.bathrooms} bath${typeof listing.squareFeet === "number" && Number.isFinite(listing.squareFeet) && listing.squareFeet > 0 ? ` · ${listing.squareFeet.toLocaleString("en-US")} sq ft` : ""}`,
           `Move-in: ${listingMoveIn(listing)}`,
           tags.length > 0 ? `Features: ${tags.join(" · ")}` : "",
           url ? `Details: ${url}` : "",
@@ -3557,39 +3626,53 @@ export default function HomePage() {
                 </label>
               </div>
 
-              <label className="field-label" htmlFor="bedrooms">{t.bedrooms}</label>
-              <select id="bedrooms" value={bedrooms} onChange={(event) => setBedrooms(event.target.value)}>
-                <option value="">{t.anyBedrooms}</option>
-                <option value="0">{t.studio}</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3+">3+</option>
-              </select>
+              <div className="price-range-fields size-range-fields" aria-label={locale === "zh" ? "房源面积范围" : "Square footage range"}>
+                <label className="field-label" htmlFor="min-sqft">{t.minSqft}
+                  <input className="price-input" id="min-sqft" type="number" min="1" step="10" inputMode="numeric" value={minSqft} onChange={(event) => setMinSqft(event.target.value)} placeholder="600" />
+                </label>
+                <label className="field-label" htmlFor="max-sqft">{t.maxSqft}
+                  <input className="price-input" id="max-sqft" type="number" min="1" step="10" inputMode="numeric" value={maxSqft} onChange={(event) => setMaxSqft(event.target.value)} placeholder="1,500" />
+                </label>
+              </div>
 
-              <label className="field-label" htmlFor="bathrooms">{t.bathrooms}</label>
-              <select id="bathrooms" value={bathrooms} onChange={(event) => setBathrooms(event.target.value)}>
-                <option value="">{t.anyBathrooms}</option>
-                <option value="1">1</option>
-                <option value="1.5">1.5</option>
-                <option value="2">2</option>
-                <option value="3+">3+</option>
-              </select>
+              <div className="filter-field">
+                <label className="field-label" htmlFor="bedrooms">{t.bedrooms}</label>
+                <select id="bedrooms" value={bedrooms} onChange={(event) => setBedrooms(event.target.value)}>
+                  <option value="">{t.anyBedrooms}</option>
+                  <option value="0">{t.studio}</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3+">3+</option>
+                </select>
+              </div>
 
-              <label className="field-label" htmlFor="type">{t.type}</label>
-              <select id="type" value={rentalType} onChange={(event) => setRentalType(event.target.value as RentalType)}>
-                <option value="all">{t.allTypes}</option>
-                <option value="entire">{t.entire}</option>
-                <option value="privateRoom">{t.privateRoom}</option>
-                <option value="sublet">{t.sublet}</option>
-              </select>
+              <div className="filter-field">
+                <label className="field-label" htmlFor="bathrooms">{t.bathrooms}</label>
+                <select id="bathrooms" value={bathrooms} onChange={(event) => setBathrooms(event.target.value)}>
+                  <option value="">{t.anyBathrooms}</option>
+                  {EXACT_BATHROOM_VALUES.map((value) => <option value={value} key={value}>{value}</option>)}
+                </select>
+              </div>
 
-              <label className="field-label" htmlFor="move-in">{t.moveIn}</label>
-              <select id="move-in" value={moveIn} onChange={(event) => setMoveIn(event.target.value)}>
-                <option value="">{t.anytime}</option>
-                <option value="august">{t.august}</option>
-                <option value="september">{t.september}</option>
-                <option value="october">{t.october}</option>
-              </select>
+              <div className="filter-field">
+                <label className="field-label" htmlFor="type">{t.type}</label>
+                <select id="type" value={rentalType} onChange={(event) => setRentalType(event.target.value as RentalType)}>
+                  <option value="all">{t.allTypes}</option>
+                  <option value="entire">{t.entire}</option>
+                  <option value="privateRoom">{t.privateRoom}</option>
+                  <option value="sublet">{t.sublet}</option>
+                </select>
+              </div>
+
+              <div className="filter-field">
+                <label className="field-label" htmlFor="move-in">{t.moveIn}</label>
+                <select id="move-in" value={moveIn} onChange={(event) => setMoveIn(event.target.value)}>
+                  <option value="">{t.anytime}</option>
+                  <option value="august">{t.august}</option>
+                  <option value="september">{t.september}</option>
+                  <option value="october">{t.october}</option>
+                </select>
+              </div>
 
               <button className="more-filters" type="button" onClick={() => setShowMore((current) => !current)}>
                 <SlidersIcon />
@@ -3673,6 +3756,7 @@ export default function HomePage() {
                     labels={{
                       bed: locale === "zh" ? "卧室" : "bed",
                       bath: locale === "zh" ? "卫" : "bath",
+                      squareFeet: locale === "zh" ? "平方英尺" : "sq ft",
                       moveIn: locale === "zh" ? "入住" : "move-in",
                       lease: locale === "zh" ? "租期" : "lease",
                       locationChecked: t.locationChecked,
@@ -3834,6 +3918,7 @@ export default function HomePage() {
                       <div><dt>{t.detailArea}</dt><dd>{listingArea(listing)}</dd></div>
                       <div><dt>{locale === "zh" ? "卧室" : "Bedrooms"}</dt><dd>{listing.bedrooms === "0" ? t.studio : listing.bedrooms}</dd></div>
                       <div><dt>{locale === "zh" ? "卫生间" : "Bathrooms"}</dt><dd>{listing.bathrooms}</dd></div>
+                      <div><dt>{locale === "zh" ? "面积" : "Size"}</dt><dd>{typeof listing.squareFeet === "number" && Number.isFinite(listing.squareFeet) && listing.squareFeet > 0 ? `${listing.squareFeet.toLocaleString("en-US")} ${locale === "zh" ? "平方英尺" : "sq ft"}` : (locale === "zh" ? "未提供" : "Not listed")}</dd></div>
                       <div><dt>{t.detailMoveIn}</dt><dd>{listingMoveIn(listing)}</dd></div>
                       <div><dt>{t.detailLease}</dt><dd>{listing.lease}</dd></div>
                       <div className="compare-feature-row"><dt>{locale === "zh" ? "房源特点" : "Features"}</dt><dd className="compare-feature-list">{listingCompareFeatures(listing).slice(0, 8).map((tag, index) => <span className="compare-feature-tag" key={`${tag}-${index}`}>{tag}</span>)}{listingCompareFeatures(listing).length === 0 && <span>—</span>}</dd></div>
@@ -3894,7 +3979,8 @@ export default function HomePage() {
                   <label className="field-label" htmlFor="post-type">{t.type}<select id="post-type" value={draft.rentalType} onChange={(event) => updateDraft({ rentalType: event.target.value as ListingDraft["rentalType"] })}><option value="entire">{t.entire}</option><option value="privateRoom">{t.privateRoom}</option><option value="sublet">{t.sublet}</option></select></label>
                   <label className="field-label" htmlFor="post-price">{locale === "zh" ? "月租" : "Monthly rent"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-price" type="number" min="1" value={draft.price} onChange={(event) => updateDraft({ price: event.target.value })} placeholder="2400" /></label>
                   <label className="field-label" htmlFor="post-bedrooms">{locale === "zh" ? "卧室" : "Bedrooms"}<select id="post-bedrooms" value={draft.bedrooms} onChange={(event) => updateDraft({ bedrooms: event.target.value })}><option value="0">Studio</option><option value="1">1</option><option value="2">2</option><option value="3">3+</option></select></label>
-                  <label className="field-label" htmlFor="post-bathrooms">{locale === "zh" ? "卫生间" : "Bathrooms"}<select id="post-bathrooms" value={draft.bathrooms} onChange={(event) => updateDraft({ bathrooms: event.target.value })}><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3+</option></select></label>
+                  <label className="field-label" htmlFor="post-bathrooms">{locale === "zh" ? "卫生间" : "Bathrooms"}<select id="post-bathrooms" value={draft.bathrooms} onChange={(event) => updateDraft({ bathrooms: event.target.value })}>{EXACT_BATHROOM_VALUES.map((value) => <option value={value} key={value}>{value}</option>)}</select></label>
+                  <label className="field-label" htmlFor="post-square-feet">{locale === "zh" ? "建筑面积（平方英尺）" : "Square footage"}<span className="field-optional">{locale === "zh" ? "可选" : "Optional"}</span><input id="post-square-feet" type="number" min="1" step="10" inputMode="numeric" value={draft.squareFeet} onChange={(event) => updateDraft({ squareFeet: event.target.value })} placeholder={locale === "zh" ? "例如 850" : "e.g. 850"} /></label>
                   <label className="field-label" htmlFor="post-move-in-mode">可入住时间<select id="post-move-in-mode" value={draft.moveInMode} onChange={(event) => updateDraft({ moveInMode: event.target.value as ListingDraft["moveInMode"] })}><option value="immediate">{t.immediate}</option><option value="date">{t.chooseDate}</option></select></label>
                   {draft.moveInMode === "date" && <label className="field-label" htmlFor="post-move-in-date">入住日期<input id="post-move-in-date" type="date" value={draft.moveInDate} onInput={(event) => updateDraft({ moveInDate: event.currentTarget.value })} onChange={(event) => updateDraft({ moveInDate: event.target.value })} /></label>}
                   <label className="field-label" htmlFor="post-lease">{locale === "zh" ? "最短租期（月）" : "Minimum lease (months)"}<input id="post-lease" type="number" min="1" value={draft.lease} onChange={(event) => updateDraft({ lease: event.target.value })} /></label>
@@ -3920,14 +4006,23 @@ export default function HomePage() {
                         const disabled = aiPolishLoading || (!checked && draft.locationLookupOptions.length >= MAX_LOCATION_LOOKUP_OPTIONS);
                         return <label className={`location-lookup-option ${checked ? "active" : ""} ${disabled ? "disabled" : ""}`} key={option}>
                           <input type="checkbox" checked={checked} disabled={disabled} onChange={() => updateDraft({ locationLookupOptions: checked ? draft.locationLookupOptions.filter((item) => item !== option) : [...draft.locationLookupOptions, option] })} />
-                          <span><strong>{LOCATION_LOOKUP_OPTION_COPY[option][locale]}</strong><small>{option === "transit" ? (locale === "zh" ? "最多查找一个附近站点并计算步行时间" : "Checks up to one nearby station and walking time") : (locale === "zh" ? "查找一个代表性地点" : "Checks one representative place")}</small></span>
+                          <span><strong>{LOCATION_LOOKUP_OPTION_COPY[option][locale]}</strong><small>{option === "community" ? (locale === "zh" ? "皇后区查法拉盛市中心；布鲁克林查八大道，估算车程" : "Checks Downtown Flushing for Queens or 8th Avenue for Brooklyn, with approximate drive time") : option === "grocery" ? (locale === "zh" ? "查找中文 / 亚洲超市并估算步行时间" : "Finds a Chinese / Asian supermarket and estimates walking time") : option === "transit" ? (locale === "zh" ? "最多查找一个附近站点并计算步行时间" : "Checks up to one nearby station and walking time") : (locale === "zh" ? "查找一个代表性地点" : "Checks one representative place")}</small></span>
                         </label>;
                       })}
                     </div>
                     <p className="location-lookup-note">{draft.locationLookupOptions.length === 0 ? t.lookupNone : `${draft.locationLookupOptions.length} ${t.lookupSelected}`}</p>
                   </fieldset>
                   {locationContextLoading && <p className="ai-location-status field-span-2" role="status">{locale === "zh" ? "正在整理所选区域的附近设施和交通参考…" : "Collecting nearby and transit context for the selected area…"}</p>}
-                  {!locationContextLoading && locationContext && <p className={`ai-location-status field-span-2 ${locationContext.source === "google" ? "ready" : ""}`} role="status">{locationContext.source === "google" ? (locale === "zh" ? "已加入大致区域的周边和到交通站点步行时间；发布前请复核。" : "Approximate-area nearby facts and walking times to transit stations were added; review before publishing.") : locationContext.notes[0] || (locale === "zh" ? "没有加入未经验证的周边或交通说法。" : "No unverified nearby or transit claims were added.")}</p>}
+                  {!locationContextLoading && locationContext && <p className={`ai-location-status field-span-2 ${locationContext.source === "google" ? "ready" : ""}`} role="status">{locationContext.source === "google" ? (locale === "zh" ? "已加入大致区域的周边、华人生活圈和出行时间；发布前请复核。" : "Approximate-area nearby places, community destinations, and travel times were added; review before publishing.") : locationContext.notes[0] || (locale === "zh" ? "没有加入未经验证的周边或交通说法。" : "No unverified nearby or transit claims were added.")}</p>}
+                  {!locationContextLoading && locationContext?.source === "google" && (locationContext.destinations.length > 0 || locationContext.nearby.length > 0 || locationContext.transit.length > 0) && <div className="location-context-results field-span-2" role="note">
+                    <strong>{locale === "zh" ? "已找到的区域参考" : "Area references found"}</strong>
+                    <ul>
+                      {locationContext.destinations.map((destination) => <li key={`${destination.mode}-${destination.name}`}><span>{destination.category}</span><strong>{destination.name}</strong><small>{destination.minutes ? (locale === "zh" ? `约 ${destination.minutes} 分钟${destination.mode === "drive" ? "车程" : "步行"}` : `About ${destination.minutes} minutes by ${destination.mode === "drive" ? "car" : "walking"}`) : (locale === "zh" ? "路线时间暂不可用" : "Travel time unavailable")}</small></li>)}
+                      {locationContext.nearby.map((place) => <li key={`nearby-${place.name}`}><span>{place.category}</span><strong>{place.name}</strong><small>{locale === "zh" ? "大致区域附近" : "Near the approximate area"}</small></li>)}
+                      {locationContext.transit.map((station) => <li key={`transit-${station.name}`}><span>{station.mode}</span><strong>{station.name}</strong><small>{station.walkMinutes ? (locale === "zh" ? `约 ${station.walkMinutes} 分钟步行` : `About ${station.walkMinutes} minutes walking`) : (locale === "zh" ? "步行时间暂不可用" : "Walking time unavailable")}</small></li>)}
+                    </ul>
+                    <p>{locale === "zh" ? "以上时间根据所选大致区域估算，不代表精确房屋地址；发布前请复核。" : "Times use the selected approximate area, not the exact property address. Review before publishing."}</p>
+                  </div>}
                   {!locationContextLoading && locationContext?.source === "google" && locationContext.cached && <p className="location-lookup-cache-note" role="status">{t.lookupCached}</p>}
                   {aiPolishSource && <p className="ai-polish-status field-span-2" role="status">{aiPolishSource === "openai" ? t.polishApplied : t.polishLocal}</p>}
                   {aiPolishNotes.length > 0 && <div className="ai-polish-notes field-span-2" role="note"><strong>{locale === "zh" ? "发布前请复核" : "Review before publishing"}</strong><ul>{aiPolishNotes.map((note) => <li key={note}>{note}</li>)}</ul></div>}
@@ -4114,6 +4209,7 @@ export default function HomePage() {
               </div>
               <div className="detail-grid">
                 <div><small>{t.detailArea}</small><strong>{listingArea(selectedListing)}</strong></div>
+                <div><small>{locale === "zh" ? "建筑面积" : "Square footage"}</small><strong>{typeof selectedListing.squareFeet === "number" && Number.isFinite(selectedListing.squareFeet) && selectedListing.squareFeet > 0 ? `${selectedListing.squareFeet.toLocaleString("en-US")} ${locale === "zh" ? "平方英尺" : "sq ft"}` : (locale === "zh" ? "未提供" : "Not listed")}</strong></div>
                 <div><small>{t.detailMoveIn}</small><strong>{listingMoveIn(selectedListing)}</strong></div>
                 <div><small>{t.detailLease}</small><strong>{selectedListing.lease}</strong></div>
                 <div><small>{t.detailPoster}</small><strong>{listingPoster(selectedListing)}</strong></div>

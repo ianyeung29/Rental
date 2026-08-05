@@ -40,6 +40,7 @@ function ownerListing(row: Record<string, unknown>) {
     currency: "USD" as const,
     bedrooms: String(row.bedrooms || ""),
     bathrooms: String(row.bathrooms || ""),
+    squareFeet: row.square_feet == null ? null : Number(row.square_feet),
     moveIn: String(row.move_in || "immediate"),
     lease: String(row.lease || ""),
     image: photos[0] || "",
@@ -90,7 +91,7 @@ export async function GET() {
     const rows = await sql.query(`
       SELECT
         l.id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type, l.price,
-        l.bedrooms, l.bathrooms, l.move_in, l.lease, l.features, l.tags_zh, l.tags_en,
+        l.bedrooms, l.bathrooms, l.square_feet, l.move_in, l.lease, l.features, l.tags_zh, l.tags_en,
         l.description_zh, l.description_en, l.poster_role, l.status, l.expires_on, l.published_at, l.created_at,
         p.private_address, p.contact_name, p.contact_email, p.tour_preference,
         p.agent_service, p.agent_fee_plan, p.agent_fee_amount, p.agent_profile_id,

@@ -9,6 +9,7 @@ type CompareListingInput = {
   price?: unknown;
   bedrooms?: unknown;
   bathrooms?: unknown;
+  squareFeet?: unknown;
   moveIn?: unknown;
   lease?: unknown;
   features?: unknown;
@@ -45,7 +46,7 @@ const OUTPUT_SCHEMA = {
 
 const SYSTEM_PROMPT = `You are a careful comparison assistant for a bilingual rental marketplace.
 
-Compare exactly the two supplied public listing fact sets. Explain the practical tradeoffs using only the supplied rent, approximate area, bedrooms, bathrooms, move-in timing, lease term, listed features, and poster signals. Do not invent square footage, transit access, building quality, availability, fees, neighborhood safety, legal status, verification, or contact details. Do not infer protected traits or recommend a listing based on them. Do not reveal or ask for an exact address. If a field is missing, say it is not listed. Keep the conclusion concise, balanced, and useful for a renter choosing what to inspect next. Return only the requested JSON object in the requested language.`;
+Compare exactly the two supplied public listing fact sets. Explain the practical tradeoffs using only the supplied rent, approximate area, bedrooms, bathrooms, square footage, move-in timing, lease term, listed features, and poster signals. Do not invent square footage, transit access, building quality, availability, fees, neighborhood safety, legal status, verification, or contact details. Do not infer protected traits or recommend a listing based on them. Do not reveal or ask for an exact address. If a field is missing, say it is not listed. Keep the conclusion concise, balanced, and useful for a renter choosing what to inspect next. Return only the requested JSON object in the requested language.`;
 
 function text(value: unknown, max = MAX_FIELD_LENGTH) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -65,6 +66,7 @@ function normalizeListing(input: CompareListingInput, index: number): CompareLis
     price: Number.isFinite(price) && price >= 0 ? price : 0,
     bedrooms: text(input.bedrooms, 40) || "Not listed",
     bathrooms: text(input.bathrooms, 40) || "Not listed",
+    squareFeet: typeof input.squareFeet === "number" && Number.isFinite(input.squareFeet) && input.squareFeet > 0 ? input.squareFeet : null,
     moveIn: text(input.moveIn, 80) || "Not listed",
     lease: text(input.lease, 80) || "Not listed",
     features: textList(input.features),

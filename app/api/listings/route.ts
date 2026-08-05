@@ -11,6 +11,7 @@ import { listingLimitFor } from "../../lib/account-types";
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
 const ALLOWED_RENTAL_TYPES = new Set(["entire", "privateRoom", "sublet"]);
+const ALLOWED_BATHROOMS = new Set(["0.5", "1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5"]);
 const ALLOWED_FEATURES = new Set([
   "furnished",
   "utilities",
@@ -74,6 +75,7 @@ type ListingBody = {
   currency?: unknown;
   bedrooms?: unknown;
   bathrooms?: unknown;
+  squareFeet?: unknown;
   moveIn?: unknown;
   lease?: unknown;
   expiresOn?: unknown;
@@ -162,6 +164,7 @@ function toClientListing(row: Record<string, unknown>) {
     currency: "USD" as const,
     bedrooms: String(row.bedrooms || ""),
     bathrooms: String(row.bathrooms || ""),
+    squareFeet: row.square_feet == null ? null : Number(row.square_feet),
     moveIn: String(row.move_in || "immediate"),
     lease: String(row.lease || ""),
     image: photos[0] || "",
@@ -194,6 +197,8 @@ function normalizeBody(body: ListingBody) {
   const currency = text(body.currency, 12);
   const bedrooms = text(body.bedrooms, 20) || "1";
   const bathrooms = text(body.bathrooms, 20) || "1";
+  const squareFeetValue = body.squareFeet === "" || body.squareFeet === null || body.squareFeet === undefined ? null : Number(body.squareFeet);
+  const squareFeet = typeof squareFeetValue === "number" && Number.isFinite(squareFeetValue) ? squareFeetValue : null;
   const moveIn = text(body.moveIn, 80) || "immediate";
   const leaseMonths = Number(body.lease);
   const expiresOn = text(body.expiresOn, 10);
@@ -221,6 +226,7 @@ function normalizeBody(body: ListingBody) {
     currency,
     bedrooms,
     bathrooms,
+    squareFeet,
     moveIn,
     leaseMonths,
     lease: `${leaseMonths} months`,
@@ -244,7 +250,9 @@ function normalizeBody(body: ListingBody) {
 function validateListing(input: ReturnType<typeof normalizeBody>) {
   if (!input.titleZh || !input.areaZh || !input.privateAddress || !input.contactName || !input.contactEmail.includes("@")) return "Complete the title, approximate area, private address, and contact email.";
   if (!ALLOWED_RENTAL_TYPES.has(input.rentalType) || input.currency !== "USD" || !Number.isFinite(input.price) || input.price <= 0) return "Use a valid rental type and positive monthly rent.";
+  if (!ALLOWED_BATHROOMS.has(input.bathrooms)) return "Choose an exact bathroom count.";
   if (!Number.isInteger(input.leaseMonths) || input.leaseMonths <= 0 || input.leaseMonths > 120) return "Use a lease term between 1 and 120 months.";
+  if (input.squareFeet !== null && (!Number.isInteger(input.squareFeet) || input.squareFeet < 50 || input.squareFeet > 100000)) return "Use a square footage value between 50 and 100,000 square feet.";
   if (input.moveIn !== "immediate" && !/^\d{4}-\d{2}-\d{2}$/.test(input.moveIn)) return "Choose immediate move-in or a valid move-in date.";
   if (input.expiresOn && (!isDateOnly(input.expiresOn) || input.expiresOn < new Date().toISOString().slice(0, 10))) return "Choose today or a future listing expiration date.";
   if (input.agentService === "agentMatch" && input.agentFeePlan === "flatFee" && (!input.agentFeeAmount || input.agentFeeAmount <= 0)) return "Add a valid agent flat fee or choose another fee preference.";
@@ -278,7 +286,7 @@ export async function GET(request: Request) {
     const rows = await sql.query(`
       SELECT
         l.id, l.owner_id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type,
-        l.price, l.bedrooms, l.bathrooms, l.move_in, l.lease, l.features,
+        l.price, l.bedrooms, l.bathrooms, l.square_feet, l.move_in, l.lease, l.features,
         l.tags_zh, l.tags_en, l.description_zh, l.description_en, l.poster_role, l.is_sample,
         COALESCE(
           jsonb_agg(jsonb_build_object('key', m.object_key, 'url', m.public_url) ORDER BY m.sort_order)
@@ -365,9 +373,9 @@ export async function POST(request: Request) {
       tx.query(`
         INSERT INTO rental_listings (
           id, owner_id, title_zh, title_en, area_zh, area_en, rental_type, price, currency,
-          bedrooms, bathrooms, move_in, lease, features, tags_zh, tags_en,
-          description_zh, description_en, poster_role, expires_on, published_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'USD', $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17, $18, $19, NOW())
+        bedrooms, bathrooms, square_feet, move_in, lease, features, tags_zh, tags_en,
+        description_zh, description_en, poster_role, expires_on, published_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'USD', $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18, $19, $20, NOW())
       `, [
         id,
         ownerId,
@@ -379,6 +387,7 @@ export async function POST(request: Request) {
         input.price,
         input.bedrooms,
         input.bathrooms,
+        input.squareFeet,
         input.moveIn,
         input.lease,
         JSON.stringify(input.features),
@@ -414,6 +423,7 @@ export async function POST(request: Request) {
       price: input.price,
       bedrooms: input.bedrooms,
       bathrooms: input.bathrooms,
+      square_feet: input.squareFeet,
       move_in: input.moveIn,
       lease: input.lease,
       features: input.features,
