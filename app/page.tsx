@@ -17,6 +17,7 @@ import { configureWeChatShare, isWeChatBrowser, toAbsoluteUrl } from "./lib/wech
 import { buildLocalCompareSummary, CompareListingFacts, CompareSummaryContent } from "./lib/compare-summary";
 import { DEFAULT_LOCATION_LOOKUP_OPTIONS, LOCATION_LOOKUP_OPTIONS, MAX_LOCATION_LOOKUP_OPTIONS } from "./lib/location-context";
 import type { LocationContext, LocationLookupOption } from "./lib/location-context";
+import portraitStyles from "./components/AgentPortrait.module.css";
 
 type Locale = "zh" | "en";
 type RentalType = "all" | "entire" | "privateRoom" | "sublet";
@@ -106,6 +107,7 @@ type AgentProfile = {
   id: string;
   displayNameZh: string;
   displayNameEn: string;
+  portraitUrl: string;
   brokerage: string;
   licenseState: string;
   licenseNumber: string;
@@ -3880,7 +3882,7 @@ export default function HomePage() {
                       {!agentProfilesLoading && !agentProfilesError && agentProfiles.length > 0 && <div className="agent-profile-options" role="radiogroup" aria-label={locale === "zh" ? "选择经纪" : "Choose an agent"}>
                         {agentProfiles.map((profile) => <label className={`agent-profile-option ${draft.agentProfileId === profile.id ? "active" : ""}`} key={profile.id}>
                           <input type="radio" name="agent-profile" value={profile.id} checked={draft.agentProfileId === profile.id} onChange={() => updateDraft({ agentProfileId: profile.id })} />
-                          <span className="agent-profile-copy"><span className="agent-profile-topline"><strong>{locale === "zh" ? profile.displayNameZh : profile.displayNameEn}</strong><span className={`agent-verification-chip ${profile.isVerified ? "verified" : "sample"}`}>{profile.isVerified ? (locale === "zh" ? "已核验" : "Verified") : (locale === "zh" ? "示例档案" : "Sample profile")}</span></span><small>{profile.brokerage} · {profile.licenseState} {profile.licenseNumber}</small><p>{profile.serviceAreas.slice(0, 3).join(" · ")} · {profile.languages.join(" / ")}</p></span>
+                          <span className={portraitStyles.profileOptionBody}><span className={portraitStyles.profileAvatar} aria-hidden="true">{profile.portraitUrl ? <Image src={profile.portraitUrl} alt="" width={42} height={42} unoptimized /> : (locale === "zh" ? profile.displayNameZh : profile.displayNameEn).slice(0, 1)}</span><span className="agent-profile-copy"><span className="agent-profile-topline"><strong>{locale === "zh" ? profile.displayNameZh : profile.displayNameEn}</strong><span className={`agent-verification-chip ${profile.isVerified ? "verified" : "sample"}`}>{profile.isVerified ? (locale === "zh" ? "已核验" : "Verified") : (locale === "zh" ? "示例档案" : "Sample profile")}</span></span><small>{profile.brokerage} · {profile.licenseState} {profile.licenseNumber}</small><p>{profile.serviceAreas.slice(0, 3).join(" · ")} · {profile.languages.join(" / ")}</p></span></span>
                         </label>)}
                       </div>}
                       {!agentProfilesLoading && !agentProfilesError && agentProfiles.length === 0 && <div className="agent-profile-empty" role="note"><strong>{locale === "zh" ? "暂时没有可选经纪" : "No agents are available yet"}</strong><p>{locale === "zh" ? "你仍然可以提交匹配请求；经纪目录准备好后，再选择具体人选。" : "You can still submit a matching request and choose a specific agent when the directory is ready."}</p></div>}

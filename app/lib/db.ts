@@ -140,6 +140,8 @@ export async function ensureDatabaseSchema() {
         verification_submitted_at TIMESTAMPTZ,
         verification_reviewed_at TIMESTAMPTZ,
         verification_note TEXT NOT NULL DEFAULT '',
+        portrait_key TEXT NOT NULL DEFAULT '',
+        portrait_url TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -147,6 +149,8 @@ export async function ensureDatabaseSchema() {
     await sql.query("ALTER TABLE rental_agent_profiles ADD COLUMN IF NOT EXISTS verification_submitted_at TIMESTAMPTZ");
     await sql.query("ALTER TABLE rental_agent_profiles ADD COLUMN IF NOT EXISTS verification_reviewed_at TIMESTAMPTZ");
     await sql.query("ALTER TABLE rental_agent_profiles ADD COLUMN IF NOT EXISTS verification_note TEXT NOT NULL DEFAULT ''");
+    await sql.query("ALTER TABLE rental_agent_profiles ADD COLUMN IF NOT EXISTS portrait_key TEXT NOT NULL DEFAULT ''");
+    await sql.query("ALTER TABLE rental_agent_profiles ADD COLUMN IF NOT EXISTS portrait_url TEXT NOT NULL DEFAULT ''");
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_listing_private_details (
         listing_id TEXT PRIMARY KEY REFERENCES rental_listings(id) ON DELETE CASCADE,

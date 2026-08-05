@@ -1,0 +1,160 @@
+.accountAvatarLarge {
+  display: grid;
+  place-items: center;
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--lime);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.accountAvatarLarge img,
+.preview img,
+.adminReview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.uploadPanel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--blue-wash);
+}
+
+.preview {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--lime);
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.copy strong {
+  font-size: 11px;
+}
+
+.copy small,
+.adminReview p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.picker {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  margin-top: 3px;
+  cursor: pointer;
+}
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.status {
+  color: var(--blue-dark) !important;
+  font-weight: 700;
+}
+
+.error {
+  color: #8c3d25 !important;
+}
+
+.adminReview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: var(--blue-wash);
+}
+
+.adminReview img {
+  flex: 0 0 72px;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+}
+
+.adminReview strong {
+  display: block;
+  font-size: 11px;
+}
+
+.profileOptionBody {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.profileAvatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--lime);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.profileAvatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profileOptionBody :global(.agent-profile-copy) {
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .uploadPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .preview {
+    width: 64px;
+    height: 64px;
+  }
+}

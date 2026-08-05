@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import Image from "next/image";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { listingLimitFor } from "../lib/account-types";
 import { toChineseLocationLabel } from "../lib/location-labels";
+import portraitStyles from "./AgentPortrait.module.css";
 
 type Locale = "zh" | "en";
 type DashboardTab = "listings" | "inquiries" | "agentRequests";
@@ -24,6 +26,7 @@ type AgentVerificationApplication = {
   licenseState: string;
   licenseNumber: string;
   brokerage: string;
+  portraitUrl: string;
   submittedAt: string | null;
   reviewedAt: string | null;
   reviewNote: string;
@@ -111,6 +114,9 @@ type AccountDrawerProps = {
   onAgentRequestDecision: (id: string, status: "accepted" | "declined") => void;
 };
 
+const AGENT_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024;
+const AGENT_PORTRAIT_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
 function CloseIcon({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -147,6 +153,10 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   const [verificationSaving, setVerificationSaving] = useState(false);
   const [verificationError, setVerificationError] = useState("");
   const [verificationSuccess, setVerificationSuccess] = useState(false);
+  const [portraitFile, setPortraitFile] = useState<File | null>(null);
+  const [portraitPreviewUrl, setPortraitPreviewUrl] = useState("");
+  const [portraitUploadStatus, setPortraitUploadStatus] = useState<"idle" | "uploading" | "uploaded">("idle");
+  const [portraitUploadError, setPortraitUploadError] = useState("");
   const handleProfileSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setProfileSaving(true);
@@ -195,23 +205,67 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
       .finally(() => { if (!cancelled) setVerificationLoading(false); });
     return () => { cancelled = true; };
   }, [user.accountType]);
+  useEffect(() => {
+    return () => {
+      if (portraitPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(portraitPreviewUrl);
+    };
+  }, [portraitPreviewUrl]);
+  const handlePortraitChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = "";
+    setPortraitUploadError("");
+    setPortraitUploadStatus("idle");
+    if (!file) return;
+    if (!AGENT_PORTRAIT_TYPES.has(file.type)) {
+      setPortraitFile(null);
+      setPortraitUploadError(zh ? "请选择 JPEG、PNG 或 WebP 图片。" : "Choose a JPEG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size > AGENT_PORTRAIT_MAX_BYTES) {
+      setPortraitFile(null);
+      setPortraitUploadError(zh ? "头像图片需要小于 8 MB。" : "The portrait must be 8 MB or smaller.");
+      return;
+    }
+    setPortraitFile(file);
+    setPortraitPreviewUrl(URL.createObjectURL(file));
+  };
+  const uploadAgentPortrait = async () => {
+    if (!portraitFile) return "";
+    setPortraitUploadStatus("uploading");
+    const presignResponse = await fetch("/api/media/presign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ purpose: "agentPortrait", filename: portraitFile.name, contentType: portraitFile.type, size: portraitFile.size }),
+    });
+    const presign = await presignResponse.json().catch(() => ({})) as { error?: string; key?: string; uploadUrl?: string };
+    if (!presignResponse.ok || !presign.key || !presign.uploadUrl) throw new Error(presign.error || (zh ? "头像上传准备失败。" : "The portrait upload could not be prepared."));
+    const uploadResponse = await fetch(presign.uploadUrl, { method: "PUT", headers: { "Content-Type": portraitFile.type }, body: portraitFile });
+    if (!uploadResponse.ok) throw new Error(zh ? "头像上传失败，请检查 R2 设置后重试。" : "The portrait upload failed. Check the R2 settings and try again.");
+    setPortraitUploadStatus("uploaded");
+    return presign.key;
+  };
   const handleAgentVerificationSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setVerificationSaving(true);
     setVerificationError("");
     setVerificationSuccess(false);
     try {
+      const portraitKey = await uploadAgentPortrait();
       const response = await fetch("/api/agent-verification", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ licenseState: verificationState, licenseNumber: verificationNumber, brokerage: verificationBrokerage }),
+        body: JSON.stringify({ licenseState: verificationState, licenseNumber: verificationNumber, brokerage: verificationBrokerage, portraitKey: portraitKey || undefined }),
       });
       const result = await response.json() as { error?: string; application?: AgentVerificationApplication | null };
       if (!response.ok) throw new Error(result.error || (zh ? "执照核验资料暂时无法提交。" : "Agent verification could not be submitted."));
       setVerificationApplication(result.application || null);
+      setPortraitFile(null);
+      setPortraitPreviewUrl("");
+      setPortraitUploadStatus("idle");
       setVerificationSuccess(true);
       onAgentVerificationStatusChange("pending");
     } catch (error) {
+      setPortraitUploadStatus("idle");
       setVerificationError(error instanceof Error ? error.message : (zh ? "执照核验资料暂时无法提交。" : "Agent verification could not be submitted."));
     } finally {
       setVerificationSaving(false);
@@ -226,7 +280,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <button className="drawer-close" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}><CloseIcon /></button>
           </div>
           <div className="account-identity">
-            <div className="account-avatar-large" aria-hidden="true">{initial}</div>
+            <div className={portraitStyles.accountAvatarLarge} aria-hidden="true">{verificationApplication?.portraitUrl ? <Image src={verificationApplication.portraitUrl} alt="" width={46} height={46} unoptimized /> : initial}</div>
             <div><h2 id="account-title">{user.displayName}</h2><p>{user.email}</p><div className="account-verification"><span className={`status-chip ${user.emailVerified ? "published" : "unpublished"}`}>{user.emailVerified ? (zh ? "邮箱已验证" : "Email verified") : (zh ? "邮箱未验证" : "Email not verified")}</span>{user.accountType === "agent" && <span className={`status-chip ${user.agentVerified ? "published" : user.agentVerificationStatus === "rejected" || user.agentVerificationStatus === "expired" ? "expired" : "unpublished"}`}>{agentStatusLabel}</span>}{!user.emailVerified && <button className="text-button" type="button" onClick={onResendVerification} disabled={resendLoading}>{resendLoading ? (zh ? "发送中…" : "Sending…") : (zh ? "重新发送" : "Resend")}</button>}</div></div>
           </div>
           {user.role === "admin" && <Link className="admin-access-panel" href="/admin/agent-verifications" onClick={onClose}>
@@ -261,6 +315,20 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
               <label className="profile-field"><span className="profile-field-label">{zh ? "执照州" : "License state"}</span><input value={verificationState} onChange={(event) => setVerificationState(event.target.value.toUpperCase())} maxLength={2} placeholder="NY" required /></label>
               <label className="profile-field"><span className="profile-field-label">{zh ? "执照编号" : "License number"}</span><input value={verificationNumber} onChange={(event) => setVerificationNumber(event.target.value)} maxLength={40} placeholder={zh ? "例如 NY-123456789" : "e.g. NY-123456789"} required /></label>
               <label className="profile-field"><span className="profile-field-label">{zh ? "所属经纪公司" : "Brokerage"}</span><input value={verificationBrokerage} onChange={(event) => setVerificationBrokerage(event.target.value)} maxLength={120} placeholder={zh ? "执照登记的经纪公司" : "Brokerage listed on the license"} required /></label>
+              <div className={portraitStyles.uploadPanel}>
+                <div className={portraitStyles.preview} aria-label={zh ? "经纪头像预览" : "Agent portrait preview"}>
+                  {(portraitPreviewUrl || verificationApplication?.portraitUrl) ? <Image src={portraitPreviewUrl || verificationApplication?.portraitUrl || ""} alt="" width={72} height={72} unoptimized /> : <span>{initial}</span>}
+                </div>
+                <div className={portraitStyles.copy}>
+                  <strong>{zh ? "经纪头像（可选）" : "Agent portrait (optional)"}</strong>
+                  <small>{zh ? "上传一张清晰、专业的正面照片；核验通过后会显示在经纪目录中。" : "Add a clear, professional headshot. It will appear in the agent directory after approval."}</small>
+                  <label className={`outline-button ${portraitStyles.picker}`} htmlFor="agent-portrait-file">{portraitFile ? (zh ? "更换照片" : "Change photo") : (zh ? "选择照片" : "Choose photo")}</label>
+                  <input className={portraitStyles.fileInput} id="agent-portrait-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePortraitChange} />
+                  {portraitUploadStatus === "uploading" && <small className={portraitStyles.status} role="status">{zh ? "正在上传头像…" : "Uploading portrait…"}</small>}
+                  {portraitUploadStatus === "uploaded" && <small className={portraitStyles.status} role="status">{zh ? "头像已上传，提交核验后保存。" : "Portrait uploaded; it will be saved with this submission."}</small>}
+                  {portraitUploadError && <small className={portraitStyles.error} role="alert">{portraitUploadError}</small>}
+                </div>
+              </div>
               <p className="field-help">{verificationLoading ? (zh ? "正在读取已保存的核验资料…" : "Loading saved verification details…") : (zh ? "目前先收集执照州、编号和经纪公司；管理员会在公开州记录中核对后更新状态。" : "We collect the state, license number, and brokerage first; an admin updates the status after checking public state records.")}</p>
               <button className="outline-button" type="submit" disabled={verificationSaving || verificationLoading}>{verificationSaving ? (zh ? "提交中…" : "Submitting…") : (user.agentVerificationStatus === "pending" ? (zh ? "更新核验资料" : "Update verification") : (zh ? "提交核验资料" : "Submit for review"))}</button>
             </form>}
