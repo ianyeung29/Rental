@@ -168,6 +168,24 @@ export async function sendAgentRequestResponse(input: AgentRequestNotificationIn
   if (error) throw new EmailError("Resend could not send the agent request response.", 502);
 }
 
+export async function sendSavedSearchAlert(input: { email: string; displayName: string; location: string; listingTitles: string[] }) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const name = escapeHtml(input.displayName || "租客");
+  const location = escapeHtml(input.location || "你保存的搜索条件");
+  const titles = input.listingTitles.slice(0, 8).map((title) => escapeHtml(title));
+  const listingText = titles.join("\n");
+  const listingHtml = titles.map((title) => `<li>${title}</li>`).join("");
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.email],
+    subject: `安居搜索提醒 · ${input.listingTitles.length} 套新房源`,
+    text: `你好 ${input.displayName || "租客"}，\n\n你的搜索「${input.location || "已保存条件"}」发现了 ${input.listingTitles.length} 套新房源：\n${listingText}\n\n打开安居继续查看：${appUrl}/#rentals`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">你的搜索有新房源</h1><p style="font-size:15px;line-height:1.7">你好 ${name}，搜索「${location}」发现了 ${input.listingTitles.length} 套新房源。</p><ul style="padding:16px 16px 16px 34px;background:#edf3ff;font-size:13px;line-height:1.8">${listingHtml}</ul><p style="margin:28px 0"><a href="${appUrl}/#rentals" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看新房源</a></p></main></body></html>`,
+  });
+  if (error) throw resendFailure(error, "Resend could not send the saved search alert.");
+}
+
 type PublicMessageInput = {
   name: string;
   email: string;

@@ -54,6 +54,7 @@ export async function ensureDatabaseSchema() {
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_saved_searches (
         user_id TEXT PRIMARY KEY REFERENCES rental_users(id) ON DELETE CASCADE,
+        label TEXT NOT NULL DEFAULT '我的搜索',
         location TEXT NOT NULL DEFAULT '',
         min_price NUMERIC(12, 2),
         max_price NUMERIC(12, 2),
@@ -63,6 +64,8 @@ export async function ensureDatabaseSchema() {
         move_in TEXT NOT NULL DEFAULT '',
         features JSONB NOT NULL DEFAULT '[]'::jsonb,
         sort_mode TEXT NOT NULL DEFAULT 'fit',
+        alert_frequency TEXT NOT NULL DEFAULT 'off',
+        last_alert_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -70,6 +73,9 @@ export async function ensureDatabaseSchema() {
     await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS min_price NUMERIC(12, 2)");
     await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS bedrooms TEXT NOT NULL DEFAULT ''");
     await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS bathrooms TEXT NOT NULL DEFAULT ''");
+    await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '我的搜索'");
+    await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS alert_frequency TEXT NOT NULL DEFAULT 'off'");
+    await sql.query("ALTER TABLE rental_saved_searches ADD COLUMN IF NOT EXISTS last_alert_at TIMESTAMPTZ");
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_listing_drafts (
         user_id TEXT PRIMARY KEY REFERENCES rental_users(id) ON DELETE CASCADE,
@@ -209,6 +215,8 @@ export async function ensureDatabaseSchema() {
         tour_preference TEXT NOT NULL,
         message TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'sent',
+        owner_read_at TIMESTAMPTZ,
+        requester_read_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -226,6 +234,46 @@ export async function ensureDatabaseSchema() {
         UNIQUE (listing_id, reporter_id)
       )
     `);
+    await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS owner_read_at TIMESTAMPTZ");
+    await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS requester_read_at TIMESTAMPTZ");
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_notifications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES rental_users(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        title_zh TEXT NOT NULL,
+        title_en TEXT NOT NULL,
+        body_zh TEXT NOT NULL DEFAULT '',
+        body_en TEXT NOT NULL DEFAULT '',
+        link TEXT NOT NULL DEFAULT '',
+        read_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_listing_events (
+        id TEXT PRIMARY KEY,
+        listing_id TEXT NOT NULL REFERENCES rental_listings(id) ON DELETE CASCADE,
+        user_id TEXT REFERENCES rental_users(id) ON DELETE SET NULL,
+        event_type TEXT NOT NULL,
+        session_key TEXT NOT NULL DEFAULT '',
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_listing_promotions (
+        id TEXT PRIMARY KEY,
+        listing_id TEXT NOT NULL REFERENCES rental_listings(id) ON DELETE CASCADE,
+        requester_id TEXT NOT NULL REFERENCES rental_users(id) ON DELETE CASCADE,
+        package TEXT NOT NULL DEFAULT 'featured',
+        status TEXT NOT NULL DEFAULT 'requested',
+        price_cents INTEGER NOT NULL DEFAULT 0,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_location_context_cache (
         cache_key TEXT PRIMARY KEY,
@@ -241,11 +289,18 @@ export async function ensureDatabaseSchema() {
     await sql.query("CREATE INDEX IF NOT EXISTS rental_email_verifications_user_idx ON rental_email_verifications(user_id, expires_at)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_listings_user_idx ON rental_saved_listings(user_id, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_listings_listing_idx ON rental_saved_listings(listing_id, created_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_searches_alert_idx ON rental_saved_searches(alert_frequency, last_alert_at)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_drafts_updated_idx ON rental_listing_drafts(updated_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listings_owner_idx ON rental_listings(owner_id, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listings_public_lifecycle_idx ON rental_listings(status, expires_on, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_inquiries_requester_idx ON rental_inquiries(requester_id, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_inquiries_listing_idx ON rental_inquiries(listing_id, created_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_notifications_user_idx ON rental_notifications(user_id, read_at, created_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_events_listing_idx ON rental_listing_events(listing_id, event_type, created_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_events_user_idx ON rental_listing_events(user_id, created_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_promotions_requester_idx ON rental_listing_promotions(requester_id, status, updated_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_promotions_status_idx ON rental_listing_promotions(status, updated_at DESC)");
+    await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS rental_listing_promotions_active_idx ON rental_listing_promotions(listing_id) WHERE status IN ('requested', 'active')");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_reports_status_idx ON rental_listing_reports(status, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listings_status_created_idx ON rental_listings(status, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_media_listing_idx ON rental_listing_media(listing_id, sort_order)");
