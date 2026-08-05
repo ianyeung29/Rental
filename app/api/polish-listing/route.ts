@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../lib/auth";
-import { buildLocationContext } from "../../lib/location-context";
-import type { LocationContext } from "../../lib/location-context";
+import { buildLocationContext, DEFAULT_LOCATION_LOOKUP_OPTIONS, normalizeLocationLookupOptions } from "../../lib/location-context";
+import type { LocationContext, LocationLookupOption } from "../../lib/location-context";
 import { hasRestrictedHousingLanguage } from "../../lib/safety";
 
 type ListingInput = {
@@ -20,6 +20,7 @@ type ListingInput = {
   features?: unknown;
   descriptionEn?: unknown;
   descriptionZh?: unknown;
+  locationLookupOptions?: unknown;
 };
 
 type NormalizedListing = {
@@ -38,6 +39,7 @@ type NormalizedListing = {
   features: string[];
   descriptionEn: string;
   descriptionZh: string;
+  locationLookupOptions: LocationLookupOption[];
   locationContext: LocationContext | null;
 };
 
@@ -101,6 +103,7 @@ function normalizeInput(input: ListingInput): NormalizedListing {
     features: textList(input.features),
     descriptionEn: text(input.descriptionEn),
     descriptionZh: text(input.descriptionZh),
+    locationLookupOptions: normalizeLocationLookupOptions(input.locationLookupOptions, DEFAULT_LOCATION_LOOKUP_OPTIONS),
     locationContext: null,
   };
 }
@@ -215,6 +218,7 @@ export async function POST(request: Request) {
       boroughEn: input.boroughEn,
       boroughZh: input.boroughZh,
       locale: input.locale,
+      lookupOptions: input.locationLookupOptions,
     });
   } catch {
     input.locationContext = {
@@ -222,7 +226,9 @@ export async function POST(request: Request) {
       approximateArea: input.areaZh || input.areaEn,
       nearby: [],
       transit: [],
+      lookupOptions: input.locationLookupOptions,
       notes: [input.locale === "zh" ? "地图服务暂时不可用；AI不会编造附近设施或交通时间。" : "Map context is temporarily unavailable; AI will not invent nearby places or travel times."],
+      cached: false,
     };
   }
 

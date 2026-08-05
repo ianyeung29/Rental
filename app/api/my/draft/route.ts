@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
+import { LOCATION_LOOKUP_OPTIONS, MAX_LOCATION_LOOKUP_OPTIONS } from "../../../lib/location-context";
 
 const MAX_BODY_LENGTH = 28_000;
 const DRAFT_FIELDS = [
   "titleEn", "titleZh", "areaEn", "areaZh", "areaGroupId", "areaLocationId", "privateAddress", "posterRole", "rentalType", "price", "currency",
   "bedrooms", "bathrooms", "moveInMode", "moveInDate", "lease", "features", "descriptionEn", "descriptionZh",
-  "photos", "photoKeys", "contactName", "contactEmail", "tourPreference", "agentService", "agentFeePlan", "agentFeeAmount", "agentProfileId", "expiresOn",
+  "photos", "photoKeys", "locationLookupOptions", "contactName", "contactEmail", "tourPreference", "agentService", "agentFeePlan", "agentFeeAmount", "agentProfileId", "expiresOn",
 ] as const;
 
 async function verifiedUser() {
@@ -27,10 +28,10 @@ function draftFromValue(value: unknown) {
   const draft: Record<string, unknown> = {};
   for (const field of DRAFT_FIELDS) {
     const fieldValue = source[field];
-    if (field === "features" || field === "photos" || field === "photoKeys") {
+    if (field === "features" || field === "photos" || field === "photoKeys" || field === "locationLookupOptions") {
       draft[field] = Array.isArray(fieldValue)
-        ? fieldValue.filter((item): item is string => typeof item === "string").map((item) => item.trim().slice(0, 2_000)).filter(Boolean).slice(0, 20)
-        : [];
+        ? fieldValue.filter((item): item is string => typeof item === "string" && (field !== "locationLookupOptions" || LOCATION_LOOKUP_OPTIONS.includes(item as typeof LOCATION_LOOKUP_OPTIONS[number]))).map((item) => item.trim().slice(0, 2_000)).filter(Boolean).slice(0, field === "locationLookupOptions" ? MAX_LOCATION_LOOKUP_OPTIONS : 20)
+        : field === "locationLookupOptions" ? ["grocery", "transit"] : [];
     } else if (fieldValue !== undefined) {
       draft[field] = text(fieldValue, field === "privateAddress" ? 500 : field === "descriptionZh" || field === "descriptionEn" ? 2_500 : 240);
     }
