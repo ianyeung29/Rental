@@ -22,7 +22,10 @@ R2_ACCESS_KEY_ID=<staging-access-key>
 R2_SECRET_ACCESS_KEY=<staging-secret-key>
 R2_PUBLIC_URL=https://<staging-public-r2-domain>
 RESEND_API_KEY=<sending-only-key>
-RESEND_FROM_EMAIL=Rentals <noreply@verified-domain.example>
+RESEND_FROM_EMAIL=Anjurentals <noreply@verified-domain.example>
+SITE_CONTACT_EMAIL=<operations-inbox>
+CONTACT_RECIPIENT_EMAIL=<optional-contact-inbox>
+FEEDBACK_RECIPIENT_EMAIL=<optional-feedback-inbox>
 APP_URL=https://<staging-domain>
 GOOGLE_CLIENT_ID=<staging-client-id>
 GOOGLE_CLIENT_SECRET=<staging-client-secret>
@@ -38,7 +41,8 @@ OPENAI_REASONING_EFFORT=low
 2. Configure R2 CORS for the exact staging origin and allow browser `PUT` uploads only to the staging bucket/prefix.
 3. Add the exact staging Google callback URL to the OAuth client.
 4. Set `APP_URL` to the public HTTPS staging URL so verification and inquiry emails point to the right place.
-5. Run `npm run db:seed` against staging only if synthetic inventory is wanted for QA.
+5. Set `SITE_CONTACT_EMAIL` (or the two explicit recipient overrides) so the public contact and feedback forms can deliver through Resend.
+6. Run `npm run db:seed` against staging only if synthetic inventory is wanted for QA.
 
 ## Smoke test after deploy
 

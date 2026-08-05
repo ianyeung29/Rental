@@ -46,7 +46,7 @@ export default function AuthDrawer({ locale, mode, loading, error, onGoogleLogin
             <span className="section-label">{isRegister ? (zh ? "创建账户" : "CREATE ACCOUNT") : (zh ? "账户登录" : "ACCOUNT SIGN IN")}</span>
             <button className="drawer-close" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}><CloseIcon /></button>
           </div>
-          <h2 id="auth-title">{isRegister ? (zh ? "建立你的租住账户" : "Create your rental account") : (zh ? "欢迎回来" : "Welcome back")}</h2>
+          <h2 id="auth-title">{isRegister ? (zh ? "建立你的安居账户" : "Create your Anjurentals account") : (zh ? "欢迎回来" : "Welcome back")}</h2>
           <p className="drawer-intro">{isRegister ? (zh ? "账户可以保存你的房源、草稿和咨询记录。" : "Your account keeps listings, drafts, and inquiries connected across devices.") : (zh ? "登录后可以发布房源、管理房源并查看咨询。" : "Sign in to publish listings, manage your rentals, and see inquiries.")}</p>
           <form className="auth-form" onSubmit={onSubmit}>
             {isRegister && <label className="field-label" htmlFor="auth-name">{zh ? "姓名" : "Name"}<input id="auth-name" name="displayName" autoComplete="name" required placeholder={zh ? "请输入姓名" : "Your name"} /></label>}
