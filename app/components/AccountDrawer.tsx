@@ -287,6 +287,10 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <span><strong>{zh ? "管理员工作台" : "Admin workspace"}</strong><small>{zh ? "查看并处理经纪身份核验申请。" : "Review and decide agent identity applications."}</small></span>
             <b aria-hidden="true">→</b>
           </Link>}
+          {user.role === "admin" && <Link className="admin-access-panel" href="/admin/promotions" onClick={onClose}>
+            <span><strong>{zh ? "房源推广队列" : "Promotion queue"}</strong><small>{zh ? "处理房主提交的推广申请，未来可接入付款。" : "Review owner promotion requests before payment is added."}</small></span>
+            <b aria-hidden="true">→</b>
+          </Link>}
           <section className="account-profile-panel" aria-labelledby="private-profile-title">
             <div className="account-profile-heading">
               <div><span className="section-label">{zh ? "私密资料" : "PRIVATE PROFILE"}</span><h3 id="private-profile-title">{zh ? "我的资料" : "My profile"}</h3><p>{zh ? "仅你可见，不会出现在公开房源页。" : "Private to your account; it is not shown on public listings."}</p></div>

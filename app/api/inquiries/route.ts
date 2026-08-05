@@ -23,6 +23,9 @@ function inquiryFromRow(row: Record<string, unknown>, received: boolean) {
     tourPreference: String(row.tour_preference || ""),
     message: String(row.message || ""),
     status: String(row.status || "sent"),
+    readAt: (received ? row.owner_read_at : row.requester_read_at) instanceof Date
+      ? (received ? row.owner_read_at as Date : row.requester_read_at as Date).toISOString()
+      : (received ? row.owner_read_at : row.requester_read_at) ? String(received ? row.owner_read_at : row.requester_read_at) : null,
     ...(received ? { requesterName: String(row.requester_name || ""), requesterEmail: String(row.requester_email || "") } : {}),
   };
 }
@@ -43,7 +46,7 @@ export async function GET(request: Request) {
     const rows = received
       ? await sql.query(`
           SELECT i.id, i.listing_id, i.move_in, i.lease_length, i.occupants, i.pets,
-                 i.tour_preference, i.message, i.status, i.created_at,
+                 i.tour_preference, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at,
                  l.title_zh, l.title_en, u.display_name AS requester_name, u.email AS requester_email
           FROM rental_inquiries i
           JOIN rental_listings l ON l.id = i.listing_id
@@ -53,7 +56,7 @@ export async function GET(request: Request) {
         `, [user.id])
       : await sql.query(`
           SELECT i.id, i.listing_id, i.move_in, i.lease_length, i.occupants, i.pets,
-                 i.tour_preference, i.message, i.status, i.created_at, l.title_zh, l.title_en
+                 i.tour_preference, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at, l.title_zh, l.title_en
           FROM rental_inquiries i
           JOIN rental_listings l ON l.id = i.listing_id
           WHERE i.requester_id = $1
@@ -103,6 +106,12 @@ export async function POST(request: Request) {
       INSERT INTO rental_inquiries (id, listing_id, requester_id, move_in, lease_length, occupants, pets, tour_preference, message)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `, [id, listingId, user.id, moveIn, leaseLength, occupants, pets, tourPreference, message]);
+    if (listing.owner_id && String(listing.owner_id) !== user.id) {
+      await sql.query(`
+        INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
+        VALUES ($1, $2, 'inquiry', '收到新的房源咨询', 'New listing inquiry', $3, $4, '/#messages')
+      `, [`notification-${randomUUID()}`, String(listing.owner_id), `有人咨询了「${String(listing.title_zh || listing.title_en || "你的房源")}」。`, `Someone sent an inquiry about “${String(listing.title_en || listing.title_zh || "your listing")}”.`]);
+    }
     const emailInput = {
       recipientEmail: String(listing.contact_email || ""),
       recipientName: String(listing.contact_name || "房源发布者"),

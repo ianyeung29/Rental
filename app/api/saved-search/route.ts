@@ -32,9 +32,11 @@ const ALLOWED_FEATURES = new Set([
   "nearTransit",
   "shortTerm",
 ]);
+const ALLOWED_ALERT_FREQUENCIES = new Set(["off", "daily"]);
 
 function snapshotFromRow(row: Record<string, unknown>) {
   return {
+    label: String(row.label || "我的搜索"),
     location: String(row.location || ""),
     minPrice: row.min_price === null || row.min_price === undefined ? "" : String(row.min_price),
     maxPrice: row.max_price === null || row.max_price === undefined ? "" : String(row.max_price),
@@ -44,6 +46,7 @@ function snapshotFromRow(row: Record<string, unknown>) {
     moveIn: String(row.move_in || ""),
     activeFeatures: Array.isArray(row.features) ? row.features.filter((feature): feature is string => typeof feature === "string") : [],
     sortMode: String(row.sort_mode || "fit"),
+    alertFrequency: String(row.alert_frequency || "off"),
     updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at || ""),
   };
 }
@@ -62,7 +65,9 @@ function normalizeSnapshot(body: Record<string, unknown>) {
     ? body.activeFeatures.filter((feature): feature is string => typeof feature === "string" && ALLOWED_FEATURES.has(feature)).slice(0, 20)
     : [];
   const sortMode = typeof body.sortMode === "string" && ALLOWED_SORT_MODES.has(body.sortMode) ? body.sortMode : "fit";
-  return { location, minPrice, maxPrice, bedrooms, bathrooms, rentalType, moveIn, activeFeatures, sortMode };
+  const alertFrequency = typeof body.alertFrequency === "string" && ALLOWED_ALERT_FREQUENCIES.has(body.alertFrequency) ? body.alertFrequency : "off";
+  const label = typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 60) : "我的搜索";
+  return { label, location, minPrice, maxPrice, bedrooms, bathrooms, rentalType, moveIn, activeFeatures, sortMode, alertFrequency };
 }
 
 async function verifiedUser() {
@@ -78,7 +83,7 @@ export async function GET() {
     const result = await verifiedUser();
     if (result.error) return result.error;
     await ensureDatabaseSchema();
-    const rows = await sql!.query("SELECT location, min_price, max_price, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, updated_at FROM rental_saved_searches WHERE user_id = $1 LIMIT 1", [result.user.id]);
+    const rows = await sql!.query("SELECT label, location, min_price, max_price, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, alert_frequency, updated_at FROM rental_saved_searches WHERE user_id = $1 LIMIT 1", [result.user.id]);
     return NextResponse.json(rows[0] ? snapshotFromRow(rows[0] as Record<string, unknown>) : null);
   } catch {
     return NextResponse.json({ error: "Saved search could not be loaded right now." }, { status: 502 });
@@ -94,9 +99,10 @@ export async function PUT(request: Request) {
     const snapshot = normalizeSnapshot(JSON.parse(rawBody) as Record<string, unknown>);
     await ensureDatabaseSchema();
     const rows = await sql!.query(`
-      INSERT INTO rental_saved_searches (user_id, location, min_price, max_price, bedrooms, bathrooms, rental_type, move_in, features, sort_mode)
-      VALUES ($1, $2, NULLIF($3, '')::numeric, NULLIF($4, '')::numeric, $5, $6, $7, $8, $9::jsonb, $10)
+      INSERT INTO rental_saved_searches (user_id, label, location, min_price, max_price, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, alert_frequency)
+      VALUES ($1, $2, $3, NULLIF($4, '')::numeric, NULLIF($5, '')::numeric, $6, $7, $8, $9, $10::jsonb, $11, $12)
       ON CONFLICT (user_id) DO UPDATE SET
+        label = EXCLUDED.label,
         location = EXCLUDED.location,
         min_price = EXCLUDED.min_price,
         max_price = EXCLUDED.max_price,
@@ -106,9 +112,10 @@ export async function PUT(request: Request) {
         move_in = EXCLUDED.move_in,
         features = EXCLUDED.features,
         sort_mode = EXCLUDED.sort_mode,
+        alert_frequency = EXCLUDED.alert_frequency,
         updated_at = NOW()
-      RETURNING location, min_price, max_price, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, updated_at
-    `, [result.user.id, snapshot.location, snapshot.minPrice, snapshot.maxPrice, snapshot.bedrooms, snapshot.bathrooms, snapshot.rentalType, snapshot.moveIn, JSON.stringify(snapshot.activeFeatures), snapshot.sortMode]);
+      RETURNING label, location, min_price, max_price, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, alert_frequency, updated_at
+    `, [result.user.id, snapshot.label, snapshot.location, snapshot.minPrice, snapshot.maxPrice, snapshot.bedrooms, snapshot.bathrooms, snapshot.rentalType, snapshot.moveIn, JSON.stringify(snapshot.activeFeatures), snapshot.sortMode, snapshot.alertFrequency]);
     return NextResponse.json(rows[0] ? snapshotFromRow(rows[0] as Record<string, unknown>) : snapshot);
   } catch {
     return NextResponse.json({ error: "Saved search could not be saved right now." }, { status: 502 });

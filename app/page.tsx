@@ -1,12 +1,14 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import AccountDrawer from "./components/AccountDrawer";
 import AuthDrawer from "./components/AuthDrawer";
 import DetailActionDock from "./components/DetailActionDock";
 import ListingCard from "./components/ListingCard";
 import ListingGallery from "./components/ListingGallery";
+import ListingAnalyticsPanel from "./components/ListingAnalyticsPanel";
+import NotificationCenter from "./components/NotificationCenter";
 import ReportDrawer from "./components/ReportDrawer";
 import SiteFooter from "./components/SiteFooter";
 import StatusPanel from "./components/StatusPanel";
@@ -86,6 +88,7 @@ type Inquiry = {
   tourPreference: string;
   message: string;
   status: string;
+  readAt?: string | null;
 };
 
 type AuthUser = {
@@ -1593,6 +1596,7 @@ function addDaysToDateOnly(value: string, days: number) {
 
 export default function HomePage() {
   const demoMode = demoModeEnabled();
+  const stableSessionId = useId();
   const [locale, setLocale] = useState<Locale>("zh");
   const [locationInput, setLocationInput] = useState("");
   const [appliedLocation, setAppliedLocation] = useState("");
@@ -1611,6 +1615,7 @@ export default function HomePage() {
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [savedSearch, setSavedSearch] = useState(false);
   const [savedSearchSnapshot, setSavedSearchSnapshot] = useState<SearchSnapshot | null>(null);
+  const [savedAlertFrequency, setSavedAlertFrequency] = useState<"off" | "daily">("off");
   const [accountSyncReady, setAccountSyncReady] = useState(false);
   const accountSyncUserIdRef = useRef<string | null>(null);
   const [customListings, setCustomListings] = useState<Listing[]>([]);
@@ -1664,6 +1669,7 @@ export default function HomePage() {
   const [postOpen, setPostOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [messagesOpen, setMessagesOpen] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [postStep, setPostStep] = useState<PostStep>(1);
   const [postError, setPostError] = useState("");
   const [aiPolishLoading, setAiPolishLoading] = useState(false);
@@ -1680,6 +1686,7 @@ export default function HomePage() {
   const wechatBrowser = isWeChatBrowser();
   const inquirySequence = useRef(0);
   const sharedListingIdRef = useRef<string | null>(null);
+  const sessionKeyRef = useRef("");
   const t = copy[locale];
   const selectedPopularArea = POPULAR_AREA_GROUPS.find((group) => group.id === selectedPopularAreaId) || null;
   const selectedPostAreaGroup = POPULAR_AREA_GROUPS.find((group) => group.id === draft.areaGroupId) || null;
@@ -1696,6 +1703,17 @@ export default function HomePage() {
     sortMode,
   }), [activeFeatures, appliedLocation, bathrooms, bedrooms, maxPrice, minPrice, moveIn, rentalType, sortMode]);
   const savedSearchIsCurrent = Boolean(savedSearch && savedSearchSnapshot && JSON.stringify(searchSnapshot) === JSON.stringify(savedSearchSnapshot));
+  const listingQuality = useMemo(() => {
+    const checks = [
+      { key: "title", done: Boolean(draft.titleZh.trim() || draft.titleEn.trim()), zh: "标题清楚", en: "Clear title" },
+      { key: "area", done: Boolean(draft.areaZh.trim() || draft.areaEn.trim()), zh: "公开区域", en: "Public area" },
+      { key: "photos", done: draft.photos.length >= 2, zh: "至少两张照片", en: "At least two photos" },
+      { key: "features", done: draft.features.length >= 3, zh: "三个以上特点", en: "Three or more features" },
+      { key: "description", done: draft.descriptionZh.trim().length >= 80 || draft.descriptionEn.trim().length >= 80, zh: "详细介绍", en: "Detailed description" },
+      { key: "moveIn", done: draft.moveInMode === "immediate" || Boolean(draft.moveInDate), zh: "入住时间", en: "Move-in timing" },
+    ];
+    return { checks, score: Math.round((checks.filter((check) => check.done).length / checks.length) * 100) };
+  }, [draft.areaEn, draft.areaZh, draft.descriptionEn, draft.descriptionZh, draft.features.length, draft.moveInDate, draft.moveInMode, draft.photos.length, draft.titleEn, draft.titleZh]);
 
   useEffect(() => {
     if (!sharePosterUrl) return;
@@ -1905,7 +1923,7 @@ export default function HomePage() {
         }
 
         if (searchResponse.ok) {
-          const searchResult = await searchResponse.json() as (SearchSnapshot & { updatedAt?: string }) | null;
+          const searchResult = await searchResponse.json() as (SearchSnapshot & { updatedAt?: string; alertFrequency?: string }) | null;
           if (searchResult) {
             const snapshot: SearchSnapshot = {
               location: searchResult.location || "",
@@ -1929,6 +1947,7 @@ export default function HomePage() {
             setActiveFeatures(snapshot.activeFeatures);
             setSortMode(snapshot.sortMode);
             setSavedSearchSnapshot(snapshot);
+            setSavedAlertFrequency(searchResult.alertFrequency === "daily" ? "daily" : "off");
             setSavedSearch(true);
           } else if (savedSearch && savedSearchSnapshot) {
             const migrationResponse = await fetch("/api/saved-search", {
@@ -2044,7 +2063,7 @@ export default function HomePage() {
     fetch("/api/saved-search", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) return;
-        const result = await response.json() as (SearchSnapshot & { updatedAt?: string }) | null;
+        const result = await response.json() as (SearchSnapshot & { updatedAt?: string; alertFrequency?: string }) | null;
         if (!cancelled && result) {
           const snapshot: SearchSnapshot = {
             location: result.location || "",
@@ -2068,6 +2087,7 @@ export default function HomePage() {
           setActiveFeatures(snapshot.activeFeatures);
           setSortMode(snapshot.sortMode);
           setSavedSearchSnapshot(snapshot);
+          setSavedAlertFrequency(result.alertFrequency === "daily" ? "daily" : "off");
           setSavedSearch(true);
         }
       })
@@ -2155,9 +2175,23 @@ export default function HomePage() {
     window.setTimeout(() => setToast(""), 3200);
   };
 
+  const trackListingEvent = (listingId: string, eventType: "view" | "save" | "contact" | "share" | "compare") => {
+    if (!hydrated || !listingId) return;
+    if (!sessionKeyRef.current) {
+      try {
+        sessionKeyRef.current = window.localStorage.getItem("rental-marketplace.session-key") || stableSessionId;
+        window.localStorage.setItem("rental-marketplace.session-key", sessionKeyRef.current);
+      } catch {
+        sessionKeyRef.current = stableSessionId;
+      }
+    }
+    void fetch("/api/listing-events", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ listingId, eventType, sessionKey: sessionKeyRef.current }) }).catch(() => undefined);
+  };
+
   const openListing = (listing: Listing) => {
     setSelectedPhotoIndex(0);
     setSelectedListing(listing);
+    trackListingEvent(listing.id, "view");
   };
 
   const resetSharePoster = () => {
@@ -2169,6 +2203,7 @@ export default function HomePage() {
   const openShare = (listing: Listing) => {
     setSelectedListing(null);
     setShareListing(listing);
+    trackListingEvent(listing.id, "share");
     setShareFeedback("");
     resetSharePoster();
   };
@@ -2498,6 +2533,7 @@ export default function HomePage() {
 
   const toggleSaved = async (id: string) => {
     const wasSaved = savedIds.has(id);
+    trackListingEvent(id, "save");
     setSavedIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -2526,6 +2562,7 @@ export default function HomePage() {
   };
 
   const toggleCompare = (id: string) => {
+    trackListingEvent(id, "compare");
     setCompareSummary(null);
     setCompareSummaryError("");
     setCompareIds((current) => {
@@ -2614,6 +2651,7 @@ export default function HomePage() {
     if (removing) {
       setSavedSearch(false);
       setSavedSearchSnapshot(null);
+      setSavedAlertFrequency("off");
       if (currentUser?.emailVerified) {
         const response = await fetch("/api/saved-search", { method: "DELETE" }).catch(() => null);
         if (response && !response.ok) showToast(locale === "zh" ? "本地已取消保存，账户同步稍后重试" : "Removed locally; account sync can retry later");
@@ -2629,7 +2667,7 @@ export default function HomePage() {
       const response = await fetch("/api/saved-search", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(snapshot),
+        body: JSON.stringify({ ...snapshot, alertFrequency: savedAlertFrequency }),
       }).catch(() => null);
       if (response && !response.ok) showToast(locale === "zh" ? "已在本地保存，账户同步稍后重试" : "Saved locally; account sync can retry later");
       else showToast(locale === "zh" ? "搜索已保存到账户" : "Search saved to your account");
@@ -2639,6 +2677,7 @@ export default function HomePage() {
   };
 
   const openContact = (listing: Listing) => {
+    trackListingEvent(listing.id, "contact");
     setContactListing(listing);
     setSelectedInquiryComments([]);
     setInquiryError("");
@@ -2861,6 +2900,18 @@ export default function HomePage() {
       setLocationContextLoading(false);
       setAiPolishLoading(false);
     }
+  };
+
+  const updateSavedSearchAlert = async (frequency: "off" | "daily") => {
+    setSavedAlertFrequency(frequency);
+    if (!currentUser?.emailVerified || !savedSearchSnapshot) return;
+    const response = await fetch("/api/saved-search", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...savedSearchSnapshot, alertFrequency: frequency }),
+    }).catch(() => null);
+    if (!response?.ok) showToast(locale === "zh" ? "提醒设置暂时无法同步" : "Alert setting could not sync right now");
+    else showToast(frequency === "daily" ? (locale === "zh" ? "已开启每日新房源提醒" : "Daily listing alerts enabled") : (locale === "zh" ? "已关闭搜索提醒" : "Search alerts disabled"));
   };
 
   const publishLocalListing = async () => {
@@ -3366,6 +3417,18 @@ export default function HomePage() {
     await copySharePayload(`${shareText}\n${shareUrl}`, message);
   };
 
+  const updateInquiryStatus = async (id: string, status: "contacted" | "tourScheduled" | "closed") => {
+    if (!currentUser?.emailVerified) return;
+    const response = await fetch(`/api/inquiries/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) }).catch(() => null);
+    if (!response?.ok) {
+      showToast(locale === "zh" ? "咨询状态暂时无法更新" : "Inquiry status could not be updated");
+      return;
+    }
+    setServerInquiries((current) => current.map((item) => item.id === id ? { ...item, status } : item));
+    setReceivedInquiries((current) => current.map((item) => item.id === id ? { ...item, status } : item));
+    showToast(locale === "zh" ? "咨询状态已更新" : "Inquiry status updated");
+  };
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#rentals">
@@ -3391,6 +3454,8 @@ export default function HomePage() {
               <span className="language-dot" aria-hidden="true" />
               {locale === "zh" ? "English" : "中文"}
             </button>
+            {currentUser && <button className="desk-link" type="button" onClick={() => setAnalyticsOpen(true)}>{locale === "zh" ? "房源表现" : "Performance"}</button>}
+            <NotificationCenter locale={locale} authenticated={Boolean(currentUser?.emailVerified)} onRequireAuth={() => { setAuthMode("login"); setAuthOpen(true); }} />
             <button className="post-button" type="button" onClick={openPostFlow}>
               <span aria-hidden="true">+</span>
               {t.post}
@@ -3687,6 +3752,19 @@ export default function HomePage() {
         </section>
       </div>
 
+      {analyticsOpen && currentUser && (
+        <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAnalyticsOpen(false); }}>
+          <aside className="drawer analytics-drawer" role="dialog" aria-modal="true" aria-labelledby="account-analytics-title">
+            <div className="drawer-content">
+              <div className="drawer-heading"><span className="section-label">PERFORMANCE DESK</span><button className="drawer-close" type="button" onClick={() => setAnalyticsOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
+              <h2 id="account-analytics-title">{locale === "zh" ? "房源表现" : "Listing performance"}</h2>
+              <p className="drawer-intro">{locale === "zh" ? "用真实互动信号判断哪些房源需要优化、推广或跟进。" : "Use real engagement signals to decide what to improve, promote, or follow up."}</p>
+              <ListingAnalyticsPanel locale={locale} />
+            </div>
+          </aside>
+        </div>
+      )}
+
       {savedOpen && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSavedOpen(false); }}>
           <aside className="drawer form-drawer" role="dialog" aria-modal="true" aria-labelledby="saved-title">
@@ -3694,6 +3772,7 @@ export default function HomePage() {
               <div className="drawer-heading"><span className="section-label">SAVED DESK</span><button className="drawer-close" type="button" onClick={() => setSavedOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="saved-title">{locale === "zh" ? "我保存的房源" : "Saved listings"}</h2>
               <p className="drawer-intro">{currentUser?.emailVerified ? (locale === "zh" ? "收藏已同步到你的账号，可以在其他设备继续查看。" : "Saved listings sync to your account so you can continue on another device.") : (locale === "zh" ? "登录并验证邮箱后，收藏会同步到你的账号；未登录时保存在此浏览器。" : "Verify your account to sync saved listings; signed-out saves stay in this browser.")}</p>
+              {currentUser?.emailVerified && savedSearch && savedSearchSnapshot && <div className="saved-alert-panel"><div><strong>{locale === "zh" ? "搜索提醒" : "Search alerts"}</strong><p>{locale === "zh" ? "每天收到符合这组条件的新房源提醒。" : "Get a daily email when new listings match this search."}</p></div><select value={savedAlertFrequency} onChange={(event) => { void updateSavedSearchAlert(event.target.value === "daily" ? "daily" : "off"); }} aria-label={locale === "zh" ? "搜索提醒频率" : "Search alert frequency"}><option value="off">{locale === "zh" ? "关闭提醒" : "Off"}</option><option value="daily">{locale === "zh" ? "每日提醒" : "Daily"}</option></select></div>}
               {savedListings.length === 0 ? (
                 <div className="drawer-empty"><div className="empty-icon" aria-hidden="true"><HeartIcon /></div><h3>{locale === "zh" ? "还没有收藏" : "Nothing saved yet"}</h3><p>{locale === "zh" ? "在房源照片上点击心形按钮，收藏会出现在这里。" : "Use the heart button on a listing photo to save it here."}</p></div>
               ) : (
@@ -3728,6 +3807,7 @@ export default function HomePage() {
                       <div className="message-item-top"><strong>{inquiry.listingTitle}</strong><span>{new Date(inquiry.sentAt).toLocaleDateString(locale === "zh" ? "zh-CN" : "en-US")}</span></div>
                       <p>{locale === "zh" ? `入住 ${inquiry.moveIn} · ${inquiry.leaseLength} 个月 · ${inquiry.occupants} 位居住者` : `Move-in ${inquiry.moveIn} · ${inquiry.leaseLength} months · ${inquiry.occupants} occupant(s)`}</p>
                       <span className="message-status">{locale === "zh" ? "已发送 · 等待回复" : "Sent · waiting for reply"}</span>
+                      {currentUser?.emailVerified && <div className="message-actions">{!inquiry.readAt && <button className="text-button" type="button" onClick={() => { void fetch(`/api/inquiries/${encodeURIComponent(inquiry.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ read: true }) }); setServerInquiries((current) => current.map((item) => item.id === inquiry.id ? { ...item, readAt: new Date().toISOString() } : item)); }}>{locale === "zh" ? "标记已读" : "Mark read"}</button>}{inquiry.status !== "closed" && <button className="text-button" type="button" onClick={() => { void updateInquiryStatus(inquiry.id, "closed"); }}>{locale === "zh" ? "完成咨询" : "Close inquiry"}</button>}</div>}
                     </article>
                   ))}
                 </div>
@@ -3909,6 +3989,11 @@ export default function HomePage() {
                     </div>
                     <label className="field-label"><span>{locale === "zh" ? "公开至" : "Public until"}</span><input type="date" min={todayDateOnly()} value={draft.expiresOn} onChange={(event) => updateDraft({ expiresOn: event.target.value })} /></label>
                   </div>
+                  <section className="listing-quality-panel" aria-labelledby="listing-quality-title">
+                    <div className="listing-quality-heading"><div><span className="section-label">QUALITY CHECK</span><h3 id="listing-quality-title">{locale === "zh" ? "发布质量检查" : "Publishing quality check"}</h3><p>{locale === "zh" ? "补齐这些信息，租客会更容易理解和比较你的房源。" : "Complete these details so renters can understand and compare your listing faster."}</p></div><strong>{listingQuality.score}%</strong></div>
+                    <div className="listing-quality-bar"><span style={{ width: `${listingQuality.score}%` }} /></div>
+                    <div className="listing-quality-checks">{listingQuality.checks.map((check) => <span className={check.done ? "done" : "missing"} key={check.key}><span aria-hidden="true">{check.done ? "✓" : "—"}</span>{locale === "zh" ? check.zh : check.en}</span>)}</div>
+                  </section>
                   <div className="post-preview">
                   <div className="preview-photo">{draft.photos[0] ? <Image src={draft.photos[0]} alt="" fill sizes="460px" unoptimized /> : null}<span>{locale === "zh" ? "公开预览" : "Public preview"}</span></div>
                   <div className="preview-copy"><span className="listing-type">{draft.rentalType === "privateRoom" ? t.privateRoom : draft.rentalType === "sublet" ? t.sublet : t.entire}</span><h3>{draft.titleZh || (locale === "zh" ? "未命名房源" : "Untitled listing")}</h3><p className="listing-area"><PinIcon size={15} />{locale === "zh" ? toChineseLocationLabel(draft.areaZh || "大致区域") : draft.areaEn || draft.areaZh || "Approximate area"}</p><div className="price-line"><strong>{draft.price ? `$${Number(draft.price).toLocaleString("en-US")}` : "—"}</strong><span>{t.month}</span></div><p className="preview-move-in">{t.detailMoveIn}：{draft.moveInMode === "immediate" ? t.immediate : draft.moveInDate || "—"}</p><div className="tag-row">{draft.features.map((feature) => <span className="listing-tag" key={feature}>{featureLabel(feature)}</span>)}</div>{draft.agentService === "agentMatch" && <div className="agent-service-preview"><ShieldIcon size={16} /><div><strong>{selectedAgentProfile ? (locale === "zh" ? `已选择经纪：${selectedAgentProfile.displayNameZh}` : `Agent selected: ${selectedAgentProfile.displayNameEn}`) : (locale === "zh" ? "已请求经纪协助" : "Agent assistance requested")}</strong><p>{draft.agentFeePlan === "firstMonthRent" ? (locale === "zh" ? "费用意向：成交后支付一个月租金" : "Fee preference: one month’s rent after a lease") : draft.agentFeePlan === "flatFee" ? (locale === "zh" ? `费用意向：固定 $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")}` : `Fee preference: $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")} flat`) : (locale === "zh" ? "费用意向：请经纪报价" : "Fee preference: agent to quote")}</p></div></div>}<div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>精确地址不会出现在公开预览中。</p></div></div></div>
