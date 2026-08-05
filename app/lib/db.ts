@@ -222,6 +222,15 @@ export async function ensureDatabaseSchema() {
         UNIQUE (listing_id, reporter_id)
       )
     `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_location_context_cache (
+        cache_key TEXT PRIMARY KEY,
+        payload JSONB NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
     await sql.query("CREATE INDEX IF NOT EXISTS rental_sessions_user_idx ON rental_sessions(user_id, expires_at)");
     await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS rental_users_google_subject_idx ON rental_users(google_subject) WHERE google_subject IS NOT NULL");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_users_account_type_idx ON rental_users(account_type, agent_verification_status)");
@@ -240,10 +249,31 @@ export async function ensureDatabaseSchema() {
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_private_agent_idx ON rental_listing_private_details(agent_profile_id)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_agent_requests_owner_idx ON rental_agent_requests(owner_id, updated_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_agent_requests_agent_idx ON rental_agent_requests(agent_profile_id, status, updated_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_location_context_cache_expiry_idx ON rental_location_context_cache(expires_at)");
   })().catch((error) => {
     schemaPromise = null;
     throw error;
   });
 
   return schemaPromise;
+}
+
+export async function readLocationContextCache(cacheKey: string) {
+  if (!sql) return null;
+  await ensureDatabaseSchema();
+  const rows = await sql.query("SELECT payload FROM rental_location_context_cache WHERE cache_key = $1 AND expires_at > NOW() LIMIT 1", [cacheKey]);
+  return rows[0]?.payload ?? null;
+}
+
+export async function writeLocationContextCache(cacheKey: string, payload: unknown, ttlDays = 7) {
+  if (!sql) return;
+  await ensureDatabaseSchema();
+  await sql.query(`
+    INSERT INTO rental_location_context_cache (cache_key, payload, expires_at)
+    VALUES ($1, $2::jsonb, NOW() + ($3 * INTERVAL '1 day'))
+    ON CONFLICT (cache_key) DO UPDATE SET
+      payload = EXCLUDED.payload,
+      expires_at = EXCLUDED.expires_at,
+      updated_at = NOW()
+  `, [cacheKey, JSON.stringify(payload), ttlDays]);
 }

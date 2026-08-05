@@ -80,6 +80,8 @@ GOOGLE_MAPS_SERVER_API_KEY=your_restricted_server_key
 
 Enable Places API (New) and Routes API for that key, restrict it to those APIs, and keep it out of `NEXT_PUBLIC_*` variables. The site sends only the selected borough/area to Google; it never sends the private street address. The generated copy describes nearby places as area references and station times as approximate walks, so the poster should review them before publishing. Without this key, AI polish continues without unverified nearby or transit claims. See Google’s [Places Text Search (New)](https://developers.google.com/maps/documentation/places/web-service/text-search) and [Routes API](https://developers.google.com/maps/documentation/routes) documentation.
 
+The posting wizard lets the poster choose up to three nearby lookup categories. Clearing all categories skips Google Maps for that polish. Successful area/category results are stored in the Neon `rental_location_context_cache` table for seven days, so later posters using the same approximate area and categories do not repeat the lookup.
+
 ## Enable Resend email verification
 
 Add these server-side values to `.env.local`:
