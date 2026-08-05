@@ -10,12 +10,15 @@ import { AccountType, AgentVerificationStatus } from "./lib/account-types";
 import { demoModeEnabled } from "./lib/demo";
 import { toChineseLocationLabel } from "./lib/location-labels";
 import { configureWeChatShare, isWeChatBrowser, toAbsoluteUrl } from "./lib/wechat-client";
+import { buildLocalCompareSummary, CompareListingFacts, CompareSummaryContent } from "./lib/compare-summary";
+import type { LocationContext } from "./lib/location-context";
 
 type Locale = "zh" | "en";
 type RentalType = "all" | "entire" | "privateRoom" | "sublet";
 type SortMode = "fit" | "price" | "fresh" | "moveIn" | "verified";
 type WeChatShareStatus = "idle" | "outside" | "loading" | "ready" | "error";
 type WeChatShareResolution = { key: string; status: Exclude<WeChatShareStatus, "idle" | "outside">; error: "" | "not-configured" | "unavailable" };
+type CompareSummary = CompareSummaryContent & { key: string; locale: Locale; source: "openai" | "local" };
 
 type Listing = {
   id: string;
@@ -162,6 +165,8 @@ type ListingDraft = {
   titleZh: string;
   areaEn: string;
   areaZh: string;
+  areaGroupId: string;
+  areaLocationId: string;
   privateAddress: string;
   posterRole: "owner" | "agent";
   rentalType: Exclude<RentalType, "all">;
@@ -194,6 +199,8 @@ const EMPTY_DRAFT: ListingDraft = {
   titleZh: "",
   areaEn: "",
   areaZh: "",
+  areaGroupId: "",
+  areaLocationId: "",
   privateAddress: "",
   posterRole: "owner",
   rentalType: "entire",
@@ -398,21 +405,21 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
   },
 ] as const;
 
+function findPopularAreaSelection(areaEn: string, areaZh: string) {
+  const matches = (value: string, candidate: string) => {
+    const normalizedValue = value.trim().toLocaleLowerCase();
+    const normalizedCandidate = candidate.trim().toLocaleLowerCase();
+    return Boolean(normalizedValue && normalizedCandidate && (normalizedValue === normalizedCandidate || normalizedValue.includes(normalizedCandidate)));
+  };
+  const group = POPULAR_AREA_GROUPS.find((item) => matches(areaEn, item.en) || matches(areaZh, item.zh));
+  const location = group?.locations.find((item) => matches(areaEn, item.en) || matches(areaZh, item.zh));
+  return { areaGroupId: group?.id || "", areaLocationId: location?.id || "" };
+}
+
 const POPULAR_LOCATION_SHORTCUTS = POPULAR_AREA_GROUPS.flatMap((group) => [
   { zh: `${group.zh} / ${group.en}`, en: group.en, value: group.value },
   ...group.locations.map((area) => ({ zh: `${area.zh} / ${area.en}`, en: area.en, value: area.value })),
 ]);
-
-const POST_AREA_SHORTCUTS = [
-  { zh: "法拉盛 / Flushing", en: "Flushing", value: "Flushing" },
-  { zh: "森林小丘 / Forest Hills", en: "Forest Hills", value: "Forest Hills" },
-  { zh: "长岛市 / Long Island City", en: "Long Island City", value: "Long Island City" },
-  { zh: "日落公园 / Sunset Park", en: "Sunset Park", value: "Sunset Park" },
-  { zh: "本森赫斯特 / Bensonhurst", en: "Bensonhurst", value: "Bensonhurst" },
-  { zh: "大颈 / Great Neck", en: "Great Neck", value: "Great Neck" },
-  { zh: "杰里科 / Jericho", en: "Jericho", value: "Jericho" },
-  { zh: "奥尔巴尼 / Albany", en: "Albany", value: "Albany" },
-] as const;
 
 const INQUIRY_COMMENT_OPTIONS = [
   { value: "details", zh: "想进一步了解房屋详情", en: "I'd like to understand more about the house" },
@@ -1034,7 +1041,7 @@ const copy = {
     stageContact: "联系与看房",
     stagePublish: "核验、预览、发布",
     polishTitle: "AI 润色房源文案",
-    polishIntro: "根据你填写的事实优化中文文案，不编造设施或承诺。精确地址不会发送给 AI。",
+    polishIntro: "根据你填写的事实和所选大致区域优化文案；配置地图服务后，可加入附近设施和步行到交通站点时间。精确地址不会发送给 AI。",
     polishAction: "用 AI 润色",
     polishLoading: "正在润色…",
     polishApplied: "AI 文案已写入，请发布前复核",
@@ -1176,7 +1183,7 @@ const copy = {
     stageContact: "Contact and tours",
     stagePublish: "Verify, preview, publish",
     polishTitle: "AI listing polish",
-    polishIntro: "Polish the Chinese listing copy from the facts you provide. The exact address never goes to AI.",
+    polishIntro: "Polish the Chinese copy from your facts and selected approximate area. With map context configured, nearby places and walking time to stations can be added; the exact address never goes to AI.",
     polishAction: "Polish with AI",
     polishLoading: "Polishing…",
     polishApplied: "AI copy applied — review before publishing",
@@ -1610,6 +1617,9 @@ export default function HomePage() {
   const [contactListing, setContactListing] = useState<Listing | null>(null);
   const [selectedInquiryComments, setSelectedInquiryComments] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [compareSummary, setCompareSummary] = useState<CompareSummary | null>(null);
+  const [compareSummaryLoading, setCompareSummaryLoading] = useState(false);
+  const [compareSummaryError, setCompareSummaryError] = useState("");
   const [postOpen, setPostOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [messagesOpen, setMessagesOpen] = useState(false);
@@ -1619,6 +1629,8 @@ export default function HomePage() {
   const [aiPolishError, setAiPolishError] = useState("");
   const [aiPolishSource, setAiPolishSource] = useState<"openai" | "local" | null>(null);
   const [aiPolishNotes, setAiPolishNotes] = useState<string[]>([]);
+  const [locationContext, setLocationContext] = useState<LocationContext | null>(null);
+  const [locationContextLoading, setLocationContextLoading] = useState(false);
   const [mediaUploading, setMediaUploading] = useState(false);
   const [publishLoading, setPublishLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -1629,6 +1641,7 @@ export default function HomePage() {
   const sharedListingIdRef = useRef<string | null>(null);
   const t = copy[locale];
   const selectedPopularArea = POPULAR_AREA_GROUPS.find((group) => group.id === selectedPopularAreaId) || null;
+  const selectedPostAreaGroup = POPULAR_AREA_GROUPS.find((group) => group.id === draft.areaGroupId) || null;
   const selectedAgentProfile = agentProfiles.find((profile) => profile.id === draft.agentProfileId) || null;
   const searchSnapshot = useMemo<SearchSnapshot>(() => ({
     location: appliedLocation,
@@ -2165,6 +2178,7 @@ export default function HomePage() {
   }, [activeFeatures, allListings, appliedLocation, bathrooms, bedrooms, maxPrice, minPrice, moveIn, rentalType, sortMode]);
 
   const compareListings = allListings.filter((listing) => compareIds.includes(listing.id));
+  const compareKey = compareListings.map((listing) => listing.id).join("|");
   const savedListings = allListings.filter((listing) => savedIds.has(listing.id));
   const messageInquiries = currentUser?.emailVerified ? serverInquiries : inquiries;
   const visibleListings = filteredListings.slice(0, visibleResultCount);
@@ -2175,6 +2189,9 @@ export default function HomePage() {
     setDraftSavedAt(1);
     setPostError("");
     setAiPolishError("");
+    if (Object.prototype.hasOwnProperty.call(updates, "areaEn") || Object.prototype.hasOwnProperty.call(updates, "areaZh") || Object.prototype.hasOwnProperty.call(updates, "areaGroupId") || Object.prototype.hasOwnProperty.call(updates, "areaLocationId")) {
+      setLocationContext(null);
+    }
   };
 
   const openPostFlow = () => {
@@ -2198,6 +2215,7 @@ export default function HomePage() {
     setAiPolishError("");
     setAiPolishSource(null);
     setAiPolishNotes([]);
+    setLocationContext(null);
   };
 
   const openAccount = () => {
@@ -2391,12 +2409,14 @@ export default function HomePage() {
     if (!listing) return;
     const moveInIsImmediate = listing.moveIn === "immediate" || !listing.moveIn;
     const leaseMonths = listing.lease.match(/\d+/)?.[0] || "12";
+    const areaSelection = findPopularAreaSelection(listing.areaEn, listing.areaZh);
     setDraft({
       ...EMPTY_DRAFT,
       titleZh: listing.titleZh,
       titleEn: listing.titleEn,
       areaZh: listing.areaZh,
       areaEn: listing.areaEn,
+      ...areaSelection,
       privateAddress: listing.privateAddress,
       posterRole: listing.posterRole || "owner",
       rentalType: listing.type,
@@ -2427,6 +2447,7 @@ export default function HomePage() {
     setAiPolishError("");
     setAiPolishSource(null);
     setAiPolishNotes([]);
+    setLocationContext(null);
     setAccountOpen(false);
     setPostOpen(true);
   };
@@ -2461,6 +2482,8 @@ export default function HomePage() {
   };
 
   const toggleCompare = (id: string) => {
+    setCompareSummary(null);
+    setCompareSummaryError("");
     setCompareIds((current) => {
       if (current.includes(id)) return current.filter((item) => item !== id);
       if (current.length >= 2) {
@@ -2691,6 +2714,7 @@ export default function HomePage() {
   const validatePostStep = (step: PostStep) => {
     const required = locale === "zh" ? "请补充此步骤的必填信息。" : "Please complete the required fields in this step.";
     if (step === 1 && (!draft.titleZh.trim() || !draft.areaZh.trim() || !draft.privateAddress.trim())) return required;
+    if (step === 1 && draft.areaGroupId && !draft.areaLocationId) return locale === "zh" ? "请选择区域 / 城市，或选择手动输入后填写公开区域名称。" : "Choose an area or city, or select manual entry and add a public area label.";
     if (step === 2 && (!draft.price || Number(draft.price) <= 0 || !draft.lease || (draft.moveInMode === "date" && !draft.moveInDate))) return locale === "zh" ? "请填写有效租金、入住方式和租期。" : "Add a valid rent, move-in option, and lease term.";
     if (step === 3 && draft.photos.length === 0) return locale === "zh" ? "至少上传一张房源照片。" : "Upload at least one listing photo.";
     if (step === 4 && (!draft.contactName.trim() || !draft.contactEmail.trim() || !draft.contactEmail.includes("@"))) return locale === "zh" ? "请填写姓名和有效邮箱。" : "Add your name and a valid email address.";
@@ -2747,7 +2771,9 @@ export default function HomePage() {
   const polishListingWithAi = async () => {
     if (aiPolishLoading) return;
     setAiPolishLoading(true);
+    setLocationContextLoading(true);
     setAiPolishError("");
+    setLocationContext(null);
     try {
       const response = await fetch("/api/polish-listing", {
         method: "POST",
@@ -2757,6 +2783,9 @@ export default function HomePage() {
           titleZh: draft.titleZh,
           areaEn: draft.areaEn || draft.areaZh,
           areaZh: draft.areaZh,
+          boroughEn: selectedPostAreaGroup?.en || draft.areaEn,
+          boroughZh: selectedPostAreaGroup?.zh || draft.areaZh,
+          locale,
           rentalType: draft.rentalType,
           price: draft.price,
           currency: draft.currency,
@@ -2767,8 +2796,9 @@ export default function HomePage() {
           descriptionZh: draft.descriptionZh,
         }),
       });
-      const result = await response.json() as { titleEn?: string; titleZh?: string; descriptionEn?: string; descriptionZh?: string; source?: "openai" | "local"; notes?: string[]; error?: string };
+      const result = await response.json() as { titleEn?: string; titleZh?: string; descriptionEn?: string; descriptionZh?: string; source?: "openai" | "local"; notes?: string[]; locationContext?: LocationContext | null; error?: string };
       if (!response.ok) throw new Error(result.error || t.polishError);
+      setLocationContext(result.locationContext || null);
       updateDraft({
         titleEn: result.titleEn || draft.titleEn || result.titleZh || draft.titleZh,
         titleZh: result.titleZh || draft.titleZh || result.titleEn || draft.titleEn,
@@ -2781,6 +2811,7 @@ export default function HomePage() {
     } catch (error) {
       setAiPolishError(error instanceof Error ? error.message : t.polishError);
     } finally {
+      setLocationContextLoading(false);
       setAiPolishLoading(false);
     }
   };
@@ -2944,6 +2975,7 @@ export default function HomePage() {
     setAiPolishSource(null);
     setAiPolishNotes([]);
     setAiPolishError("");
+    setLocationContext(null);
     setPostOpen(false);
     showToast(locale === "zh" ? "房源已发布到本地预览" : "Listing published to this local preview");
   };
@@ -2966,6 +2998,7 @@ export default function HomePage() {
     setAiPolishError("");
     setAiPolishSource(null);
     setAiPolishNotes([]);
+    setLocationContext(null);
     setDraftSavedAt(null);
     if (currentUser?.emailVerified) await fetch("/api/my/draft", { method: "DELETE" }).catch(() => undefined);
     showToast(locale === "zh" ? "草稿已清除" : "Draft cleared");
@@ -2995,8 +3028,69 @@ export default function HomePage() {
     const value = t[feature as keyof typeof t];
     return typeof value === "string" ? value : feature;
   };
+  const listingCompareFeatures = (listing: Listing) => {
+    const features = listing.features.map((feature) => featureLabel(feature)).filter(Boolean);
+    return features.length > 0 ? features : listingTags(listing);
+  };
+  const compareFacts: CompareListingFacts[] = compareListings.map((listing) => ({
+    id: listing.id,
+    title: listingTitle(listing),
+    area: listingArea(listing),
+    price: listing.price,
+    bedrooms: listing.bedrooms,
+    bathrooms: listing.bathrooms,
+    moveIn: listingMoveIn(listing),
+    lease: listing.lease,
+    features: listingCompareFeatures(listing).slice(0, 8),
+    poster: listing.source === "local" ? (locale === "zh" ? "本地账号" : "Local account") : listing.source === "demo" ? (locale === "zh" ? "演示发布" : "Demo post") : listingPoster(listing),
+  }));
+  const activeCompareSummary = compareSummary && compareSummary.key === compareKey && compareSummary.locale === locale ? compareSummary : null;
   const selectedPhotos = selectedListing ? listingPhotos(selectedListing) : [];
   const selectedPhoto = selectedPhotos[selectedPhotoIndex] || selectedListing?.image || "";
+  const handleCompareSummary = async () => {
+    if (compareFacts.length !== 2) {
+      setCompareSummaryError(locale === "zh" ? "请先选择两套房源。" : "Select two listings first.");
+      return;
+    }
+
+    const localSummary = buildLocalCompareSummary(compareFacts, locale);
+    setCompareSummary({ ...localSummary, key: compareKey, locale, source: "local" });
+    setCompareSummaryLoading(true);
+    setCompareSummaryError("");
+    try {
+      const response = await fetch("/api/compare-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locale, listings: compareFacts }),
+      });
+      const result = await response.json() as {
+        headline?: unknown;
+        summary?: unknown;
+        bestFor?: unknown;
+        tradeoffs?: unknown;
+        source?: unknown;
+        error?: unknown;
+      };
+      if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "The comparison summary is unavailable right now.");
+      const tradeoffs = Array.isArray(result.tradeoffs) ? result.tradeoffs.filter((item): item is string => typeof item === "string").slice(0, 3) : [];
+      setCompareSummary({
+        headline: typeof result.headline === "string" && result.headline.trim() ? result.headline : localSummary.headline,
+        summary: typeof result.summary === "string" && result.summary.trim() ? result.summary : localSummary.summary,
+        bestFor: typeof result.bestFor === "string" && result.bestFor.trim() ? result.bestFor : localSummary.bestFor,
+        tradeoffs: tradeoffs.length > 0 ? tradeoffs : localSummary.tradeoffs,
+        key: compareKey,
+        locale,
+        source: result.source === "openai" ? "openai" : "local",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The comparison summary is unavailable right now.";
+      setCompareSummaryError(currentUser
+        ? message
+        : (locale === "zh" ? `本地比较摘要已生成；登录并验证邮箱后可使用 AI 总结（${message}）。` : `A local comparison is ready; sign in and verify your email to use AI summary (${message}).`));
+    } finally {
+      setCompareSummaryLoading(false);
+    }
+  };
   const buildListingShareUrl = (listing: Listing) => {
     if (typeof window === "undefined") return "";
     return `${window.location.origin}/?listing=${encodeURIComponent(listing.id)}`;
@@ -3227,7 +3321,7 @@ export default function HomePage() {
             <a href="#messages" onClick={(event) => { event.preventDefault(); setMessagesOpen(true); }}>{t.messages}{messageInquiries.length > 0 ? ` ${messageInquiries.length}` : ""}</a>
           </nav>
           <div className="topbar-actions">
-            <button className="language-switch" type="button" onClick={() => setLocale((current) => current === "zh" ? "en" : "zh")} aria-label={locale === "zh" ? "Switch to English" : "切换到中文"}>
+            <button className="language-switch" type="button" onClick={() => { setCompareSummary(null); setCompareSummaryError(""); setLocale((current) => current === "zh" ? "en" : "zh"); }} aria-label={locale === "zh" ? "Switch to English" : "切换到中文"}>
               <span className="language-dot" aria-hidden="true" />
               {locale === "zh" ? "English" : "中文"}
             </button>
@@ -3566,18 +3660,42 @@ export default function HomePage() {
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">COMPARE DESK</span><button className="drawer-close" type="button" onClick={() => setCompareOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="compare-title">{locale === "zh" ? "并排比较房源" : "Compare listings"}</h2>
-              <p className="drawer-intro">{locale === "zh" ? "把租金、入住时间、租期和发布者信号放在一起看。" : "Put rent, move-in timing, lease, and poster signals side by side."}</p>
+              <p className="drawer-intro">{locale === "zh" ? "把租金、户型、房源特点、入住时间、租期和发布者信号放在一起看。" : "Put rent, bedrooms, bathrooms, features, timing, lease, and poster signals side by side."}</p>
               <div className="compare-grid">
                 {compareListings.map((listing) => (
                   <article className="compare-card" key={listing.id}>
                     <Image src={listing.image} alt="" width={180} height={120} unoptimized={listing.source !== "sample"} />
                     <strong>{listingTitle(listing)}</strong>
                     <span>{formatPrice(listing)} {t.month}</span>
-                    <dl><div><dt>{t.detailArea}</dt><dd>{listingArea(listing)}</dd></div><div><dt>{t.detailMoveIn}</dt><dd>{listingMoveIn(listing)}</dd></div><div><dt>{t.detailLease}</dt><dd>{listing.lease}</dd></div><div><dt>{t.detailPoster}</dt><dd>{listing.source === "local" ? (locale === "zh" ? "本地账号" : "Local account") : listing.source === "demo" ? (locale === "zh" ? "演示发布" : "Demo post") : listingPoster(listing)}</dd></div></dl>
+                    <dl>
+                      <div><dt>{t.detailArea}</dt><dd>{listingArea(listing)}</dd></div>
+                      <div><dt>{locale === "zh" ? "卧室" : "Bedrooms"}</dt><dd>{listing.bedrooms === "0" ? t.studio : listing.bedrooms}</dd></div>
+                      <div><dt>{locale === "zh" ? "卫生间" : "Bathrooms"}</dt><dd>{listing.bathrooms}</dd></div>
+                      <div><dt>{t.detailMoveIn}</dt><dd>{listingMoveIn(listing)}</dd></div>
+                      <div><dt>{t.detailLease}</dt><dd>{listing.lease}</dd></div>
+                      <div className="compare-feature-row"><dt>{locale === "zh" ? "房源特点" : "Features"}</dt><dd className="compare-feature-list">{listingCompareFeatures(listing).slice(0, 8).map((tag, index) => <span className="compare-feature-tag" key={`${tag}-${index}`}>{tag}</span>)}{listingCompareFeatures(listing).length === 0 && <span>—</span>}</dd></div>
+                      <div><dt>{t.detailPoster}</dt><dd>{listing.source === "local" ? (locale === "zh" ? "本地账号" : "Local account") : listing.source === "demo" ? (locale === "zh" ? "演示发布" : "Demo post") : listingPoster(listing)}</dd></div>
+                    </dl>
                     <button className="outline-button" type="button" onClick={() => { openListing(listing); setCompareOpen(false); }}>{t.view}</button>
                   </article>
                 ))}
               </div>
+              <section className="compare-summary" aria-labelledby="compare-summary-title">
+                <div className="compare-summary-heading">
+                  <div><span className="section-label">AI CONCLUSION</span><h3 id="compare-summary-title">{locale === "zh" ? "这两套房源怎么选？" : "Which listing fits better?"}</h3></div>
+                  {activeCompareSummary && <span className={`compare-summary-source ${activeCompareSummary.source}`}>{activeCompareSummary.source === "openai" ? "AI" : (locale === "zh" ? "本地摘要" : "Local summary")}</span>}
+                </div>
+                {compareFacts.length < 2 ? (
+                  <div className="compare-summary-empty"><strong>{locale === "zh" ? "再选一套房源" : "Choose one more listing"}</strong><p>{locale === "zh" ? "选择两套房源后，才能生成有意义的并排结论。" : "Select two listings to generate a useful side-by-side conclusion."}</p></div>
+                ) : (
+                  <>
+                    {activeCompareSummary && <div className="compare-summary-body"><strong>{activeCompareSummary.headline}</strong><p>{activeCompareSummary.summary}</p><div className="compare-summary-best"><span>{locale === "zh" ? "适合谁" : "Best for"}</span>{activeCompareSummary.bestFor}</div>{activeCompareSummary.tradeoffs.length > 0 && <ul>{activeCompareSummary.tradeoffs.map((tradeoff, index) => <li key={`${tradeoff}-${index}`}>{tradeoff}</li>)}</ul>}</div>}
+                    <button className="primary-button compare-summary-button" type="button" onClick={() => { void handleCompareSummary(); }} disabled={compareSummaryLoading}>{compareSummaryLoading ? (locale === "zh" ? "正在生成总结…" : "Generating summary…") : activeCompareSummary ? (locale === "zh" ? "重新生成 AI 总结" : "Regenerate AI summary") : (locale === "zh" ? "用 AI 总结比较" : "Summarize with AI")}<ArrowIcon size={15} /></button>
+                    {compareSummaryError && <p className="compare-summary-note" role="status">{compareSummaryError}</p>}
+                    {activeCompareSummary?.source === "local" && !compareSummaryError && <p className="compare-summary-note">{locale === "zh" ? "当前显示本地规则摘要；配置 OPENAI_API_KEY 并验证邮箱后，可生成 AI 结论。" : "This is a local rules-based summary. Configure OPENAI_API_KEY and verify your email to generate an AI conclusion."}</p>}
+                  </>
+                )}
+              </section>
             </div>
           </aside>
         </div>
@@ -3600,8 +3718,8 @@ export default function HomePage() {
                 <div className="post-form-grid">
                   <div className="post-quick-start field-span-2" role="note"><strong>{locale === "zh" ? "先选一个常用区域，再填写 3 项核心信息" : "Start with a popular area, then add the 3 core details"}</strong><p>{locale === "zh" ? "标题、公开区域和精确地址是第一步必填项；精确地址只用于后续看房沟通。" : "Title, public area, and exact address are required here; the exact address stays out of the public listing."}</p></div>
                   <label className="field-label" htmlFor="post-title-zh">{locale === "zh" ? "中文房源标题" : "Listing title"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-title-zh" value={draft.titleZh} onChange={(event) => updateDraft({ titleZh: event.target.value })} placeholder={locale === "zh" ? "近地铁的明亮两居" : "Bright two-bedroom near transit"} /></label>
-                  <label className="field-label field-span-2" htmlFor="post-area-zh">{locale === "zh" ? "公开区域" : "Public area"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-area-zh" value={draft.areaZh} onChange={(event) => updateDraft({ areaZh: event.target.value, areaEn: "" })} placeholder={locale === "zh" ? "皇后区 · Forest Hills 一带" : "Queens · around Forest Hills"} /></label>
-                  <div className="post-area-shortcuts field-span-2" aria-label={locale === "zh" ? "常用区域快捷选择" : "Popular area shortcuts"}><div className="post-helper-heading"><span>{locale === "zh" ? "常用区域" : "Popular areas"}</span><small>{locale === "zh" ? "点击后仍可修改" : "You can edit it after selecting"}</small></div><div className="post-area-shortcut-list">{POST_AREA_SHORTCUTS.map((shortcut) => <button className={`post-area-shortcut ${draft.areaEn === shortcut.en ? "active" : ""}`} key={shortcut.value} type="button" onClick={() => updateDraft({ areaZh: shortcut.zh, areaEn: shortcut.en })} aria-pressed={draft.areaEn === shortcut.en}>{shortcut.zh}</button>)}</div></div>
+                  <div className="post-location-picker field-span-2" role="group" aria-labelledby="post-location-heading"><div className="post-helper-heading"><span id="post-location-heading">{locale === "zh" ? "公开区域" : "Public area"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span></span><small>{locale === "zh" ? "先选行政区 / 地区，再选区域 / 城市" : "Choose a borough or region, then an area or city"}</small></div><p className="field-help">{locale === "zh" ? "公开页面只显示大致区域；精确地址不会放在公开房源中。" : "Public pages show only an approximate area; the exact address stays private."}</p><div className="post-location-grid"><label className="field-label" htmlFor="post-area-group">{locale === "zh" ? "行政区 / 地区" : "Borough / region"}<select id="post-area-group" value={draft.areaGroupId} onChange={(event) => { const group = POPULAR_AREA_GROUPS.find((item) => item.id === event.target.value); updateDraft({ areaGroupId: event.target.value, areaLocationId: "", areaZh: group?.zh || "", areaEn: group?.en || "" }); }}><option value="">{locale === "zh" ? "请选择行政区或地区" : "Choose a borough or region"}</option>{POPULAR_AREA_GROUPS.map((group) => <option value={group.id} key={group.id}>{group.zh} / {group.en}</option>)}</select></label><label className="field-label" htmlFor="post-area-location">{locale === "zh" ? "区域 / 城市" : "Area / city"}<select id="post-area-location" value={draft.areaLocationId} disabled={!selectedPostAreaGroup} onChange={(event) => { const location = selectedPostAreaGroup?.locations.find((item) => item.id === event.target.value); updateDraft({ areaLocationId: event.target.value, areaZh: location?.zh || draft.areaZh, areaEn: location?.en || draft.areaEn }); }}><option value="">{selectedPostAreaGroup ? (locale === "zh" ? "请选择区域或城市" : "Choose an area or city") : (locale === "zh" ? "请先选择行政区 / 地区" : "Choose a borough or region first")}</option>{selectedPostAreaGroup?.locations.map((location) => <option value={location.id} key={location.id}>{location.zh} / {location.en}</option>)}{selectedPostAreaGroup && <option value="custom">{locale === "zh" ? "其他区域 / 手动输入" : "Other area / enter manually"}</option>}</select></label></div></div>
+                  <label className="field-label field-span-2" htmlFor="post-area-zh">{locale === "zh" ? "公开区域名称" : "Public area label"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-area-zh" value={draft.areaZh} onChange={(event) => updateDraft({ areaZh: event.target.value, areaEn: "", areaLocationId: draft.areaGroupId ? "custom" : "" })} placeholder={locale === "zh" ? "例如：皇后区 · 森林小丘一带" : "Example: Queens · around Forest Hills"} /><span className="field-help">{locale === "zh" ? "选择区域后可继续修改公开名称；建议使用中文，方便本地租客搜索。" : "You can edit the public label after selecting an area; Chinese helps local renters search."}</span></label>
                   <label className="field-label" htmlFor="post-private-address">{locale === "zh" ? "精确地址（私密）" : "Exact address (private)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-private-address" value={draft.privateAddress} onChange={(event) => updateDraft({ privateAddress: event.target.value })} placeholder={locale === "zh" ? "请输入完整街道地址" : "Enter the full street address"} /></label>
                   <div className="post-privacy-note"><LockIcon /><div><strong>{t.addressPrivate}</strong><p>仅保存在本地草稿，不会出现在公开房源卡片。</p></div></div>
                   <label className="field-label" htmlFor="post-role">发布者角色<select id="post-role" value={draft.posterRole} onChange={(event) => updateDraft({ posterRole: event.target.value as ListingDraft["posterRole"] })} disabled={Boolean(currentUser) && !canPostAsAgent}><option value="owner">房主</option>{canPostAsAgent && <option value="agent">房产经纪</option>}</select>{currentUser?.accountType === "agent" && !currentUser.agentVerified && <small className="field-help">完成经纪执照核验后，才可使用经纪身份并获得更高发布额度。</small>}{currentUser && currentUser.accountType === "user" && <small className="field-help">普通用户账户按个人房源额度发布。</small>}</label>
@@ -3630,6 +3748,8 @@ export default function HomePage() {
                     <div className="ai-polish-copy"><span className="ai-polish-mark" aria-hidden="true"><ShieldIcon size={16} /></span><div><strong>{t.polishTitle}</strong><p>{t.polishIntro}</p></div></div>
                     <button className="outline-button ai-polish-button" type="button" onClick={polishListingWithAi} disabled={aiPolishLoading || (!draft.titleZh.trim() && !draft.descriptionZh.trim())}>{aiPolishLoading ? t.polishLoading : t.polishAction}<ArrowIcon size={14} /></button>
                   </div>
+                  {locationContextLoading && <p className="ai-location-status field-span-2" role="status">{locale === "zh" ? "正在整理所选区域的附近设施和交通参考…" : "Collecting nearby and transit context for the selected area…"}</p>}
+                  {!locationContextLoading && locationContext && <p className={`ai-location-status field-span-2 ${locationContext.source === "google" ? "ready" : ""}`} role="status">{locationContext.source === "google" ? (locale === "zh" ? "已加入大致区域的周边和到交通站点步行时间；发布前请复核。" : "Approximate-area nearby facts and walking times to transit stations were added; review before publishing.") : locationContext.notes[0] || (locale === "zh" ? "没有加入未经验证的周边或交通说法。" : "No unverified nearby or transit claims were added.")}</p>}
                   {aiPolishSource && <p className="ai-polish-status field-span-2" role="status">{aiPolishSource === "openai" ? t.polishApplied : t.polishLocal}</p>}
                   {aiPolishNotes.length > 0 && <div className="ai-polish-notes field-span-2" role="note"><strong>{locale === "zh" ? "发布前请复核" : "Review before publishing"}</strong><ul>{aiPolishNotes.map((note) => <li key={note}>{note}</li>)}</ul></div>}
                   {aiPolishError && <p className="form-error field-span-2" role="alert">{aiPolishError}</p>}
