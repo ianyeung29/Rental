@@ -7,6 +7,7 @@ export type CompareListingFacts = {
   price: number;
   bedrooms: string;
   bathrooms: string;
+  squareFeet?: number | null;
   moveIn: string;
   lease: string;
   features: string[];

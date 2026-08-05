@@ -1,5 +1,8 @@
+"use client";
+
 import Image from "next/image";
-import type { ReactNode } from "react";
+import { useRef, useState } from "react";
+import type { ReactNode, TouchEvent } from "react";
 
 export type ListingCardListing = {
   id: string;
@@ -9,6 +12,7 @@ export type ListingCardListing = {
   areaEn: string;
   bedrooms: string;
   bathrooms: string;
+  squareFeet?: number | null;
   lease: string;
   price: number;
   image: string;
@@ -22,6 +26,7 @@ type IconRenderer = (options?: { size?: number; filled?: boolean }) => ReactNode
 export type ListingCardLabels = {
   bed: string;
   bath: string;
+  squareFeet: string;
   moveIn: string;
   lease: string;
   locationChecked: string;
@@ -73,6 +78,14 @@ type ListingCardProps = {
   onContact: () => void;
 };
 
+function CardGalleryArrowIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d={direction === "left" ? "m14.5 5-7 7 7 7" : "m9.5 5 7 7-7 7"} />
+    </svg>
+  );
+}
+
 export default function ListingCard({
   listing,
   featured = false,
@@ -98,12 +111,48 @@ export default function ListingCard({
   onContact,
 }: ListingCardProps) {
   const photoCount = photos.length;
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const touchStartX = useRef<number | null>(null);
+  const ignoreNextClick = useRef(false);
+  const safePhotoIndex = photoCount > 0 ? Math.min(photoIndex, photoCount - 1) : 0;
+  const currentPhoto = photos[safePhotoIndex] || photos[0] || listing.image;
+
+  const movePhoto = (direction: -1 | 1) => {
+    if (photoCount < 2) return;
+    setPhotoIndex((current) => (current + direction + photoCount) % photoCount);
+  };
+
+  const handleImageTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    touchStartX.current = event.touches[0]?.clientX ?? null;
+  };
+
+  const handleImageTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
+    const startX = touchStartX.current;
+    touchStartX.current = null;
+    if (startX === null || photoCount < 2) return;
+    const delta = (event.changedTouches[0]?.clientX ?? startX) - startX;
+    if (Math.abs(delta) <= 45) return;
+    ignoreNextClick.current = true;
+    movePhoto(delta > 0 ? -1 : 1);
+  };
+
+  const openFromImage = () => {
+    if (ignoreNextClick.current) {
+      ignoreNextClick.current = false;
+      return;
+    }
+    onOpen();
+  };
 
   return (
     <article className={`listing-card ${featured ? "listing-card-featured" : ""}`}>
-      <div className="listing-image-wrap">
+      <div
+        className="listing-image-wrap listing-image-browse"
+        onTouchStart={handleImageTouchStart}
+        onTouchEnd={handleImageTouchEnd}
+      >
         <Image
-          src={listing.image}
+          src={currentPhoto}
           alt={locale === "zh" ? `${title} 房源照片` : `${title} listing photo`}
           fill
           sizes="(max-width: 600px) 100vw, (max-width: 1080px) 40vw, 31vw"
@@ -111,9 +160,15 @@ export default function ListingCard({
           loading={featured ? "eager" : "lazy"}
           unoptimized={listing.source !== "sample"}
         />
+        <button className="listing-image-open" type="button" onClick={openFromImage} aria-label={locale === "zh" ? `查看${title}的房源照片` : `Browse photos for ${title}`} />
         <span className="image-label"><span className="image-label-dot" aria-hidden="true" />{freshness}</span>
         {photoCount > 1 && <span className="image-photo-count"><span aria-hidden="true">{icons.gallery({ size: 13 })}</span>{photoCount} {labels.photoCount}</span>}
-        <button className={`save-button ${saved ? "is-saved" : ""}`} type="button" onClick={onSave} aria-label={saved ? labels.removeSaved : labels.save} aria-pressed={saved}>
+        {photoCount > 1 && <>
+          <button className="listing-gallery-control listing-gallery-prev" type="button" onClick={(event) => { event.stopPropagation(); movePhoto(-1); }} aria-label={locale === "zh" ? "上一张房源照片" : "Previous listing photo"}><CardGalleryArrowIcon direction="left" /></button>
+          <button className="listing-gallery-control listing-gallery-next" type="button" onClick={(event) => { event.stopPropagation(); movePhoto(1); }} aria-label={locale === "zh" ? "下一张房源照片" : "Next listing photo"}><CardGalleryArrowIcon direction="right" /></button>
+          <span className="listing-gallery-count" aria-live="polite">{safePhotoIndex + 1} / {photoCount}</span>
+        </>}
+        <button className={`save-button ${saved ? "is-saved" : ""}`} type="button" onClick={(event) => { event.stopPropagation(); onSave(); }} aria-label={saved ? labels.removeSaved : labels.save} aria-pressed={saved}>
           {icons.heart({ filled: saved })}
         </button>
       </div>
@@ -133,6 +188,7 @@ export default function ListingCard({
         <div className="listing-facts" aria-label={labels.listingBasics}>
           <span><b>{listing.bedrooms}</b> {labels.bed}</span>
           <span><b>{listing.bathrooms}</b> {labels.bath}</span>
+          {typeof listing.squareFeet === "number" && Number.isFinite(listing.squareFeet) && listing.squareFeet > 0 && <span><b>{listing.squareFeet.toLocaleString("en-US")}</b> {labels.squareFeet}</span>}
           <span><b>{moveInValue}</b> {labels.moveIn}</span>
           <span><b>{listing.lease}</b> {labels.lease}</span>
         </div>

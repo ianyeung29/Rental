@@ -27,6 +27,7 @@ const samples = [
     price: 3200,
     bedrooms: "2",
     bathrooms: "1",
+    squareFeet: 1100,
     moveIn: "2026-09-01",
     lease: "12 months",
     features: ["furnished", "utilities", "laundry"],
@@ -52,6 +53,7 @@ const samples = [
     price: 2680,
     bedrooms: "1",
     bathrooms: "1",
+    squareFeet: 720,
     moveIn: "2026-08-15",
     lease: "12 months",
     features: ["utilities", "parking", "pets"],
@@ -77,6 +79,7 @@ const samples = [
     price: 1450,
     bedrooms: "1",
     bathrooms: "1",
+    squareFeet: 520,
     moveIn: "2026-09-01",
     lease: "6 months",
     features: ["furnished", "utilities", "laundry", "pets"],
@@ -102,6 +105,7 @@ const samples = [
     price: 2350,
     bedrooms: "1",
     bathrooms: "1",
+    squareFeet: 850,
     moveIn: "2026-09-15",
     lease: "4 months",
     features: ["furnished", "utilities", "parking"],
@@ -116,6 +120,7 @@ const samples = [
 ];
 
 await sql.query("ALTER TABLE rental_listings ADD COLUMN IF NOT EXISTS is_sample BOOLEAN NOT NULL DEFAULT FALSE");
+await sql.query("ALTER TABLE rental_listings ADD COLUMN IF NOT EXISTS square_feet INTEGER");
 await sql.query(`
   CREATE TABLE IF NOT EXISTS rental_saved_searches (
     user_id TEXT PRIMARY KEY REFERENCES rental_users(id) ON DELETE CASCADE,
@@ -134,9 +139,9 @@ for (const sample of samples) {
   await sql.query(`
     INSERT INTO rental_listings (
       id, owner_id, title_zh, title_en, area_zh, area_en, rental_type, price, currency,
-      bedrooms, bathrooms, move_in, lease, features, tags_zh, tags_en,
+      bedrooms, bathrooms, square_feet, move_in, lease, features, tags_zh, tags_en,
       description_zh, description_en, poster_role, status, is_sample
-    ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, 'USD', $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17, 'published', TRUE)
+    ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, 'USD', $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17, $18, 'published', TRUE)
     ON CONFLICT (id) DO UPDATE SET
       owner_id = NULL,
       title_zh = EXCLUDED.title_zh,
@@ -148,6 +153,7 @@ for (const sample of samples) {
       currency = 'USD',
       bedrooms = EXCLUDED.bedrooms,
       bathrooms = EXCLUDED.bathrooms,
+      square_feet = EXCLUDED.square_feet,
       move_in = EXCLUDED.move_in,
       lease = EXCLUDED.lease,
       features = EXCLUDED.features,
@@ -169,6 +175,7 @@ for (const sample of samples) {
     sample.price,
     sample.bedrooms,
     sample.bathrooms,
+    sample.squareFeet,
     sample.moveIn,
     sample.lease,
     JSON.stringify(sample.features),

@@ -10,6 +10,7 @@ import { listingLimitFor } from "../../../../lib/account-types";
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
 const ALLOWED_RENTAL_TYPES = new Set(["entire", "privateRoom", "sublet"]);
+const ALLOWED_BATHROOMS = new Set(["0.5", "1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5"]);
 const ALLOWED_FEATURES = new Set([
   "furnished",
   "utilities",
@@ -74,6 +75,7 @@ type ListingBody = {
   currency?: unknown;
   bedrooms?: unknown;
   bathrooms?: unknown;
+  squareFeet?: unknown;
   moveIn?: unknown;
   lease?: unknown;
   expiresOn?: unknown;
@@ -146,6 +148,7 @@ function normalizeBody(body: ListingBody) {
     price: Number(body.price),
     bedrooms: text(body.bedrooms, 20) || "1",
     bathrooms: text(body.bathrooms, 20) || "1",
+    squareFeet: body.squareFeet === "" || body.squareFeet === null || body.squareFeet === undefined ? null : Number(body.squareFeet),
     moveIn: text(body.moveIn, 80) || "immediate",
     leaseMonths,
     lease: `${leaseMonths} months`,
@@ -167,7 +170,9 @@ function normalizeBody(body: ListingBody) {
 function validationError(input: ReturnType<typeof normalizeBody>) {
   if (!input.titleZh || !input.areaZh || !input.privateAddress) return "Complete the title, approximate area, and private address.";
   if (!ALLOWED_RENTAL_TYPES.has(input.rentalType) || !Number.isFinite(input.price) || input.price <= 0) return "Use a valid rental type and positive monthly rent.";
+  if (!ALLOWED_BATHROOMS.has(input.bathrooms)) return "Choose an exact bathroom count.";
   if (!Number.isInteger(input.leaseMonths) || input.leaseMonths <= 0 || input.leaseMonths > 120) return "Use a lease term between 1 and 120 months.";
+  if (input.squareFeet !== null && (!Number.isInteger(input.squareFeet) || input.squareFeet < 50 || input.squareFeet > 100000)) return "Use a square footage value between 50 and 100,000 square feet.";
   if (input.moveIn !== "immediate" && !/^\d{4}-\d{2}-\d{2}$/.test(input.moveIn)) return "Choose immediate move-in or a valid move-in date.";
   if (input.expiresOn && (!isDateOnly(input.expiresOn) || input.expiresOn < new Date().toISOString().slice(0, 10))) return "Choose today or a future listing expiration date.";
   if (input.agentService === "agentMatch" && input.agentFeePlan === "flatFee" && (!input.agentFeeAmount || input.agentFeeAmount <= 0)) return "Add a valid agent flat fee or choose another fee preference.";
@@ -285,10 +290,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       tx.query(`
         UPDATE rental_listings SET
           title_zh = $1, title_en = $2, area_zh = $3, area_en = $4, rental_type = $5,
-          price = $6, currency = 'USD', bedrooms = $7, bathrooms = $8, move_in = $9,
-          lease = $10, features = $11::jsonb, tags_zh = $12::jsonb, tags_en = $13::jsonb,
-          description_zh = $14, description_en = $15, poster_role = $16, expires_on = $17, updated_at = NOW()
-        WHERE id = $18 AND owner_id = $19
+          price = $6, currency = 'USD', bedrooms = $7, bathrooms = $8, square_feet = $9, move_in = $10,
+          lease = $11, features = $12::jsonb, tags_zh = $13::jsonb, tags_en = $14::jsonb,
+          description_zh = $15, description_en = $16, poster_role = $17, expires_on = $18, updated_at = NOW()
+        WHERE id = $19 AND owner_id = $20
         RETURNING id, status, expires_on
       `, [
         input.titleZh,
@@ -299,6 +304,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         input.price,
         input.bedrooms,
         input.bathrooms,
+        input.squareFeet,
         input.moveIn,
         input.lease,
         JSON.stringify(input.features),

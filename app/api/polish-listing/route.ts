@@ -15,6 +15,7 @@ type ListingInput = {
   rentalType?: unknown;
   price?: unknown;
   currency?: unknown;
+  squareFeet?: unknown;
   moveIn?: unknown;
   lease?: unknown;
   features?: unknown;
@@ -34,6 +35,7 @@ type NormalizedListing = {
   rentalType: string;
   price: string;
   currency: string;
+  squareFeet: string;
   moveIn: string;
   lease: string;
   features: string[];
@@ -71,7 +73,7 @@ const SYSTEM_PROMPT = `You are a careful bilingual rental-listing editor for a h
 
 Rewrite only the facts supplied by the poster. Do not invent rent, square footage, amenities, transit access, views, availability, verification, photos, exact addresses, contact details, or legal promises. Preserve numbers, dates, and approximate-location language. The marketplace uses USD by default, so do not add a currency code to user-facing listing copy. Keep the English and Simplified Chinese versions aligned. If one language is missing, translate conservatively from the supplied facts.
 
-The optional locationContext contains provider-returned facts for the selected approximate area, not the property address. Use nearby places only as area references, and use walkMinutes only to describe an approximate walk to a named station. Do not turn these facts into a claim about the exact building, a commute to an unspecified destination, or a guarantee of service frequency. If locationContext is empty or has no facts, do not add nearby or transportation claims.
+The optional locationContext contains provider-returned facts for the selected approximate area, not the property address. Use nearby places only as area references. A destination with minutes is an approximate route from the selected area: describe drive destinations as approximate driving time and walk destinations as approximate walking time. Do not turn these facts into a claim about the exact building, a guaranteed commute, or a guarantee of service frequency. If locationContext is empty or has no facts, do not add nearby, destination, or transportation claims.
 
 Remove or rewrite discriminatory housing preferences or screening language. The marketplace supports Chinese-language outreach, but listings must not restrict housing based on protected traits or imply that only a particular ethnicity, nationality, family status, disability status, religion, sex, or similar group may rent. Mention a short review note when you had to soften or remove a risky claim.
 
@@ -98,6 +100,7 @@ function normalizeInput(input: ListingInput): NormalizedListing {
     rentalType: text(input.rentalType, 40),
     price: text(input.price, 40),
     currency: text(input.currency, 12),
+    squareFeet: typeof input.squareFeet === "number" || typeof input.squareFeet === "string" ? String(input.squareFeet).trim().slice(0, 20) : "",
     moveIn: text(input.moveIn, 80),
     lease: text(input.lease, 40),
     features: textList(input.features),
@@ -137,16 +140,19 @@ function localPolish(input: NormalizedListing) {
   const featureZh = input.features.length ? `发布者填写的特点：${input.features.join("、")}。` : "";
   const nearbyLine = input.locationContext?.nearby.map((place) => `${place.name} (${place.category})`).join(", ") || "";
   const transitLine = input.locationContext?.transit.map((item) => `${item.name} (${item.mode}${item.walkMinutes ? `, about a ${item.walkMinutes}-minute walk` : ""})`).join(", ") || "";
-  const contextEn = input.locationContext?.source === "google" && (nearbyLine || transitLine)
-    ? `Selected-area references, to verify before publishing: ${[nearbyLine ? `Nearby: ${nearbyLine}.` : "", transitLine ? `Transportation: ${transitLine}.` : ""].filter(Boolean).join(" ")}`
+  const destinationLine = input.locationContext?.destinations.map((item) => `${item.name} (${item.category}, ${item.minutes ? `about ${item.minutes} minutes` : "travel time unavailable"} by ${item.mode === "drive" ? "car" : "walking"})`).join(", ") || "";
+  const destinationLineZh = input.locationContext?.destinations.map((item) => `${item.name}（${item.category}，约 ${item.minutes || "暂缺"} 分钟${item.mode === "drive" ? "车程" : "步行"}）`).join("、") || "";
+  const contextEn = input.locationContext?.source === "google" && (nearbyLine || transitLine || destinationLine)
+    ? `Selected-area references, to verify before publishing: ${[nearbyLine ? `Nearby: ${nearbyLine}.` : "", destinationLine ? `Destinations: ${destinationLine}.` : "", transitLine ? `Transportation: ${transitLine}.` : ""].filter(Boolean).join(" ")}`
     : "";
-  const contextZh = input.locationContext?.source === "google" && (nearbyLine || transitLine)
-    ? `所选区域参考（发布前请核实）：${[nearbyLine ? `附近：${nearbyLine}。` : "", transitLine ? `交通：${transitLine}。` : ""].filter(Boolean).join("")}`
+  const contextZh = input.locationContext?.source === "google" && (nearbyLine || transitLine || destinationLineZh)
+    ? `所选区域参考（发布前请核实）：${[nearbyLine ? `附近：${nearbyLine}。` : "", destinationLineZh ? `生活圈和超市：${destinationLineZh}。` : "", transitLine ? `交通：${transitLine}。` : ""].filter(Boolean).join("")}`
     : "";
   const descriptionEn = [
     input.descriptionEn,
     input.areaEn ? appendIfMissing(input.descriptionEn, `Approximate area: ${input.areaEn}.`) : "",
     input.price ? appendIfMissing(input.descriptionEn, `Monthly rent: ${input.price}.`) : "",
+    input.squareFeet ? appendIfMissing(input.descriptionEn, `Approximate size: ${input.squareFeet} sq ft.`) : "",
     input.moveIn ? appendIfMissing(input.descriptionEn, `Move-in: ${input.moveIn}.`) : "",
     input.lease ? appendIfMissing(input.descriptionEn, `Minimum lease: ${input.lease} months.`) : "",
     appendIfMissing(input.descriptionEn, featureEn),
@@ -156,6 +162,7 @@ function localPolish(input: NormalizedListing) {
     input.descriptionZh,
     input.areaZh ? appendIfMissing(input.descriptionZh, `大致区域：${input.areaZh}。`) : "",
     input.price ? appendIfMissing(input.descriptionZh, `月租：${input.price}。`) : "",
+    input.squareFeet ? appendIfMissing(input.descriptionZh, `建筑面积：${input.squareFeet} 平方英尺。`) : "",
     input.moveIn ? appendIfMissing(input.descriptionZh, `入住时间：${input.moveIn}。`) : "",
     input.lease ? appendIfMissing(input.descriptionZh, `最短租期：${input.lease} 个月。`) : "",
     appendIfMissing(input.descriptionZh, featureZh),
@@ -226,6 +233,7 @@ export async function POST(request: Request) {
       approximateArea: input.areaZh || input.areaEn,
       nearby: [],
       transit: [],
+      destinations: [],
       lookupOptions: input.locationLookupOptions,
       notes: [input.locale === "zh" ? "地图服务暂时不可用；AI不会编造附近设施或交通时间。" : "Map context is temporarily unavailable; AI will not invent nearby places or travel times."],
       cached: false,
