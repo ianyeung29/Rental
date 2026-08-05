@@ -11,7 +11,7 @@ function text(value: unknown, max: number) {
 
 function feeLabel(row: Record<string, unknown>) {
   if (String(row.fee_plan || "") === "firstMonthRent") return "成交后支付一个月租金";
-  if (String(row.fee_plan || "") === "flatFee") return `固定 $${Number(row.fee_amount || 0).toLocaleString("en-US")} USD`;
+  if (String(row.fee_plan || "") === "flatFee") return `固定 $${Number(row.fee_amount || 0).toLocaleString("en-US")}`;
   return "请经纪报价";
 }
 

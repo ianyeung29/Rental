@@ -3,11 +3,12 @@ import { AuthError, registerUser, setSessionCookie } from "../../../lib/auth";
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { email?: unknown; password?: unknown; displayName?: unknown };
+    const body = await request.json() as { email?: unknown; password?: unknown; displayName?: unknown; accountType?: unknown };
     const result = await registerUser({
       email: typeof body.email === "string" ? body.email : "",
       password: typeof body.password === "string" ? body.password : "",
       displayName: typeof body.displayName === "string" ? body.displayName : "",
+      accountType: body.accountType === "agent" ? "agent" : "user",
     });
     const response = NextResponse.json({ user: result.user, verificationSent: result.verificationSent }, { status: 201 });
     setSessionCookie(response, result.token);

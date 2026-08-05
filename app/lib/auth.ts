@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from "no
 import { promisify } from "node:util";
 import { ensureDatabaseSchema, sql } from "./db";
 import { emailIsConfigured, sendVerificationEmail } from "./email";
+import { AccountType, AgentVerificationStatus, isVerifiedAgent, normalizeAccountType, normalizeAgentVerificationStatus } from "./account-types";
 
 const SESSION_COOKIE = "rental_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -12,7 +13,11 @@ export type AuthUser = {
   id: string;
   email: string;
   displayName: string;
+  phone: string;
   role: string;
+  accountType: AccountType;
+  agentVerificationStatus: AgentVerificationStatus;
+  agentVerified: boolean;
   emailVerified: boolean;
 };
 
@@ -35,11 +40,17 @@ export function normalizeEmail(value: string) {
 }
 
 function userFromRow(row: Record<string, unknown>): AuthUser {
+  const accountType = normalizeAccountType(row.account_type);
+  const agentVerificationStatus = normalizeAgentVerificationStatus(row.agent_verification_status);
   return {
     id: String(row.id),
     email: String(row.email),
     displayName: String(row.display_name),
+    phone: String(row.phone || ""),
     role: String(row.role || "user"),
+    accountType,
+    agentVerificationStatus,
+    agentVerified: isVerifiedAgent(accountType, agentVerificationStatus),
     emailVerified: Boolean(row.email_verified_at),
   };
 }
@@ -122,11 +133,12 @@ export function clearSessionCookie(response: Response) {
   });
 }
 
-export async function registerUser(input: { email: string; password: string; displayName: string }) {
+export async function registerUser(input: { email: string; password: string; displayName: string; accountType: AccountType }) {
   await ensureDatabaseSchema();
   const db = database();
   const email = normalizeEmail(input.email);
   const displayName = input.displayName.trim().slice(0, 80);
+  const accountType = normalizeAccountType(input.accountType);
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new AuthError("Enter a valid email address.");
   if (input.password.length < 8 || input.password.length > 128) throw new AuthError("Use a password between 8 and 128 characters.");
   if (!displayName) throw new AuthError("Enter your name.");
@@ -134,13 +146,18 @@ export async function registerUser(input: { email: string; password: string; dis
   if (existing.length > 0) throw new AuthError("An account with this email already exists.", 409);
   const userId = `user-${randomUUID()}`;
   await db.query(
-    "INSERT INTO rental_users (id, email, display_name, password_hash) VALUES ($1, $2, $3, $4)",
-    [userId, email, displayName, await hashPassword(input.password)],
+    "INSERT INTO rental_users (id, email, display_name, password_hash, account_type) VALUES ($1, $2, $3, $4, $5)",
+    [userId, email, displayName, await hashPassword(input.password), accountType],
   );
   const verificationToken = await createVerificationToken(userId);
   const verification = await sendVerificationIfConfigured(email, displayName, verificationToken);
   const token = await createSession(userId);
-  return { token, verificationSent: verification.sent, verificationError: verification.error, user: { id: userId, email, displayName, role: "user", emailVerified: false } satisfies AuthUser };
+  return {
+    token,
+    verificationSent: verification.sent,
+    verificationError: verification.error,
+    user: { id: userId, email, displayName, phone: "", role: "user", accountType, agentVerificationStatus: "unsubmitted", agentVerified: false, emailVerified: false } satisfies AuthUser,
+  };
 }
 
 export async function loginUser(input: { email: string; password: string }) {
@@ -148,37 +165,37 @@ export async function loginUser(input: { email: string; password: string }) {
   const db = database();
   const email = normalizeEmail(input.email);
   if (!email || !input.password) throw new AuthError("Enter your email and password.");
-  const rows = await db.query("SELECT id, email, display_name, password_hash, role, email_verified_at FROM rental_users WHERE email = $1 LIMIT 1", [email]);
+  const rows = await db.query("SELECT id, email, display_name, phone, password_hash, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE email = $1 LIMIT 1", [email]);
   const row = rows[0] as Record<string, unknown> | undefined;
   if (!row || typeof row.password_hash !== "string" || !(await verifyPassword(input.password, row.password_hash))) throw new AuthError("The email or password is not correct.", 401);
   const token = await createSession(String(row.id));
   return { token, user: userFromRow(row) };
 }
 
-export async function loginWithGoogle(input: { subject: string; email: string; displayName: string }) {
+export async function loginWithGoogle(input: { subject: string; email: string; displayName: string }, requestedAccountType: AccountType = "user") {
   await ensureDatabaseSchema();
   const db = database();
   const email = normalizeEmail(input.email);
   if (!email || !input.subject) throw new AuthError("Google did not return a complete identity.", 400);
-  const bySubject = await db.query("SELECT id, email, display_name, role, email_verified_at, google_subject FROM rental_users WHERE google_subject = $1 LIMIT 1", [input.subject]);
+  const bySubject = await db.query("SELECT id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at, google_subject FROM rental_users WHERE google_subject = $1 LIMIT 1", [input.subject]);
   let row = bySubject[0] as Record<string, unknown> | undefined;
   if (row && normalizeEmail(String(row.email)) !== email) throw new AuthError("This Google identity is linked to a different account.", 409);
   if (!row) {
-    const byEmail = await db.query("SELECT id, email, display_name, role, email_verified_at, google_subject FROM rental_users WHERE email = $1 LIMIT 1", [email]);
+    const byEmail = await db.query("SELECT id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at, google_subject FROM rental_users WHERE email = $1 LIMIT 1", [email]);
     row = byEmail[0] as Record<string, unknown> | undefined;
   }
   if (row) {
     if (row.google_subject && String(row.google_subject) !== input.subject) throw new AuthError("This email is linked to another Google identity.", 409);
     await db.query("UPDATE rental_users SET google_subject = $1, email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW() WHERE id = $2", [input.subject, String(row.id)]);
-    const refreshed = await db.query("SELECT id, email, display_name, role, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [String(row.id)]);
+    const refreshed = await db.query("SELECT id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [String(row.id)]);
     row = refreshed[0] as Record<string, unknown> | undefined;
   } else {
     const userId = `user-${randomUUID()}`;
     await db.query(
-      "INSERT INTO rental_users (id, email, display_name, password_hash, email_verified_at, google_subject) VALUES ($1, $2, $3, $4, NOW(), $5)",
-      [userId, email, input.displayName.trim().slice(0, 80) || "Google user", `google:${randomUUID()}`, input.subject],
+      "INSERT INTO rental_users (id, email, display_name, password_hash, account_type, email_verified_at, google_subject) VALUES ($1, $2, $3, $4, $5, NOW(), $6)",
+      [userId, email, input.displayName.trim().slice(0, 80) || "Google user", `google:${randomUUID()}`, normalizeAccountType(requestedAccountType), input.subject],
     );
-    const created = await db.query("SELECT id, email, display_name, role, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [userId]);
+    const created = await db.query("SELECT id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [userId]);
     row = created[0] as Record<string, unknown> | undefined;
   }
   if (!row) throw new AuthError("Google account setup could not be completed.", 502);
@@ -192,13 +209,30 @@ export async function getCurrentUser() {
   await ensureDatabaseSchema();
   const db = database();
   const rows = await db.query(`
-    SELECT u.id, u.email, u.display_name, u.role, u.email_verified_at
+    SELECT u.id, u.email, u.display_name, u.phone, u.role, u.account_type, u.agent_verification_status, u.email_verified_at
     FROM rental_sessions s
     JOIN rental_users u ON u.id = s.user_id
     WHERE s.token_hash = $1 AND s.expires_at > NOW()
     LIMIT 1
   `, [tokenHash(token)]);
   return rows[0] ? userFromRow(rows[0] as Record<string, unknown>) : null;
+}
+
+export async function updateCurrentUserProfile(userId: string, input: { displayName: string; phone: string }) {
+  await ensureDatabaseSchema();
+  const db = database();
+  const displayName = input.displayName.trim().slice(0, 80);
+  const phone = input.phone.trim().slice(0, 32);
+  if (!displayName) throw new AuthError("Enter your name.");
+  const rows = await db.query(`
+    UPDATE rental_users
+    SET display_name = $1, phone = $2, updated_at = NOW()
+    WHERE id = $3
+    RETURNING id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at
+  `, [displayName, phone, userId]);
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (!row) throw new AuthError("Account not found.", 404);
+  return userFromRow(row);
 }
 
 export async function verifyEmailToken(token: string) {

@@ -6,6 +6,7 @@ import { getCurrentUser } from "../../lib/auth";
 import { listingSafetyError } from "../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../lib/email";
 import { demoModeEnabled } from "../../lib/demo";
+import { listingLimitFor } from "../../lib/account-types";
 
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
@@ -242,7 +243,7 @@ function normalizeBody(body: ListingBody) {
 
 function validateListing(input: ReturnType<typeof normalizeBody>) {
   if (!input.titleZh || !input.areaZh || !input.privateAddress || !input.contactName || !input.contactEmail.includes("@")) return "Complete the title, approximate area, private address, and contact email.";
-  if (!ALLOWED_RENTAL_TYPES.has(input.rentalType) || input.currency !== "USD" || !Number.isFinite(input.price) || input.price <= 0) return "Use a valid rental type, USD rent, and positive price.";
+  if (!ALLOWED_RENTAL_TYPES.has(input.rentalType) || input.currency !== "USD" || !Number.isFinite(input.price) || input.price <= 0) return "Use a valid rental type and positive monthly rent.";
   if (!Number.isInteger(input.leaseMonths) || input.leaseMonths <= 0 || input.leaseMonths > 120) return "Use a lease term between 1 and 120 months.";
   if (input.moveIn !== "immediate" && !/^\d{4}-\d{2}-\d{2}$/.test(input.moveIn)) return "Choose immediate move-in or a valid move-in date.";
   if (input.expiresOn && (!isDateOnly(input.expiresOn) || input.expiresOn < new Date().toISOString().slice(0, 10))) return "Choose today or a future listing expiration date.";
@@ -253,7 +254,7 @@ function validateListing(input: ReturnType<typeof normalizeBody>) {
 
 function agentFeeLabel(input: ReturnType<typeof normalizeBody>) {
   if (input.agentFeePlan === "firstMonthRent") return "成交后支付一个月租金";
-  if (input.agentFeePlan === "flatFee") return `固定 $${Number(input.agentFeeAmount || 0).toLocaleString("en-US")} USD`;
+  if (input.agentFeePlan === "flatFee") return `固定 $${Number(input.agentFeeAmount || 0).toLocaleString("en-US")}`;
   return "请经纪报价";
 }
 
@@ -321,6 +322,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Please send a valid listing." }, { status: 400 });
   }
   if (user) input = { ...input, contactName: user.displayName, contactEmail: user.email };
+  if (user && input.posterRole === "agent" && !user.agentVerified) {
+    return NextResponse.json({ error: "Complete agent license verification before publishing as an agent.", code: "AGENT_VERIFICATION_REQUIRED" }, { status: 403 });
+  }
   const validationError = validateListing(input);
   if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
   const safetyError = listingSafetyError([input.titleZh, input.titleEn, input.descriptionZh, input.descriptionEn]);
@@ -328,6 +332,28 @@ export async function POST(request: Request) {
 
   try {
     await ensureDatabaseSchema();
+    if (user) {
+      const listingLimit = listingLimitFor(user.accountType, user.agentVerified);
+      const quotaRows = await sql.query(`
+        SELECT COUNT(*)::int AS count
+        FROM rental_listings
+        WHERE owner_id = $1
+          AND status IN ('published', 'paused')
+          AND (expires_on IS NULL OR expires_on >= CURRENT_DATE)
+      `, [user.id]);
+      const usedListings = Number((quotaRows[0] as Record<string, unknown> | undefined)?.count || 0);
+      if (usedListings >= listingLimit) {
+        return NextResponse.json({
+          error: user.agentVerified
+            ? `Verified agent accounts can publish up to ${listingLimit} active listings.`
+            : `Regular accounts can publish up to ${listingLimit} active listings.`,
+          code: "LISTING_LIMIT_REACHED",
+          limit: listingLimit,
+          used: usedListings,
+          agentVerified: user.agentVerified,
+        }, { status: 403 });
+      }
+    }
     if (input.agentProfileId) {
       const agentRows = await sql.query("SELECT id FROM rental_agent_profiles WHERE id = $1 AND is_active = TRUE LIMIT 1", [input.agentProfileId]);
       if (agentRows.length === 0) return NextResponse.json({ error: "Choose an active agent profile or submit a general matching request." }, { status: 400 });

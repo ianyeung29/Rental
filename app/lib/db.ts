@@ -16,14 +16,20 @@ export async function ensureDatabaseSchema() {
         id TEXT PRIMARY KEY,
         email TEXT NOT NULL UNIQUE,
         display_name TEXT NOT NULL,
+        phone TEXT NOT NULL DEFAULT '',
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'user',
+        account_type TEXT NOT NULL DEFAULT 'user',
+        agent_verification_status TEXT NOT NULL DEFAULT 'unsubmitted',
         email_verified_at TIMESTAMPTZ,
         google_subject TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT ''");
+    await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'user'");
+    await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS agent_verification_status TEXT NOT NULL DEFAULT 'unsubmitted'");
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ");
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS google_subject TEXT");
     await sql.query(`
@@ -131,10 +137,16 @@ export async function ensureDatabaseSchema() {
         is_verified BOOLEAN NOT NULL DEFAULT FALSE,
         is_sample BOOLEAN NOT NULL DEFAULT FALSE,
         is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        verification_submitted_at TIMESTAMPTZ,
+        verification_reviewed_at TIMESTAMPTZ,
+        verification_note TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await sql.query("ALTER TABLE rental_agent_profiles ADD COLUMN IF NOT EXISTS verification_submitted_at TIMESTAMPTZ");
+    await sql.query("ALTER TABLE rental_agent_profiles ADD COLUMN IF NOT EXISTS verification_reviewed_at TIMESTAMPTZ");
+    await sql.query("ALTER TABLE rental_agent_profiles ADD COLUMN IF NOT EXISTS verification_note TEXT NOT NULL DEFAULT ''");
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_listing_private_details (
         listing_id TEXT PRIMARY KEY REFERENCES rental_listings(id) ON DELETE CASCADE,
@@ -212,6 +224,7 @@ export async function ensureDatabaseSchema() {
     `);
     await sql.query("CREATE INDEX IF NOT EXISTS rental_sessions_user_idx ON rental_sessions(user_id, expires_at)");
     await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS rental_users_google_subject_idx ON rental_users(google_subject) WHERE google_subject IS NOT NULL");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_users_account_type_idx ON rental_users(account_type, agent_verification_status)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_email_verifications_user_idx ON rental_email_verifications(user_id, expires_at)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_listings_user_idx ON rental_saved_listings(user_id, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_listings_listing_idx ON rental_saved_listings(listing_id, created_at DESC)");
