@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { listingLimitFor } from "../lib/account-types";
 import { toChineseLocationLabel } from "../lib/location-labels";
@@ -12,6 +13,7 @@ type AccountUser = {
   displayName: string;
   email: string;
   phone: string;
+  role: string;
   accountType: "user" | "agent";
   agentVerificationStatus: "unsubmitted" | "pending" | "verified" | "rejected" | "expired";
   agentVerified: boolean;
@@ -227,6 +229,10 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <div className="account-avatar-large" aria-hidden="true">{initial}</div>
             <div><h2 id="account-title">{user.displayName}</h2><p>{user.email}</p><div className="account-verification"><span className={`status-chip ${user.emailVerified ? "published" : "unpublished"}`}>{user.emailVerified ? (zh ? "邮箱已验证" : "Email verified") : (zh ? "邮箱未验证" : "Email not verified")}</span>{user.accountType === "agent" && <span className={`status-chip ${user.agentVerified ? "published" : user.agentVerificationStatus === "rejected" || user.agentVerificationStatus === "expired" ? "expired" : "unpublished"}`}>{agentStatusLabel}</span>}{!user.emailVerified && <button className="text-button" type="button" onClick={onResendVerification} disabled={resendLoading}>{resendLoading ? (zh ? "发送中…" : "Sending…") : (zh ? "重新发送" : "Resend")}</button>}</div></div>
           </div>
+          {user.role === "admin" && <Link className="admin-access-panel" href="/admin/agent-verifications" onClick={onClose}>
+            <span><strong>{zh ? "管理员工作台" : "Admin workspace"}</strong><small>{zh ? "查看并处理经纪身份核验申请。" : "Review and decide agent identity applications."}</small></span>
+            <b aria-hidden="true">→</b>
+          </Link>}
           <section className="account-profile-panel" aria-labelledby="private-profile-title">
             <div className="account-profile-heading">
               <div><span className="section-label">{zh ? "私密资料" : "PRIVATE PROFILE"}</span><h3 id="private-profile-title">{zh ? "我的资料" : "My profile"}</h3><p>{zh ? "仅你可见，不会出现在公开房源页。" : "Private to your account; it is not shown on public listings."}</p></div>

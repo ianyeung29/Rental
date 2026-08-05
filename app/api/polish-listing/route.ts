@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../lib/auth";
+import { buildLocationContext } from "../../lib/location-context";
+import type { LocationContext } from "../../lib/location-context";
 import { hasRestrictedHousingLanguage } from "../../lib/safety";
 
 type ListingInput = {
@@ -7,6 +9,9 @@ type ListingInput = {
   titleZh?: unknown;
   areaEn?: unknown;
   areaZh?: unknown;
+  boroughEn?: unknown;
+  boroughZh?: unknown;
+  locale?: unknown;
   rentalType?: unknown;
   price?: unknown;
   currency?: unknown;
@@ -22,6 +27,9 @@ type NormalizedListing = {
   titleZh: string;
   areaEn: string;
   areaZh: string;
+  boroughEn: string;
+  boroughZh: string;
+  locale: "zh" | "en";
   rentalType: string;
   price: string;
   currency: string;
@@ -30,6 +38,7 @@ type NormalizedListing = {
   features: string[];
   descriptionEn: string;
   descriptionZh: string;
+  locationContext: LocationContext | null;
 };
 
 const MAX_BODY_LENGTH = 14_000;
@@ -60,6 +69,8 @@ const SYSTEM_PROMPT = `You are a careful bilingual rental-listing editor for a h
 
 Rewrite only the facts supplied by the poster. Do not invent rent, square footage, amenities, transit access, views, availability, verification, photos, exact addresses, contact details, or legal promises. Preserve numbers, dates, and approximate-location language. The marketplace uses USD by default, so do not add a currency code to user-facing listing copy. Keep the English and Simplified Chinese versions aligned. If one language is missing, translate conservatively from the supplied facts.
 
+The optional locationContext contains provider-returned facts for the selected approximate area, not the property address. Use nearby places only as area references, and use walkMinutes only to describe an approximate walk to a named station. Do not turn these facts into a claim about the exact building, a commute to an unspecified destination, or a guarantee of service frequency. If locationContext is empty or has no facts, do not add nearby or transportation claims.
+
 Remove or rewrite discriminatory housing preferences or screening language. The marketplace supports Chinese-language outreach, but listings must not restrict housing based on protected traits or imply that only a particular ethnicity, nationality, family status, disability status, religion, sex, or similar group may rent. Mention a short review note when you had to soften or remove a risky claim.
 
 Use concise, factual, welcoming copy with no markdown. Return only the requested JSON object.`;
@@ -79,6 +90,9 @@ function normalizeInput(input: ListingInput): NormalizedListing {
     titleZh: text(input.titleZh, 180),
     areaEn: text(input.areaEn, 180),
     areaZh: text(input.areaZh, 180),
+    boroughEn: text(input.boroughEn, 120),
+    boroughZh: text(input.boroughZh, 120),
+    locale: input.locale === "en" ? "en" : "zh",
     rentalType: text(input.rentalType, 40),
     price: text(input.price, 40),
     currency: text(input.currency, 12),
@@ -87,6 +101,7 @@ function normalizeInput(input: ListingInput): NormalizedListing {
     features: textList(input.features),
     descriptionEn: text(input.descriptionEn),
     descriptionZh: text(input.descriptionZh),
+    locationContext: null,
   };
 }
 
@@ -117,6 +132,14 @@ function localPolish(input: NormalizedListing) {
   const titleZh = input.titleZh || `${typeZh}${input.areaZh ? ` · ${input.areaZh}` : ""}`;
   const featureEn = input.features.length ? `Features listed by the poster: ${input.features.join(", ")}.` : "";
   const featureZh = input.features.length ? `发布者填写的特点：${input.features.join("、")}。` : "";
+  const nearbyLine = input.locationContext?.nearby.map((place) => `${place.name} (${place.category})`).join(", ") || "";
+  const transitLine = input.locationContext?.transit.map((item) => `${item.name} (${item.mode}${item.walkMinutes ? `, about a ${item.walkMinutes}-minute walk` : ""})`).join(", ") || "";
+  const contextEn = input.locationContext?.source === "google" && (nearbyLine || transitLine)
+    ? `Selected-area references, to verify before publishing: ${[nearbyLine ? `Nearby: ${nearbyLine}.` : "", transitLine ? `Transportation: ${transitLine}.` : ""].filter(Boolean).join(" ")}`
+    : "";
+  const contextZh = input.locationContext?.source === "google" && (nearbyLine || transitLine)
+    ? `所选区域参考（发布前请核实）：${[nearbyLine ? `附近：${nearbyLine}。` : "", transitLine ? `交通：${transitLine}。` : ""].filter(Boolean).join("")}`
+    : "";
   const descriptionEn = [
     input.descriptionEn,
     input.areaEn ? appendIfMissing(input.descriptionEn, `Approximate area: ${input.areaEn}.`) : "",
@@ -124,6 +147,7 @@ function localPolish(input: NormalizedListing) {
     input.moveIn ? appendIfMissing(input.descriptionEn, `Move-in: ${input.moveIn}.`) : "",
     input.lease ? appendIfMissing(input.descriptionEn, `Minimum lease: ${input.lease} months.`) : "",
     appendIfMissing(input.descriptionEn, featureEn),
+    appendIfMissing(input.descriptionEn, contextEn),
   ].filter(Boolean).join(" ");
   const descriptionZh = [
     input.descriptionZh,
@@ -132,10 +156,12 @@ function localPolish(input: NormalizedListing) {
     input.moveIn ? appendIfMissing(input.descriptionZh, `入住时间：${input.moveIn}。`) : "",
     input.lease ? appendIfMissing(input.descriptionZh, `最短租期：${input.lease} 个月。`) : "",
     appendIfMissing(input.descriptionZh, featureZh),
+    appendIfMissing(input.descriptionZh, contextZh),
   ].filter(Boolean).join(" ");
   const notes = ["Review the draft before publishing; this local preview does not use an AI model."];
+  if (input.locationContext?.notes.length) notes.push(...input.locationContext.notes.slice(0, 1));
   if (hasPotentiallyDiscriminatoryLanguage(input)) notes.push("Review language about who may rent and remove protected-trait restrictions.");
-  return { titleEn, titleZh, descriptionEn, descriptionZh, notes };
+  return { titleEn, titleZh, descriptionEn, descriptionZh, notes: notes.slice(0, 3) };
 }
 
 function outputText(response: unknown) {
@@ -182,8 +208,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Add a title or description before polishing." }, { status: 400 });
   }
 
+  try {
+    input.locationContext = await buildLocationContext({
+      areaEn: input.areaEn,
+      areaZh: input.areaZh,
+      boroughEn: input.boroughEn,
+      boroughZh: input.boroughZh,
+      locale: input.locale,
+    });
+  } catch {
+    input.locationContext = {
+      source: "none",
+      approximateArea: input.areaZh || input.areaEn,
+      nearby: [],
+      transit: [],
+      notes: [input.locale === "zh" ? "地图服务暂时不可用；AI不会编造附近设施或交通时间。" : "Map context is temporarily unavailable; AI will not invent nearby places or travel times."],
+    };
+  }
+
   if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json({ ...localPolish(input), source: "local" });
+    return NextResponse.json({ ...localPolish(input), locationContext: input.locationContext, source: "local" });
   }
 
   try {
@@ -212,12 +256,14 @@ export async function POST(request: Request) {
     const rawOutput = outputText(data);
     const polished = JSON.parse(rawOutput) as { titleEn?: unknown; titleZh?: unknown; descriptionEn?: unknown; descriptionZh?: unknown; notes?: unknown };
     const notes = Array.isArray(polished.notes) ? polished.notes.filter((note): note is string => typeof note === "string").map((note) => text(note, 240)).filter(Boolean).slice(0, 3) : [];
+    if (input.locationContext?.notes[0] && notes.length < 3) notes.push(input.locationContext.notes[0]);
     return NextResponse.json({
       titleEn: safeModelOutput(polished.titleEn, input.titleEn, 180),
       titleZh: safeModelOutput(polished.titleZh, input.titleZh, 180),
       descriptionEn: safeModelOutput(polished.descriptionEn, input.descriptionEn, MAX_FIELD_LENGTH),
       descriptionZh: safeModelOutput(polished.descriptionZh, input.descriptionZh, MAX_FIELD_LENGTH),
       notes,
+      locationContext: input.locationContext,
       source: "openai",
     });
   } catch {

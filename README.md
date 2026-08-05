@@ -12,7 +12,7 @@ This is a browser-first MVP slice of the Chinese-first North American rental mar
 - Approximate-area privacy language with no exact address in public content.
 - Save listings and searches with browser persistence.
 - Saved searches remain available anonymously in the browser and sync to Neon for verified signed-in users.
-- Compare up to two listings in a side-by-side view.
+- Compare up to two listings in a side-by-side view with bedrooms, bathrooms, feature tags, and a balanced AI conclusion; a labeled local comparison remains available when AI is not configured.
 - Listing detail drawer, structured inquiry flow, and a Messages view that combines local preview records with Neon-backed inquiries.
 - Five-step poster workflow with autosaved and explicitly savable drafts, private exact-address input, rental terms, photo compression, cover-photo ordering, preview, validation, and cloud publish.
 - Chinese-only posting fields for the current pilot, USD rental currency, immediate move-in by default with optional date selection, and expanded feature choices including laundry, air conditioning, dishwasher, balcony, elevator, gym, doorman, and storage.
@@ -58,7 +58,7 @@ npm run db:seed:agents
 
 These profiles are explicitly marked as sample profiles and are not verified professionals. Replace them with reviewed agent records before production use.
 
-## Enable AI listing polish
+## Enable AI listing tools
 
 Copy `.env.example` to `.env.local` and add your server-side API key:
 
@@ -68,7 +68,17 @@ OPENAI_MODEL=gpt-5.6-luna
 OPENAI_REASONING_EFFORT=low
 ```
 
-The default model is the cost-sensitive GPT-5.6 Luna with low reasoning effort, which is appropriate for fast listing copy polish. Never expose the key in client-side code or commit `.env.local`. Without a key, the posting wizard still offers a clearly labeled local polish preview.
+The default model is the cost-sensitive GPT-5.6 Luna with low reasoning effort, which is appropriate for fast listing copy polish and two-listing comparison conclusions. Never expose the key in client-side code or commit `.env.local`. Without a key, the posting wizard and Compare Desk still offer clearly labeled local previews; the AI comparison route also requires a signed-in, verified account.
+
+### Optional area context for AI copy
+
+To let the posting wizard add verified, approximate-area references for nearby places and walking time to transportation stations, add a server-only Google Maps Platform key:
+
+```bash
+GOOGLE_MAPS_SERVER_API_KEY=your_restricted_server_key
+```
+
+Enable Places API (New) and Routes API for that key, restrict it to those APIs, and keep it out of `NEXT_PUBLIC_*` variables. The site sends only the selected borough/area to Google; it never sends the private street address. The generated copy describes nearby places as area references and station times as approximate walks, so the poster should review them before publishing. Without this key, AI polish continues without unverified nearby or transit claims. See Google’s [Places Text Search (New)](https://developers.google.com/maps/documentation/places/web-service/text-search) and [Routes API](https://developers.google.com/maps/documentation/routes) documentation.
 
 ## Enable Resend email verification
 
@@ -128,6 +138,20 @@ APP_URL=https://your-production-domain.com
 ```
 
 In the Official Account admin console, add the exact production hostname under the JS interface safe domain (`JS接口安全域名`). The site calls `/api/wechat/signature` to obtain a server-generated signature; the AppSecret never reaches the browser. Test by opening the listing URL in WeChat itself, not Chrome or Safari, then use the top-right `...` menu and choose `分享到朋友圈`.
+
+## Review agent identity
+
+Agent registration and verification are separate steps. A user chooses `Agent` during registration, verifies the account email, then opens the account avatar and submits the license state, license number, and brokerage under `AGENT IDENTITY`. The application is not approved automatically.
+
+To grant an operations account access to the review desk, set its role once in Neon using the account email:
+
+```sql
+UPDATE rental_users
+SET role = 'admin', updated_at = NOW()
+WHERE email = 'admin@example.com';
+```
+
+After signing in with that verified admin account, open the account avatar and choose `Admin workspace`, or go directly to `/admin/agent-verifications`. The desk reads the protected `/api/admin/agent-verifications` queue and provides `Approve verification` and `Return for updates` actions. Approval enables the verified-agent listing capacity; returning an application stores the note and leaves it in the queue for follow-up. Check the submitted license against the relevant state’s public records before approving.
 
 ## Production checklist
 

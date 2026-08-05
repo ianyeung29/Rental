@@ -4,7 +4,7 @@ import { ensureDatabaseSchema, sql } from "../../../lib/db";
 
 const MAX_BODY_LENGTH = 28_000;
 const DRAFT_FIELDS = [
-  "titleEn", "titleZh", "areaEn", "areaZh", "privateAddress", "posterRole", "rentalType", "price", "currency",
+  "titleEn", "titleZh", "areaEn", "areaZh", "areaGroupId", "areaLocationId", "privateAddress", "posterRole", "rentalType", "price", "currency",
   "bedrooms", "bathrooms", "moveInMode", "moveInDate", "lease", "features", "descriptionEn", "descriptionZh",
   "photos", "photoKeys", "contactName", "contactEmail", "tourPreference", "agentService", "agentFeePlan", "agentFeeAmount", "agentProfileId", "expiresOn",
 ] as const;
