@@ -6,7 +6,9 @@ import AccountDrawer from "./components/AccountDrawer";
 import AuthDrawer from "./components/AuthDrawer";
 import ReportDrawer from "./components/ReportDrawer";
 import SiteFooter from "./components/SiteFooter";
+import { AccountType, AgentVerificationStatus } from "./lib/account-types";
 import { demoModeEnabled } from "./lib/demo";
+import { toChineseLocationLabel } from "./lib/location-labels";
 import { configureWeChatShare, isWeChatBrowser, toAbsoluteUrl } from "./lib/wechat-client";
 
 type Locale = "zh" | "en";
@@ -81,7 +83,11 @@ type AuthUser = {
   id: string;
   email: string;
   displayName: string;
+  phone: string;
   role: string;
+  accountType: AccountType;
+  agentVerificationStatus: AgentVerificationStatus;
+  agentVerified: boolean;
   emailVerified: boolean;
 };
 
@@ -799,7 +805,7 @@ const LISTINGS: Listing[] = [
     id: "elmwood-light",
     titleZh: "树影公园旁的两居",
     titleEn: "Two bedrooms beside Elmwood Park",
-    areaZh: "Queens · Forest Hills 一带",
+    areaZh: "皇后区 · 森林小丘一带",
     areaEn: "Queens · around Forest Hills",
     type: "entire",
     typeZh: "整套住房",
@@ -825,7 +831,7 @@ const LISTINGS: Listing[] = [
     id: "harbor-window",
     titleZh: "带早餐角的明亮一居",
     titleEn: "Bright one-bedroom with a breakfast nook",
-    areaZh: "Jersey City · Heights 一带",
+    areaZh: "泽西市 · 高地一带",
     areaEn: "Jersey City · around the Heights",
     type: "entire",
     typeZh: "整套住房",
@@ -851,7 +857,7 @@ const LISTINGS: Listing[] = [
     id: "cedar-room",
     titleZh: "近通勤线的独立房间",
     titleEn: "Private room near a commuter line",
-    areaZh: "North York · Willowdale 一带",
+    areaZh: "北约克 · 柳树谷一带",
     areaEn: "North York · around Willowdale",
     type: "privateRoom",
     typeZh: "独立房间",
@@ -877,7 +883,7 @@ const LISTINGS: Listing[] = [
     id: "sunset-sublet",
     titleZh: "带露台的短租转租",
     titleEn: "A terrace sublet for the fall",
-    areaZh: "Brooklyn · Sunset Park 一带",
+    areaZh: "布鲁克林 · 日落公园一带",
     areaEn: "Brooklyn · around Sunset Park",
     type: "sublet",
     typeZh: "转租",
@@ -982,8 +988,8 @@ const copy = {
     contact: "开始联系",
     month: "/月",
     monthly: "月租",
-    costBreakdown: "USD 月租",
-    costNote: "月租明确；押金、水电和其他费用请向发布者确认",
+    costBreakdown: "月租",
+    costNote: "月租金额已标明；押金、水电和其他费用请向发布者确认",
     locationChecked: "地点已核验",
     availability: "近期确认有房",
     photoCount: "张照片",
@@ -1124,7 +1130,7 @@ const copy = {
     contact: "Start a conversation",
     month: "/mo",
     monthly: "monthly",
-    costBreakdown: "USD monthly",
+    costBreakdown: "Monthly rent",
     costNote: "Monthly rent is shown; confirm deposits, utilities, and other fees with the poster",
     locationChecked: "Location checked",
     availability: "Availability recent",
@@ -1316,7 +1322,7 @@ function CheckIcon({ size = 14 }: { size?: number }) {
 }
 
 function formatPrice(listing: Listing) {
-  return `$${listing.price.toLocaleString("en-US")} ${listing.currency}`;
+  return `$${listing.price.toLocaleString("en-US")}`;
 }
 
 function listingPhotos(listing: Listing) {
@@ -2162,6 +2168,7 @@ export default function HomePage() {
   const savedListings = allListings.filter((listing) => savedIds.has(listing.id));
   const messageInquiries = currentUser?.emailVerified ? serverInquiries : inquiries;
   const visibleListings = filteredListings.slice(0, visibleResultCount);
+  const canPostAsAgent = !currentUser ? demoMode : currentUser.agentVerified;
 
   const updateDraft = (updates: Partial<ListingDraft>) => {
     setDraft((current) => ({ ...current, ...updates }));
@@ -2186,7 +2193,7 @@ export default function HomePage() {
     setPostOpen(true);
     setEditingListingId(null);
     setPostStep(1);
-    setDraft((current) => ({ ...current, contactName: current.contactName || currentUser?.displayName || "", contactEmail: current.contactEmail || currentUser?.email || "" }));
+    setDraft((current) => ({ ...current, posterRole: canPostAsAgent ? current.posterRole : "owner", contactName: current.contactName || currentUser?.displayName || "", contactEmail: current.contactEmail || currentUser?.email || "" }));
     setPostError("");
     setAiPolishError("");
     setAiPolishSource(null);
@@ -2211,7 +2218,10 @@ export default function HomePage() {
     const payload = {
       email: String(formData.get("email") || ""),
       password: String(formData.get("password") || ""),
-      ...(authMode === "register" ? { displayName: String(formData.get("displayName") || "") } : {}),
+      ...(authMode === "register" ? {
+        displayName: String(formData.get("displayName") || ""),
+        accountType: formData.get("accountType") === "agent" ? "agent" : "user",
+      } : {}),
     };
     setAuthLoading(true);
     setAuthError("");
@@ -2229,7 +2239,11 @@ export default function HomePage() {
       setAuthOpen(false);
       setAuthError("");
       showToast(authMode === "register"
-        ? (result.verificationSent ? (locale === "zh" ? "账户已创建，验证邮件已发送" : "Account created; verification email sent") : (locale === "zh" ? "账户已创建，请配置或重新发送验证邮件" : "Account created; verification email is not configured yet"))
+        ? result.user.accountType === "agent"
+          ? (result.verificationSent
+            ? (locale === "zh" ? "经纪账户已创建，验证邮件已发送；执照核验通过后可发布更多房源" : "Agent account created; verify your email, then complete license review for higher limits")
+            : (locale === "zh" ? "经纪账户已创建；请先验证邮箱并完成执照核验" : "Agent account created; verify your email and complete license review"))
+          : (result.verificationSent ? (locale === "zh" ? "账户已创建，验证邮件已发送" : "Account created; verification email sent") : (locale === "zh" ? "账户已创建，请配置或重新发送验证邮件" : "Account created; verification email is not configured yet"))
         : (locale === "zh" ? "已登录" : "Signed in"));
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : (locale === "zh" ? "账户操作失败。" : "Account action failed."));
@@ -2281,6 +2295,10 @@ export default function HomePage() {
     }
   };
 
+  const handleAgentVerificationStatusChange = (status: AuthUser["agentVerificationStatus"]) => {
+    setCurrentUser((current) => current ? { ...current, agentVerificationStatus: status, agentVerified: status === "verified" } : current);
+  };
+
   const handleDashboardStatus = async (id: string, status: "published" | "paused") => {
     try {
       const response = await fetch(`/api/my/listings/${encodeURIComponent(id)}`, {
@@ -2288,8 +2306,11 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Listing status could not be updated.");
+      const result = await response.json() as { error?: string; code?: string; limit?: number };
+      if (!response.ok) {
+        if (result.code === "LISTING_LIMIT_REACHED") throw new Error(locale === "zh" ? `当前账户最多可发布 ${result.limit || 3} 套有效房源。` : (result.error || "Your listing limit has been reached."));
+        throw new Error(result.error || "Listing status could not be updated.");
+      }
       setDashboardListings((current) => current.map((listing) => listing.id === id ? { ...listing, status } : listing));
       const listingResponse = await fetch("/api/listings", { cache: "no-store" });
       if (listingResponse.ok) {
@@ -2316,8 +2337,11 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "published", expiresOn }),
       });
-      const result = await response.json() as { error?: string; expiresOn?: string | null };
-      if (!response.ok) throw new Error(result.error || "Listing could not be renewed.");
+      const result = await response.json() as { error?: string; code?: string; limit?: number; expiresOn?: string | null };
+      if (!response.ok) {
+        if (result.code === "LISTING_LIMIT_REACHED") throw new Error(locale === "zh" ? `当前账户最多可发布 ${result.limit || 3} 套有效房源。` : (result.error || "Your listing limit has been reached."));
+        throw new Error(result.error || "Listing could not be renewed.");
+      }
       setDashboardListings((current) => current.map((item) => item.id === id ? { ...item, status: "published", expiresOn: result.expiresOn || expiresOn } : item));
       const listingResponse = await fetch("/api/listings", { cache: "no-store" });
       if (listingResponse.ok) {
@@ -2449,6 +2473,18 @@ export default function HomePage() {
 
   const toggleFeature = (feature: string) => {
     setActiveFeatures((current) => (current.includes(feature) ? current.filter((item) => item !== feature) : [...current, feature]));
+  };
+
+  const handleProfileUpdate = async (input: { displayName: string; phone: string }) => {
+    const response = await fetch("/api/auth/me", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const result = await response.json() as { user?: AuthUser; error?: string };
+    if (!response.ok || !result.user) throw new Error(result.error || (locale === "zh" ? "资料暂时无法更新。" : "Profile could not be updated right now."));
+    setCurrentUser(result.user);
+    showToast(locale === "zh" ? "资料已更新" : "Profile updated");
   };
 
   const applyPopularLocation = (value: string) => {
@@ -2796,8 +2832,18 @@ export default function HomePage() {
           media: draft.photoKeys.map((key) => ({ key, contentType: "image/jpeg" })),
         }),
       });
-      const result = await response.json() as Listing & { error?: string; status?: string };
-      if (!response.ok) throw new Error(result.error || (editingId ? "The listing could not be updated." : "The listing could not be published."));
+      const result = await response.json() as Listing & { error?: string; status?: string; code?: string; limit?: number; used?: number };
+      if (!response.ok) {
+        if (result.code === "LISTING_LIMIT_REACHED") {
+          throw new Error(locale === "zh"
+            ? `当前账户已使用 ${result.used || 0} / ${result.limit || 3} 个有效房源额度。完成经纪执照核验后，额度会提高。`
+            : (result.error || "Your listing limit has been reached."));
+        }
+        if (result.code === "AGENT_VERIFICATION_REQUIRED") {
+          throw new Error(locale === "zh" ? "完成经纪执照核验后，才可以使用经纪身份发布房源。" : (result.error || "Complete agent license verification before publishing as an agent."));
+        }
+        throw new Error(result.error || (editingId ? "The listing could not be updated." : "The listing could not be published."));
+      }
       if (editingId) {
         const listingResponse = await fetch("/api/listings", { cache: "no-store" });
         if (listingResponse.ok) {
@@ -2937,7 +2983,7 @@ export default function HomePage() {
   };
 
   const listingTitle = (listing: Listing) => (locale === "zh" ? listing.titleZh : listing.titleEn);
-  const listingArea = (listing: Listing) => (locale === "zh" ? listing.areaZh : listing.areaEn);
+  const listingArea = (listing: Listing) => (locale === "zh" ? toChineseLocationLabel(listing.areaZh || listing.areaEn) : listing.areaEn || listing.areaZh);
   const listingType = (listing: Listing) => (locale === "zh" ? listing.typeZh : listing.typeEn);
   const listingTags = (listing: Listing) => (locale === "zh" ? listing.tagsZh : listing.tagsEn);
   const listingFreshness = (listing: Listing) => (locale === "zh" ? listing.freshnessZh : listing.freshnessEn);
@@ -2957,7 +3003,7 @@ export default function HomePage() {
   };
   const buildListingShareText = (listing: Listing, url: string) => {
     const title = locale === "zh" ? listing.titleZh : listing.titleEn;
-    const area = locale === "zh" ? listing.areaZh : listing.areaEn;
+    const area = listingArea(listing);
     const type = locale === "zh" ? listing.typeZh : listing.typeEn;
     const tags = listingTags(listing).slice(0, 5);
     const lines = locale === "zh"
@@ -2987,7 +3033,7 @@ export default function HomePage() {
     const listing = shareListing || selectedListing;
     if (!listing) return null;
     const title = locale === "zh" ? listing.titleZh : listing.titleEn;
-    const area = locale === "zh" ? listing.areaZh : listing.areaEn;
+    const area = locale === "zh" ? toChineseLocationLabel(listing.areaZh || listing.areaEn) : listing.areaEn || listing.areaZh;
     const moveIn = formatMoveIn(listing.moveIn, locale);
     const description = locale === "zh"
       ? `${area} · 月租 ${formatPrice(listing)} · ${moveIn}`
@@ -3181,6 +3227,10 @@ export default function HomePage() {
             <a href="#messages" onClick={(event) => { event.preventDefault(); setMessagesOpen(true); }}>{t.messages}{messageInquiries.length > 0 ? ` ${messageInquiries.length}` : ""}</a>
           </nav>
           <div className="topbar-actions">
+            <button className="language-switch" type="button" onClick={() => setLocale((current) => current === "zh" ? "en" : "zh")} aria-label={locale === "zh" ? "Switch to English" : "切换到中文"}>
+              <span className="language-dot" aria-hidden="true" />
+              {locale === "zh" ? "English" : "中文"}
+            </button>
             <button className="post-button" type="button" onClick={openPostFlow}>
               <span aria-hidden="true">+</span>
               {t.post}
@@ -3554,14 +3604,14 @@ export default function HomePage() {
                   <div className="post-area-shortcuts field-span-2" aria-label={locale === "zh" ? "常用区域快捷选择" : "Popular area shortcuts"}><div className="post-helper-heading"><span>{locale === "zh" ? "常用区域" : "Popular areas"}</span><small>{locale === "zh" ? "点击后仍可修改" : "You can edit it after selecting"}</small></div><div className="post-area-shortcut-list">{POST_AREA_SHORTCUTS.map((shortcut) => <button className={`post-area-shortcut ${draft.areaEn === shortcut.en ? "active" : ""}`} key={shortcut.value} type="button" onClick={() => updateDraft({ areaZh: shortcut.zh, areaEn: shortcut.en })} aria-pressed={draft.areaEn === shortcut.en}>{shortcut.zh}</button>)}</div></div>
                   <label className="field-label" htmlFor="post-private-address">{locale === "zh" ? "精确地址（私密）" : "Exact address (private)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-private-address" value={draft.privateAddress} onChange={(event) => updateDraft({ privateAddress: event.target.value })} placeholder={locale === "zh" ? "请输入完整街道地址" : "Enter the full street address"} /></label>
                   <div className="post-privacy-note"><LockIcon /><div><strong>{t.addressPrivate}</strong><p>仅保存在本地草稿，不会出现在公开房源卡片。</p></div></div>
-                  <label className="field-label" htmlFor="post-role">发布者角色<select id="post-role" value={draft.posterRole} onChange={(event) => updateDraft({ posterRole: event.target.value as ListingDraft["posterRole"] })}><option value="owner">房主</option><option value="agent">房产经纪</option></select></label>
+                  <label className="field-label" htmlFor="post-role">发布者角色<select id="post-role" value={draft.posterRole} onChange={(event) => updateDraft({ posterRole: event.target.value as ListingDraft["posterRole"] })} disabled={Boolean(currentUser) && !canPostAsAgent}><option value="owner">房主</option>{canPostAsAgent && <option value="agent">房产经纪</option>}</select>{currentUser?.accountType === "agent" && !currentUser.agentVerified && <small className="field-help">完成经纪执照核验后，才可使用经纪身份并获得更高发布额度。</small>}{currentUser && currentUser.accountType === "user" && <small className="field-help">普通用户账户按个人房源额度发布。</small>}</label>
                 </div>
               )}
 
               {postStep === 2 && (
                 <div className="post-form-grid">
                   <label className="field-label" htmlFor="post-type">{t.type}<select id="post-type" value={draft.rentalType} onChange={(event) => updateDraft({ rentalType: event.target.value as ListingDraft["rentalType"] })}><option value="entire">{t.entire}</option><option value="privateRoom">{t.privateRoom}</option><option value="sublet">{t.sublet}</option></select></label>
-                  <label className="field-label" htmlFor="post-price">{locale === "zh" ? "月租（USD）" : "Monthly rent (USD)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-price" type="number" min="1" value={draft.price} onChange={(event) => updateDraft({ price: event.target.value })} placeholder="2400" /></label>
+                  <label className="field-label" htmlFor="post-price">{locale === "zh" ? "月租" : "Monthly rent"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-price" type="number" min="1" value={draft.price} onChange={(event) => updateDraft({ price: event.target.value })} placeholder="2400" /></label>
                   <label className="field-label" htmlFor="post-bedrooms">{locale === "zh" ? "卧室" : "Bedrooms"}<select id="post-bedrooms" value={draft.bedrooms} onChange={(event) => updateDraft({ bedrooms: event.target.value })}><option value="0">Studio</option><option value="1">1</option><option value="2">2</option><option value="3">3+</option></select></label>
                   <label className="field-label" htmlFor="post-bathrooms">{locale === "zh" ? "卫生间" : "Bathrooms"}<select id="post-bathrooms" value={draft.bathrooms} onChange={(event) => updateDraft({ bathrooms: event.target.value })}><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3+</option></select></label>
                   <label className="field-label" htmlFor="post-move-in-mode">可入住时间<select id="post-move-in-mode" value={draft.moveInMode} onChange={(event) => updateDraft({ moveInMode: event.target.value as ListingDraft["moveInMode"] })}><option value="immediate">{t.immediate}</option><option value="date">{t.chooseDate}</option></select></label>
@@ -3622,9 +3672,9 @@ export default function HomePage() {
                       <div className="agent-fee-options">
                         <label className={`agent-fee-option ${draft.agentFeePlan === "agentQuote" ? "active" : ""}`}><input type="radio" name="agent-fee-plan" value="agentQuote" checked={draft.agentFeePlan === "agentQuote"} onChange={() => updateDraft({ agentFeePlan: "agentQuote" })} /><span>{locale === "zh" ? "先让经纪报价" : "Ask the agent to quote"}</span></label>
                         <label className={`agent-fee-option ${draft.agentFeePlan === "firstMonthRent" ? "active" : ""}`}><input type="radio" name="agent-fee-plan" value="firstMonthRent" checked={draft.agentFeePlan === "firstMonthRent"} onChange={() => updateDraft({ agentFeePlan: "firstMonthRent" })} /><span>{locale === "zh" ? "成交后支付一个月租金" : "One month’s rent after a lease"}</span></label>
-                        <label className={`agent-fee-option ${draft.agentFeePlan === "flatFee" ? "active" : ""}`}><input type="radio" name="agent-fee-plan" value="flatFee" checked={draft.agentFeePlan === "flatFee"} onChange={() => updateDraft({ agentFeePlan: "flatFee" })} /><span>{locale === "zh" ? "固定费用（USD）" : "Flat fee (USD)"}</span></label>
+                        <label className={`agent-fee-option ${draft.agentFeePlan === "flatFee" ? "active" : ""}`}><input type="radio" name="agent-fee-plan" value="flatFee" checked={draft.agentFeePlan === "flatFee"} onChange={() => updateDraft({ agentFeePlan: "flatFee" })} /><span>{locale === "zh" ? "固定费用" : "Flat fee"}</span></label>
                       </div>
-                      {draft.agentFeePlan === "flatFee" && <label className="field-label agent-fee-amount" htmlFor="post-agent-fee-amount">{locale === "zh" ? "预期固定费用（USD）" : "Expected flat fee (USD)"}<input id="post-agent-fee-amount" type="number" min="1" step="1" value={draft.agentFeeAmount} onChange={(event) => updateDraft({ agentFeeAmount: event.target.value })} placeholder="1500" /></label>}
+                      {draft.agentFeePlan === "flatFee" && <label className="field-label agent-fee-amount" htmlFor="post-agent-fee-amount">{locale === "zh" ? "预期固定费用" : "Expected flat fee"}<input id="post-agent-fee-amount" type="number" min="1" step="1" value={draft.agentFeeAmount} onChange={(event) => updateDraft({ agentFeeAmount: event.target.value })} placeholder="1500" /></label>}
                       </div>
                     </div>}
                   </fieldset>
@@ -3642,7 +3692,7 @@ export default function HomePage() {
                   </div>
                   <div className="post-preview">
                   <div className="preview-photo">{draft.photos[0] ? <Image src={draft.photos[0]} alt="" fill sizes="460px" unoptimized /> : null}<span>{locale === "zh" ? "公开预览" : "Public preview"}</span></div>
-                  <div className="preview-copy"><span className="listing-type">{draft.rentalType === "privateRoom" ? t.privateRoom : draft.rentalType === "sublet" ? t.sublet : t.entire}</span><h3>{draft.titleZh || (locale === "zh" ? "未命名房源" : "Untitled listing")}</h3><p className="listing-area"><PinIcon size={15} />{draft.areaZh || "大致区域"}</p><div className="price-line"><strong>{draft.price ? `$${Number(draft.price).toLocaleString("en-US")} USD` : "—"}</strong><span>{t.month}</span></div><p className="preview-move-in">{t.detailMoveIn}：{draft.moveInMode === "immediate" ? t.immediate : draft.moveInDate || "—"}</p><div className="tag-row">{draft.features.map((feature) => <span className="listing-tag" key={feature}>{featureLabel(feature)}</span>)}</div>{draft.agentService === "agentMatch" && <div className="agent-service-preview"><ShieldIcon size={16} /><div><strong>{selectedAgentProfile ? (locale === "zh" ? `已选择经纪：${selectedAgentProfile.displayNameZh}` : `Agent selected: ${selectedAgentProfile.displayNameEn}`) : (locale === "zh" ? "已请求经纪协助" : "Agent assistance requested")}</strong><p>{draft.agentFeePlan === "firstMonthRent" ? (locale === "zh" ? "费用意向：成交后支付一个月租金" : "Fee preference: one month’s rent after a lease") : draft.agentFeePlan === "flatFee" ? (locale === "zh" ? `费用意向：固定 $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")} USD` : `Fee preference: $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")} USD flat`) : (locale === "zh" ? "费用意向：请经纪报价" : "Fee preference: agent to quote")}</p></div></div>}<div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>精确地址不会出现在公开预览中。</p></div></div></div>
+                  <div className="preview-copy"><span className="listing-type">{draft.rentalType === "privateRoom" ? t.privateRoom : draft.rentalType === "sublet" ? t.sublet : t.entire}</span><h3>{draft.titleZh || (locale === "zh" ? "未命名房源" : "Untitled listing")}</h3><p className="listing-area"><PinIcon size={15} />{locale === "zh" ? toChineseLocationLabel(draft.areaZh || "大致区域") : draft.areaEn || draft.areaZh || "Approximate area"}</p><div className="price-line"><strong>{draft.price ? `$${Number(draft.price).toLocaleString("en-US")}` : "—"}</strong><span>{t.month}</span></div><p className="preview-move-in">{t.detailMoveIn}：{draft.moveInMode === "immediate" ? t.immediate : draft.moveInDate || "—"}</p><div className="tag-row">{draft.features.map((feature) => <span className="listing-tag" key={feature}>{featureLabel(feature)}</span>)}</div>{draft.agentService === "agentMatch" && <div className="agent-service-preview"><ShieldIcon size={16} /><div><strong>{selectedAgentProfile ? (locale === "zh" ? `已选择经纪：${selectedAgentProfile.displayNameZh}` : `Agent selected: ${selectedAgentProfile.displayNameEn}`) : (locale === "zh" ? "已请求经纪协助" : "Agent assistance requested")}</strong><p>{draft.agentFeePlan === "firstMonthRent" ? (locale === "zh" ? "费用意向：成交后支付一个月租金" : "Fee preference: one month’s rent after a lease") : draft.agentFeePlan === "flatFee" ? (locale === "zh" ? `费用意向：固定 $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")}` : `Fee preference: $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")} flat`) : (locale === "zh" ? "费用意向：请经纪报价" : "Fee preference: agent to quote")}</p></div></div>}<div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>精确地址不会出现在公开预览中。</p></div></div></div>
                   </div>
                 </>
               )}
@@ -3816,9 +3866,9 @@ export default function HomePage() {
         </div>
       )}
 
-      {authOpen && <AuthDrawer locale={locale} mode={authMode} loading={authLoading} error={authError} onGoogleLogin={() => { window.location.assign("/api/auth/google"); }} onClose={() => { setAuthOpen(false); setAuthError(""); }} onModeChange={(mode) => { setAuthMode(mode); setAuthError(""); }} onSubmit={handleAuthSubmit} />}
+      {authOpen && <AuthDrawer locale={locale} mode={authMode} loading={authLoading} error={authError} onGoogleLogin={(accountType) => { window.location.assign(`/api/auth/google?accountType=${accountType || "user"}`); }} onClose={() => { setAuthOpen(false); setAuthError(""); }} onModeChange={(mode) => { setAuthMode(mode); setAuthError(""); }} onSubmit={handleAuthSubmit} />}
 
-      {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} agentRequests={agentRequests} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} />}
+      {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} agentRequests={agentRequests} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onUpdateProfile={handleProfileUpdate} onAgentVerificationStatusChange={handleAgentVerificationStatusChange} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} />}
 
       {(toast || verificationNotice) && <div className="toast" role="status"><span className="toast-mark"><CheckIcon size={13} /></span>{toast || verificationNotice}</div>}
 

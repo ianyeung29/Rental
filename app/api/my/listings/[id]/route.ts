@@ -5,6 +5,7 @@ import { getCurrentUser } from "../../../../lib/auth";
 import { publicUrlForKey } from "../../../../lib/r2";
 import { listingSafetyError } from "../../../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../../../lib/email";
+import { listingLimitFor } from "../../../../lib/account-types";
 
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
@@ -165,7 +166,7 @@ function normalizeBody(body: ListingBody) {
 
 function validationError(input: ReturnType<typeof normalizeBody>) {
   if (!input.titleZh || !input.areaZh || !input.privateAddress) return "Complete the title, approximate area, and private address.";
-  if (!ALLOWED_RENTAL_TYPES.has(input.rentalType) || !Number.isFinite(input.price) || input.price <= 0) return "Use a valid rental type and positive USD price.";
+  if (!ALLOWED_RENTAL_TYPES.has(input.rentalType) || !Number.isFinite(input.price) || input.price <= 0) return "Use a valid rental type and positive monthly rent.";
   if (!Number.isInteger(input.leaseMonths) || input.leaseMonths <= 0 || input.leaseMonths > 120) return "Use a lease term between 1 and 120 months.";
   if (input.moveIn !== "immediate" && !/^\d{4}-\d{2}-\d{2}$/.test(input.moveIn)) return "Choose immediate move-in or a valid move-in date.";
   if (input.expiresOn && (!isDateOnly(input.expiresOn) || input.expiresOn < new Date().toISOString().slice(0, 10))) return "Choose today or a future listing expiration date.";
@@ -176,7 +177,7 @@ function validationError(input: ReturnType<typeof normalizeBody>) {
 
 function agentFeeLabel(input: ReturnType<typeof normalizeBody>) {
   if (input.agentFeePlan === "firstMonthRent") return "成交后支付一个月租金";
-  if (input.agentFeePlan === "flatFee") return `固定 $${Number(input.agentFeeAmount || 0).toLocaleString("en-US")} USD`;
+  if (input.agentFeePlan === "flatFee") return `固定 $${Number(input.agentFeeAmount || 0).toLocaleString("en-US")}`;
   return "请经纪报价";
 }
 
@@ -210,6 +211,38 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (expiresOn && (!isDateOnly(expiresOn) || expiresOn < new Date().toISOString().slice(0, 10))) {
         return NextResponse.json({ error: "Choose today or a future listing expiration date." }, { status: 400 });
       }
+      const ownedRows = await sql.query(
+        "SELECT status, expires_on FROM rental_listings WHERE id = $1 AND owner_id = $2 LIMIT 1",
+        [id, user.id],
+      );
+      const ownedListing = ownedRows[0] as Record<string, unknown> | undefined;
+      if (!ownedListing) return NextResponse.json({ error: "Listing not found." }, { status: 404 });
+      const currentExpiresOn = dateOnly(ownedListing.expires_on);
+      const currentCountsTowardQuota = (ownedListing.status === "published" || ownedListing.status === "paused")
+        && (!currentExpiresOn || currentExpiresOn >= new Date().toISOString().slice(0, 10));
+      if (!currentCountsTowardQuota) {
+        const listingLimit = listingLimitFor(user.accountType, user.agentVerified);
+        const quotaRows = await sql.query(`
+          SELECT COUNT(*)::int AS count
+          FROM rental_listings
+          WHERE owner_id = $1
+            AND id <> $2
+            AND status IN ('published', 'paused')
+            AND (expires_on IS NULL OR expires_on >= CURRENT_DATE)
+        `, [user.id, id]);
+        const usedListings = Number((quotaRows[0] as Record<string, unknown> | undefined)?.count || 0);
+        if (usedListings >= listingLimit) {
+          return NextResponse.json({
+            error: user.agentVerified
+              ? `Verified agent accounts can publish up to ${listingLimit} active listings.`
+              : `Regular accounts can publish up to ${listingLimit} active listings.`,
+            code: "LISTING_LIMIT_REACHED",
+            limit: listingLimit,
+            used: usedListings,
+            agentVerified: user.agentVerified,
+          }, { status: 403 });
+        }
+      }
       const result = await sql.query(
         hasExpiration
           ? "UPDATE rental_listings SET status = $1, expires_on = $2, published_at = CASE WHEN $1 = 'published' THEN NOW() ELSE published_at END, paused_at = CASE WHEN $1 = 'paused' THEN NOW() ELSE NULL END, updated_at = NOW() WHERE id = $3 AND owner_id = $4 RETURNING id, status, expires_on"
@@ -230,6 +263,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     input = normalizeBody(body);
   } catch {
     return NextResponse.json({ error: "R2 storage is not configured on the server yet." }, { status: 503 });
+  }
+  if (input.posterRole === "agent" && !user.agentVerified) {
+    return NextResponse.json({ error: "Complete agent license verification before publishing as an agent.", code: "AGENT_VERIFICATION_REQUIRED" }, { status: 403 });
   }
   const validation = validationError(input);
   if (validation) return NextResponse.json({ error: validation }, { status: 400 });

@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent } from "react";
+import { FormEvent, useState } from "react";
+import { AccountType } from "../lib/account-types";
 
 type Locale = "zh" | "en";
 type AuthMode = "login" | "register";
@@ -10,7 +11,7 @@ type AuthDrawerProps = {
   mode: AuthMode;
   loading: boolean;
   error: string;
-  onGoogleLogin: () => void;
+  onGoogleLogin: (accountType?: AccountType) => void;
   onClose: () => void;
   onModeChange: (mode: AuthMode) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -38,6 +39,7 @@ function GoogleIcon({ size = 18 }: { size?: number }) {
 export default function AuthDrawer({ locale, mode, loading, error, onGoogleLogin, onClose, onModeChange, onSubmit }: AuthDrawerProps) {
   const isRegister = mode === "register";
   const zh = locale === "zh";
+  const [accountType, setAccountType] = useState<AccountType>("user");
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="drawer auth-drawer" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -50,13 +52,14 @@ export default function AuthDrawer({ locale, mode, loading, error, onGoogleLogin
           <p className="drawer-intro">{isRegister ? (zh ? "账户可以保存你的房源、草稿和咨询记录。" : "Your account keeps listings, drafts, and inquiries connected across devices.") : (zh ? "登录后可以发布房源、管理房源并查看咨询。" : "Sign in to publish listings, manage your rentals, and see inquiries.")}</p>
           <form className="auth-form" onSubmit={onSubmit}>
             {isRegister && <label className="field-label" htmlFor="auth-name">{zh ? "姓名" : "Name"}<input id="auth-name" name="displayName" autoComplete="name" required placeholder={zh ? "请输入姓名" : "Your name"} /></label>}
+            {isRegister && <><label className="field-label" htmlFor="auth-account-type">{zh ? "注册身份" : "Account type"}<select id="auth-account-type" name="accountType" value={accountType} onChange={(event) => setAccountType(event.target.value as AccountType)}><option value="user">{zh ? "普通用户" : "Regular user"}</option><option value="agent">{zh ? "房产经纪" : "Real-estate agent"}</option></select></label><p className="auth-role-note">{accountType === "agent" ? (zh ? "经纪账户需要完成执照核验；核验通过后可发布更多房源。" : "Agent accounts need license review; verified agents can publish more listings.") : (zh ? "普通用户可以浏览、收藏并发布个人房源。" : "Regular users can browse, save, and publish their own rentals.")}</p></>}
             <label className="field-label" htmlFor="auth-email">{zh ? "邮箱" : "Email"}<input id="auth-email" name="email" type="email" autoComplete="email" required placeholder="name@example.com" /></label>
             <label className="field-label" htmlFor="auth-password">{zh ? "密码" : "Password"}<input id="auth-password" name="password" type="password" autoComplete={isRegister ? "new-password" : "current-password"} minLength={8} required placeholder={zh ? "至少 8 个字符" : "At least 8 characters"} /></label>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="primary-button full-button" type="submit" disabled={loading}>{loading ? (zh ? "处理中…" : "Working…") : (isRegister ? (zh ? "创建账户" : "Create account") : (zh ? "登录" : "Sign in"))}</button>
           </form>
           <div className="auth-divider" aria-hidden="true"><span>{zh ? "或" : "OR"}</span></div>
-          <button className="google-button" type="button" onClick={onGoogleLogin} disabled={loading}><GoogleIcon />{zh ? "使用 Google 登录" : "Continue with Google"}</button>
+          <button className="google-button" type="button" onClick={() => onGoogleLogin(isRegister ? accountType : "user")} disabled={loading}><GoogleIcon />{isRegister ? (accountType === "agent" ? (zh ? "使用 Google 注册经纪账户" : "Register agent account with Google") : (zh ? "使用 Google 注册普通账户" : "Register regular account with Google")) : (zh ? "使用 Google 登录" : "Continue with Google")}</button>
           <div className="auth-switch">
             <p>{isRegister ? (zh ? "已经有账户？" : "Already have an account?") : (zh ? "还没有账户？" : "New to the marketplace?")}</p>
             <button className="text-button" type="button" onClick={() => onModeChange(isRegister ? "login" : "register")}>{isRegister ? (zh ? "登录" : "Sign in") : (zh ? "创建账户" : "Create an account")}</button>

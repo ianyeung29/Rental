@@ -1,7 +1,9 @@
 import { OAuth2Client } from "google-auth-library";
 import { randomBytes } from "node:crypto";
+import { AccountType, normalizeAccountType } from "./account-types";
 
 export const GOOGLE_STATE_COOKIE = "google_oauth_state";
+export const GOOGLE_ACCOUNT_TYPE_COOKIE = "google_account_type";
 
 class GoogleConfigError extends Error {
   status = 503;
@@ -75,6 +77,32 @@ export function clearGoogleStateCookie(response: Response) {
   const mutableResponse = response as Response & { cookies?: { set: (options: Record<string, unknown>) => void } };
   mutableResponse.cookies?.set({
     name: GOOGLE_STATE_COOKIE,
+    value: "",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+}
+
+export function setGoogleAccountTypeCookie(response: Response, accountType: AccountType) {
+  const mutableResponse = response as Response & { cookies?: { set: (options: Record<string, unknown>) => void } };
+  mutableResponse.cookies?.set({
+    name: GOOGLE_ACCOUNT_TYPE_COOKIE,
+    value: normalizeAccountType(accountType),
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 600,
+  });
+}
+
+export function clearGoogleAccountTypeCookie(response: Response) {
+  const mutableResponse = response as Response & { cookies?: { set: (options: Record<string, unknown>) => void } };
+  mutableResponse.cookies?.set({
+    name: GOOGLE_ACCOUNT_TYPE_COOKIE,
     value: "",
     httpOnly: true,
     sameSite: "lax",

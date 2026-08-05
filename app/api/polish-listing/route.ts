@@ -58,7 +58,7 @@ const OUTPUT_SCHEMA = {
 
 const SYSTEM_PROMPT = `You are a careful bilingual rental-listing editor for a housing marketplace.
 
-Rewrite only the facts supplied by the poster. Do not invent rent, square footage, amenities, transit access, views, availability, verification, photos, exact addresses, contact details, or legal promises. Preserve numbers, currency, dates, and approximate-location language. Keep the English and Simplified Chinese versions aligned. If one language is missing, translate conservatively from the supplied facts.
+Rewrite only the facts supplied by the poster. Do not invent rent, square footage, amenities, transit access, views, availability, verification, photos, exact addresses, contact details, or legal promises. Preserve numbers, dates, and approximate-location language. The marketplace uses USD by default, so do not add a currency code to user-facing listing copy. Keep the English and Simplified Chinese versions aligned. If one language is missing, translate conservatively from the supplied facts.
 
 Remove or rewrite discriminatory housing preferences or screening language. The marketplace supports Chinese-language outreach, but listings must not restrict housing based on protected traits or imply that only a particular ethnicity, nationality, family status, disability status, religion, sex, or similar group may rent. Mention a short review note when you had to soften or remove a risky claim.
 
@@ -120,7 +120,7 @@ function localPolish(input: NormalizedListing) {
   const descriptionEn = [
     input.descriptionEn,
     input.areaEn ? appendIfMissing(input.descriptionEn, `Approximate area: ${input.areaEn}.`) : "",
-    input.price && input.currency ? appendIfMissing(input.descriptionEn, `Monthly rent: ${input.currency} ${input.price}.`) : "",
+    input.price ? appendIfMissing(input.descriptionEn, `Monthly rent: ${input.price}.`) : "",
     input.moveIn ? appendIfMissing(input.descriptionEn, `Move-in: ${input.moveIn}.`) : "",
     input.lease ? appendIfMissing(input.descriptionEn, `Minimum lease: ${input.lease} months.`) : "",
     appendIfMissing(input.descriptionEn, featureEn),
@@ -128,7 +128,7 @@ function localPolish(input: NormalizedListing) {
   const descriptionZh = [
     input.descriptionZh,
     input.areaZh ? appendIfMissing(input.descriptionZh, `大致区域：${input.areaZh}。`) : "",
-    input.price && input.currency ? appendIfMissing(input.descriptionZh, `月租：${input.currency} ${input.price}。`) : "",
+    input.price ? appendIfMissing(input.descriptionZh, `月租：${input.price}。`) : "",
     input.moveIn ? appendIfMissing(input.descriptionZh, `入住时间：${input.moveIn}。`) : "",
     input.lease ? appendIfMissing(input.descriptionZh, `最短租期：${input.lease} 个月。`) : "",
     appendIfMissing(input.descriptionZh, featureZh),
