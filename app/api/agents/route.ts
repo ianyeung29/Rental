@@ -12,6 +12,7 @@ function toAgentProfile(row: Record<string, unknown>) {
     id: String(row.id),
     displayNameZh: String(row.display_name_zh || ""),
     displayNameEn: String(row.display_name_en || ""),
+    portraitUrl: String(row.portrait_url || ""),
     brokerage: String(row.brokerage || ""),
     licenseState: String(row.license_state || ""),
     licenseNumber: String(row.license_number || ""),
@@ -40,7 +41,7 @@ export async function GET() {
   try {
     await ensureDatabaseSchema();
     const rows = await sql.query(`
-      SELECT id, display_name_zh, display_name_en, brokerage, license_state, license_number,
+      SELECT id, display_name_zh, display_name_en, portrait_url, brokerage, license_state, license_number,
              service_areas, languages, fee_summary_zh, fee_summary_en, is_verified, is_sample
       FROM rental_agent_profiles
       WHERE is_active = TRUE

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import SiteFooter from "./SiteFooter";
+import portraitStyles from "./AgentPortrait.module.css";
 
 type Locale = "zh" | "en";
 type QueueStatus = "pending" | "rejected" | "expired" | "unsubmitted";
@@ -16,6 +17,7 @@ type AgentApplication = {
   account_type: string;
   agent_verification_status: QueueStatus;
   profile_id: string | null;
+  portrait_url: string | null;
   brokerage: string | null;
   license_state: string | null;
   license_number: string | null;
@@ -196,6 +198,7 @@ export default function AdminAgentVerificationDesk({ adminName }: { adminName: s
                   <div><h3>{application.display_name}</h3><p>{application.email}</p></div>
                 </div>
                 <div className="admin-application-body">
+                  {application.portrait_url && <div className={portraitStyles.adminReview}><Image src={application.portrait_url} alt={zh ? `经纪 ${application.display_name} 的头像` : `${application.display_name}'s portrait`} width={88} height={88} unoptimized /><div><strong>{zh ? "经纪头像" : "Agent portrait"}</strong><p>{zh ? "供管理员在核验身份时参考。" : "Reference image for the identity review."}</p></div></div>}
                   <dl className="admin-application-facts">
                     <div><dt>{zh ? "执照州 / 编号" : "License state / number"}</dt><dd>{hasLicense ? `${application.license_state} · ${application.license_number}` : (zh ? "尚未提交" : "Not submitted")}</dd></div>
                     <div><dt>{zh ? "所属经纪公司" : "Brokerage"}</dt><dd>{application.brokerage || (zh ? "尚未提交" : "Not submitted")}</dd></div>

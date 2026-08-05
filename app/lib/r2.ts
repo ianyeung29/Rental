@@ -41,14 +41,20 @@ export function publicUrlForKey(key: string) {
   return `${publicUrl}/${key.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-export async function createImageUpload(input: { filename: string; contentType: string; size: number }) {
+export async function createImageUpload(input: { filename: string; contentType: string; size: number; keyPrefix?: string }) {
   if (!ALLOWED_IMAGE_TYPES.has(input.contentType)) throw new Error("Only JPEG, PNG, and WebP images are supported.");
   if (!Number.isFinite(input.size) || input.size <= 0 || input.size > MAX_IMAGE_BYTES) throw new Error("Each image must be 8 MB or smaller.");
   const { bucket } = config();
-  const key = `listings/${randomUUID()}.${safeExtension(input.filename, input.contentType)}`;
+  const keyPrefix = input.keyPrefix?.trim().replace(/^\/+|\/+$/g, "") || "listings";
+  if (!/^[A-Za-z0-9/_-]+$/.test(keyPrefix)) throw new Error("The upload destination is invalid.");
+  const key = `${keyPrefix}/${randomUUID()}.${safeExtension(input.filename, input.contentType)}`;
   const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: input.contentType });
   const uploadUrl = await getSignedUrl(r2Client(), command, { expiresIn: 900 });
   return { key, uploadUrl, publicUrl: publicUrlForKey(key), expiresIn: 900 };
+}
+
+export function isAgentPortraitKeyForUser(key: string, userId: string) {
+  return key.startsWith(`agents/${userId}/`) && /^agents\/.+\/[a-f0-9-]{36}\.(jpg|png|webp)$/i.test(key);
 }
 
 export { ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES };

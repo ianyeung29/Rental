@@ -25,7 +25,7 @@ export async function GET() {
     await ensureDatabaseSchema();
     const rows = await db.query(`
       SELECT u.id AS user_id, u.display_name, u.email, u.account_type,
-             u.agent_verification_status, p.id AS profile_id, p.brokerage,
+             u.agent_verification_status, p.id AS profile_id, p.portrait_url, p.brokerage,
              p.license_state, p.license_number, p.verification_submitted_at,
              p.verification_reviewed_at, p.verification_note
       FROM rental_users u
