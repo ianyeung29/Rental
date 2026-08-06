@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!listingId || !eventType) return NextResponse.json({ error: "A listing and event type are required." }, { status: 400 });
   try {
     await ensureDatabaseSchema();
-    const listingRows = await sql.query("SELECT id FROM rental_listings WHERE id = $1 AND status = 'published' AND (expires_on IS NULL OR expires_on >= CURRENT_DATE) LIMIT 1", [listingId]);
+    const listingRows = await sql.query("SELECT id FROM rental_listings WHERE id = $1 AND status = 'published' AND moderation_status = 'approved' AND (expires_on IS NULL OR expires_on >= CURRENT_DATE) LIMIT 1", [listingId]);
     if (listingRows.length === 0) return NextResponse.json({ error: "Listing not found." }, { status: 404 });
     if (eventType === "view" && sessionKey) {
       const duplicateRows = await sql.query("SELECT 1 FROM rental_listing_events WHERE listing_id = $1 AND event_type = 'view' AND session_key = $2 AND created_at > NOW() - INTERVAL '1 day' LIMIT 1", [listingId, sessionKey]);
