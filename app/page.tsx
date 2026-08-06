@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useEffect, useId, useMemo, useRef, useState } f
 import Image from "next/image";
 import AccountDrawer from "./components/AccountDrawer";
 import ApplicationDrawer, { type ApplicationFormValues } from "./components/ApplicationDrawer";
+import AreaContextPanel from "./components/AreaContextPanel";
 import AuthDrawer from "./components/AuthDrawer";
 import CommuteEstimator from "./components/CommuteEstimator";
 import DetailActionDock from "./components/DetailActionDock";
@@ -4671,6 +4672,7 @@ export default function HomePage() {
               <h3 className="drawer-section-heading">{t.detailAmenities}</h3>
               <div className="tag-row drawer-tags">{listingTags(selectedListing).map((tag) => <span className="listing-tag" key={tag}>{tag}</span>)}</div>
               <div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>{listingPrivacy(selectedListing)}</p></div></div>
+              <AreaContextPanel locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
               <CommuteEstimator locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
               <SafetyNotice
                 locale={locale}
