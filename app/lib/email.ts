@@ -113,6 +113,149 @@ export async function sendInquiryConfirmation(input: InquiryEmailInput) {
   if (error) throw new EmailError("Resend could not send the inquiry confirmation.", 502);
 }
 
+type InquiryStatusUpdateInput = {
+  recipientEmail: string;
+  recipientName: string;
+  listingTitle: string;
+  status: "tourScheduled" | "closed" | "contacted";
+  scheduledAt?: string | null;
+  timeZone?: string;
+  tourNote?: string;
+};
+
+function tourDateLabel(value: string, timeZone: string) {
+  try {
+    return new Intl.DateTimeFormat("zh-CN", { dateStyle: "full", timeStyle: "short", timeZone }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+export async function sendInquiryStatusUpdate(input: InquiryStatusUpdateInput) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const recipientName = escapeHtml(input.recipientName || "租客");
+  const listingTitle = escapeHtml(input.listingTitle);
+  const scheduledAt = input.scheduledAt ? tourDateLabel(input.scheduledAt, input.timeZone || "UTC") : "";
+  const note = input.tourNote?.trim() || "无补充说明";
+  const title = input.status === "tourScheduled" ? "看房时间已安排" : input.status === "closed" ? "房源咨询已完成" : "房源咨询有新进展";
+  const details = input.status === "tourScheduled"
+    ? `看房时间：${scheduledAt}\n时区：${input.timeZone || "UTC"}\n补充说明：${note}`
+    : input.status === "closed" ? "这条咨询已被标记为完成。" : "发布者已更新这条咨询的状态。";
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.recipientEmail],
+    subject: `${title} · ${input.listingTitle}`,
+    text: `你好 ${input.recipientName || "租客"}，\n\n「${input.listingTitle}」${title}。\n\n${details}\n\n登录安居查看：${appUrl}/#messages`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">${title}</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，房源「${listingTitle}」有新的咨询进展。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${escapeHtml(details).replace(/\n/g, "<br>")}</p><p style="margin:28px 0"><a href="${appUrl}/#messages" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看咨询</a></p><p style="color:#637384;font-size:12px;line-height:1.6">如时间或安排有变化，请在安居中联系房源发布者确认。</p></main></body></html>`,
+  });
+  if (error) throw new EmailError("Resend could not send the inquiry status update.", 502);
+}
+
+export async function sendTourReminder(input: { recipientEmail: string; recipientName: string; listingTitle: string; scheduledAt: string; timeZone: string; note: string }) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const recipientName = escapeHtml(input.recipientName || "安居用户");
+  const listingTitle = escapeHtml(input.listingTitle);
+  const scheduledAt = tourDateLabel(input.scheduledAt, input.timeZone || "UTC");
+  const note = escapeHtml(input.note || "无补充说明");
+  const details = `看房时间：${scheduledAt}\n时区：${input.timeZone || "UTC"}\n备注：${input.note || "无补充说明"}`;
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.recipientEmail],
+    subject: `看房提醒 · ${input.listingTitle}`,
+    text: `你好 ${input.recipientName || "安居用户"}，\n\n明天有一场「${input.listingTitle}」的看房安排。\n\n${details}\n\n登录安居查看详情：${appUrl}/#messages`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">看房提醒</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，明天有一场「${listingTitle}」的看房安排。</p><p style="padding:16px;background:#f4f8d4;font-size:13px;line-height:1.7">看房时间：${scheduledAt}<br>时区：${escapeHtml(input.timeZone || "UTC")}<br>备注：${note}</p><p style="margin:28px 0"><a href="${appUrl}/#messages" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看看房安排</a></p></main></body></html>`,
+  });
+  if (error) throw new EmailError("Resend could not send the tour reminder.", 502);
+}
+
+type ApplicationNotificationInput = {
+  recipientEmail: string;
+  recipientName: string;
+  listingTitle: string;
+  listingArea: string;
+  applicantName: string;
+  applicantEmail: string;
+  phone: string;
+  moveIn: string;
+  leaseLength: string;
+  occupants: string;
+  pets: string;
+  employmentStatus: string;
+  incomeRange: string;
+  message: string;
+};
+
+function applicationDetails(input: ApplicationNotificationInput) {
+  return [
+    `房源：${input.listingTitle}`,
+    `区域：${input.listingArea || "未提供"}`,
+    `申请人：${input.applicantName} <${input.applicantEmail}>`,
+    `电话：${input.phone}`,
+    `入住：${input.moveIn}`,
+    `租期：${input.leaseLength}`,
+    `居住人数：${input.occupants}`,
+    `宠物：${input.pets}`,
+    `工作情况：${input.employmentStatus || "未提供"}`,
+    `收入范围：${input.incomeRange || "未提供"}`,
+    input.message ? `补充信息：${input.message}` : "补充信息：无",
+  ].join("\n");
+}
+
+export async function sendApplicationNotification(input: ApplicationNotificationInput) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const recipientName = escapeHtml(input.recipientName || "房源发布者");
+  const listingTitle = escapeHtml(input.listingTitle);
+  const applicantName = escapeHtml(input.applicantName);
+  const details = escapeHtml(applicationDetails(input)).replace(/\n/g, "<br>");
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.recipientEmail],
+    replyTo: input.applicantEmail,
+    subject: `收到新的租赁申请 · ${input.listingTitle}`,
+    text: `你好 ${input.recipientName || "房源发布者"}，\n\n${applicationDetails(input)}\n\n登录安居查看并处理申请：${appUrl}/#messages`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">收到新的租赁申请</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，${applicantName} 申请了「${listingTitle}」。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${details}</p><p style="margin:28px 0"><a href="${appUrl}/#messages" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">打开申请工作台</a></p><p style="color:#637384;font-size:12px;line-height:1.6">你可以在安居中更新申请状态。申请阶段不会要求上传身份证件或信用文件。</p></main></body></html>`,
+  });
+  if (error) throw new EmailError("Resend could not send the rental application notification.", 502);
+}
+
+type ApplicationStatusUpdateInput = {
+  recipientEmail: string;
+  recipientName: string;
+  listingTitle: string;
+  status: "submitted" | "reviewing" | "approved" | "declined" | "withdrawn";
+  note: string;
+  recipientRole: "renter" | "owner";
+};
+
+export async function sendApplicationStatusUpdate(input: ApplicationStatusUpdateInput) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const title = input.status === "approved"
+    ? "租赁申请已通过"
+    : input.status === "declined"
+      ? "租赁申请未通过"
+      : input.status === "reviewing"
+        ? "租赁申请正在审核"
+        : input.status === "withdrawn"
+          ? "租客撤回了申请"
+          : "租赁申请已提交";
+  const note = input.note?.trim() || "无补充说明";
+  const recipientName = escapeHtml(input.recipientName || (input.recipientRole === "renter" ? "租客" : "房源发布者"));
+  const listingTitle = escapeHtml(input.listingTitle);
+  const details = escapeHtml(`房源：${input.listingTitle}\n状态：${title}\n备注：${note}`).replace(/\n/g, "<br>");
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.recipientEmail],
+    subject: `${title} · ${input.listingTitle}`,
+    text: `你好 ${input.recipientName || (input.recipientRole === "renter" ? "租客" : "房源发布者")}，\n\n「${input.listingTitle}」${title}。\n\n备注：${note}\n\n登录安居查看详情：${appUrl}/#messages`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">${title}</h1><p style="font-size:15px;line-height:1.7">你好 ${recipientName}，申请「${listingTitle}」的状态有更新。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${details}</p><p style="margin:28px 0"><a href="${appUrl}/#messages" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看申请</a></p></main></body></html>`,
+  });
+  if (error) throw new EmailError("Resend could not send the application status update.", 502);
+}
+
 type AgentRequestNotificationInput = {
   recipientEmail: string;
   recipientName: string;
@@ -255,4 +398,41 @@ export async function sendSiteFeedbackEmail(input: SiteFeedbackEmailInput) {
     html: publicEmailHtml("收到一条产品反馈", `${input.name || "一位用户"} 通过安居提交了反馈。`, text, "如果用户留下邮箱，可以直接回复此邮件。"),
   });
   if (error) throw resendFailure(error, "Resend could not send the feedback message.");
+}
+
+type ModerationDecisionStatus = "approved" | "under_review" | "hidden" | "rejected";
+
+export async function sendModerationDecision(input: {
+  email: string;
+  displayName: string;
+  listingTitle: string;
+  area: string;
+  status: ModerationDecisionStatus;
+  note: string;
+}) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const labels: Record<ModerationDecisionStatus, [string, string]> = {
+    approved: ["房源已恢复公开", "Listing restored to public view"],
+    under_review: ["房源正在审核中", "Listing is under review"],
+    hidden: ["房源已暂时隐藏", "Listing temporarily hidden"],
+    rejected: ["房源未通过审核", "Listing was not approved"],
+  };
+  const [titleZh, titleEn] = labels[input.status];
+  const detail = [
+    `房源：${input.listingTitle}`,
+    input.area ? `区域：${input.area}` : "",
+    `审核状态：${titleZh}`,
+    input.note ? `审核说明：${input.note}` : "",
+  ].filter(Boolean).join("\n");
+  const escapedName = escapeHtml(input.displayName || "房源发布者");
+  const escapedDetail = escapeHtml(detail).replace(/\n/g, "<br>");
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.email],
+    subject: `安居 · ${titleEn} · ${subjectText(input.listingTitle)}`,
+    text: `你好 ${input.displayName || "房源发布者"}，\n\n${detail}\n\n请登录安居查看房源状态：${appUrl}/#account`,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">${titleZh}</h1><p style="font-size:15px;line-height:1.7">你好 ${escapedName}，管理员已更新你的房源审核状态。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${escapedDetail}</p><p style="margin:28px 0"><a href="${appUrl}/#account" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看房源工作台</a></p></main></body></html>`,
+  });
+  if (error) throw resendFailure(error, "Resend could not send the moderation decision.");
 }

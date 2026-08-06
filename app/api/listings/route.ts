@@ -295,7 +295,9 @@ export async function GET(request: Request) {
         ) AS media
       FROM rental_listings l
       LEFT JOIN rental_listing_media m ON m.listing_id = l.id
-      WHERE l.status = 'published' AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
+      WHERE l.status = 'published'
+        AND l.moderation_status = 'approved'
+        AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
       GROUP BY l.id
       ORDER BY ${orderBy}
       LIMIT $1 OFFSET $2

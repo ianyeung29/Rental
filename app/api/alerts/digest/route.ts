@@ -80,18 +80,25 @@ export async function GET(request: Request) {
       LIMIT 500
     `);
     const listings = await sql.query(`
-      SELECT id, title_zh, title_en, area_zh, area_en, price, bedrooms, bathrooms, square_feet, rental_type, move_in, features
+      SELECT id, title_zh, title_en, area_zh, area_en, price, bedrooms, bathrooms, square_feet, rental_type, move_in, features, created_at
       FROM rental_listings
-      WHERE status = 'published' AND (expires_on IS NULL OR expires_on >= CURRENT_DATE)
+      WHERE status = 'published' AND moderation_status = 'approved' AND (expires_on IS NULL OR expires_on >= CURRENT_DATE)
         AND created_at > NOW() - INTERVAL '30 days'
       ORDER BY created_at DESC
       LIMIT 1000
     `);
     let processed = 0;
     let sent = 0;
+    let emailFailed = 0;
     for (const searchRow of searches) {
       const search = searchRow as Record<string, unknown>;
-      const matchesForSearch = listings.filter((listing) => matches(search, listing as Record<string, unknown>)).slice(0, 8) as Record<string, unknown>[];
+      const defaultCutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const storedCutoff = search.last_alert_at ? Date.parse(String(search.last_alert_at)) : Number.NaN;
+      const cutoff = Number.isFinite(storedCutoff) ? storedCutoff : defaultCutoff;
+      const matchesForSearch = listings.filter((listing) => {
+        const listingCreatedAt = Date.parse(String((listing as Record<string, unknown>).created_at || ""));
+        return Number.isFinite(listingCreatedAt) && listingCreatedAt > cutoff && matches(search, listing as Record<string, unknown>);
+      }).slice(0, 8) as Record<string, unknown>[];
       if (matchesForSearch.length > 0) {
         const titles = matchesForSearch.map((listing) => String(listing.title_zh || listing.title_en || "新房源"));
         if (emailIsConfigured()) {
@@ -99,7 +106,7 @@ export async function GET(request: Request) {
             await sendSavedSearchAlert({ email: String(search.email), displayName: String(search.display_name || ""), location: String(search.location || ""), listingTitles: titles });
             sent += 1;
           } catch {
-            // Keep the digest moving for other users; the next run can retry delivery.
+            emailFailed += 1;
           }
         }
         await sql.query(`
@@ -110,7 +117,7 @@ export async function GET(request: Request) {
       await sql.query("UPDATE rental_saved_searches SET last_alert_at = NOW() WHERE user_id = $1", [String(search.user_id)]);
       processed += 1;
     }
-    return NextResponse.json({ ok: true, processed, sent, configuredEmail: emailIsConfigured() });
+    return NextResponse.json({ ok: true, processed, sent, emailFailed, configuredEmail: emailIsConfigured() });
   } catch {
     return NextResponse.json({ error: "Saved search alerts could not be processed right now." }, { status: 502 });
   }

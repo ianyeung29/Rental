@@ -6,7 +6,7 @@ const MAX_BODY_LENGTH = 2_000;
 const ALLOWED_RENTAL_TYPES = new Set(["all", "entire", "privateRoom", "sublet"]);
 const ALLOWED_SORT_MODES = new Set(["fit", "price", "fresh", "moveIn", "verified"]);
 const ALLOWED_MOVE_IN = new Set(["", "august", "september", "october"]);
-const ALLOWED_BEDROOMS = new Set(["", "0", "1", "2", "3+"]);
+const ALLOWED_BEDROOMS = new Set(["", "0", "1", "2", "3", "4"]);
 const ALLOWED_BATHROOMS = new Set(["", "0.5", "1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5"]);
 const ALLOWED_FEATURES = new Set([
   "furnished",
@@ -49,6 +49,7 @@ function snapshotFromRow(row: Record<string, unknown>) {
     activeFeatures: Array.isArray(row.features) ? row.features.filter((feature): feature is string => typeof feature === "string") : [],
     sortMode: String(row.sort_mode || "fit"),
     alertFrequency: String(row.alert_frequency || "off"),
+    lastAlertAt: row.last_alert_at instanceof Date ? row.last_alert_at.toISOString() : row.last_alert_at ? String(row.last_alert_at) : null,
     updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at || ""),
   };
 }
@@ -89,7 +90,7 @@ export async function GET() {
     const result = await verifiedUser();
     if (result.error) return result.error;
     await ensureDatabaseSchema();
-    const rows = await sql!.query("SELECT label, location, min_price, max_price, min_sqft, max_sqft, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, alert_frequency, updated_at FROM rental_saved_searches WHERE user_id = $1 LIMIT 1", [result.user.id]);
+    const rows = await sql!.query("SELECT label, location, min_price, max_price, min_sqft, max_sqft, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, alert_frequency, last_alert_at, updated_at FROM rental_saved_searches WHERE user_id = $1 LIMIT 1", [result.user.id]);
     return NextResponse.json(rows[0] ? snapshotFromRow(rows[0] as Record<string, unknown>) : null);
   } catch {
     return NextResponse.json({ error: "Saved search could not be loaded right now." }, { status: 502 });
@@ -122,7 +123,7 @@ export async function PUT(request: Request) {
         sort_mode = EXCLUDED.sort_mode,
         alert_frequency = EXCLUDED.alert_frequency,
         updated_at = NOW()
-      RETURNING label, location, min_price, max_price, min_sqft, max_sqft, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, alert_frequency, updated_at
+      RETURNING label, location, min_price, max_price, min_sqft, max_sqft, bedrooms, bathrooms, rental_type, move_in, features, sort_mode, alert_frequency, last_alert_at, updated_at
     `, [result.user.id, snapshot.label, snapshot.location, snapshot.minPrice, snapshot.maxPrice, snapshot.minSqft, snapshot.maxSqft, snapshot.bedrooms, snapshot.bathrooms, snapshot.rentalType, snapshot.moveIn, JSON.stringify(snapshot.activeFeatures), snapshot.sortMode, snapshot.alertFrequency]);
     return NextResponse.json(rows[0] ? snapshotFromRow(rows[0] as Record<string, unknown>) : snapshot);
   } catch {

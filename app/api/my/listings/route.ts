@@ -55,6 +55,8 @@ function ownerListing(row: Record<string, unknown>) {
     posterEn: "My listing",
     privacyZh: "公开页面只显示大致区域",
     privacyEn: "Public page shows approximate area only",
+    moderationStatus: String(row.moderation_status || "approved"),
+    moderationNote: String(row.moderation_note || ""),
     descriptionZh: String(row.description_zh || ""),
     descriptionEn: String(row.description_en || ""),
     privateAddress: String(row.private_address || ""),
@@ -92,7 +94,7 @@ export async function GET() {
       SELECT
         l.id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type, l.price,
         l.bedrooms, l.bathrooms, l.square_feet, l.move_in, l.lease, l.features, l.tags_zh, l.tags_en,
-        l.description_zh, l.description_en, l.poster_role, l.status, l.expires_on, l.published_at, l.created_at,
+        l.description_zh, l.description_en, l.poster_role, l.status, l.moderation_status, l.moderation_note, l.expires_on, l.published_at, l.created_at,
         p.private_address, p.contact_name, p.contact_email, p.tour_preference,
         p.agent_service, p.agent_fee_plan, p.agent_fee_amount, p.agent_profile_id,
         a.display_name_zh AS agent_profile_name_zh, a.display_name_en AS agent_profile_name_en,

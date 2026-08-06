@@ -10,6 +10,12 @@ function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function dateTime(value: unknown) {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+}
+
 function inquiryFromRow(row: Record<string, unknown>, received: boolean) {
   return {
     id: String(row.id),
@@ -21,6 +27,9 @@ function inquiryFromRow(row: Record<string, unknown>, received: boolean) {
     occupants: String(row.occupants || ""),
     pets: String(row.pets || ""),
     tourPreference: String(row.tour_preference || ""),
+    tourScheduledAt: dateTime(row.tour_scheduled_at),
+    tourTimeZone: String(row.tour_timezone || "UTC"),
+    tourNote: String(row.tour_note || ""),
     message: String(row.message || ""),
     status: String(row.status || "sent"),
     readAt: (received ? row.owner_read_at : row.requester_read_at) instanceof Date
@@ -46,7 +55,7 @@ export async function GET(request: Request) {
     const rows = received
       ? await sql.query(`
           SELECT i.id, i.listing_id, i.move_in, i.lease_length, i.occupants, i.pets,
-                 i.tour_preference, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at,
+                 i.tour_preference, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at,
                  l.title_zh, l.title_en, u.display_name AS requester_name, u.email AS requester_email
           FROM rental_inquiries i
           JOIN rental_listings l ON l.id = i.listing_id
@@ -56,7 +65,7 @@ export async function GET(request: Request) {
         `, [user.id])
       : await sql.query(`
           SELECT i.id, i.listing_id, i.move_in, i.lease_length, i.occupants, i.pets,
-                 i.tour_preference, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at, l.title_zh, l.title_en
+                 i.tour_preference, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at, l.title_zh, l.title_en
           FROM rental_inquiries i
           JOIN rental_listings l ON l.id = i.listing_id
           WHERE i.requester_id = $1
@@ -95,7 +104,7 @@ export async function POST(request: Request) {
       SELECT l.id, l.owner_id, l.title_zh, l.title_en, pd.contact_name, pd.contact_email
       FROM rental_listings l
       LEFT JOIN rental_listing_private_details pd ON pd.listing_id = l.id
-      WHERE l.id = $1 AND l.status = 'published' AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
+      WHERE l.id = $1 AND l.status = 'published' AND l.moderation_status = 'approved' AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
       LIMIT 1
     `, [listingId]);
     const listing = listingRows[0] as Record<string, unknown> | undefined;
@@ -121,9 +130,12 @@ export async function POST(request: Request) {
       moveIn,
       leaseLength,
       occupants,
-      pets,
-      tourPreference,
-      message,
+       pets,
+       tourPreference,
+       tourScheduledAt: null,
+       tourTimeZone: "UTC",
+       tourNote: "",
+       message,
     };
     let notificationSent = false;
     let confirmationSent = false;
@@ -153,6 +165,9 @@ export async function POST(request: Request) {
       occupants,
       pets,
       tourPreference,
+      tourScheduledAt: null,
+      tourTimeZone: "UTC",
+      tourNote: "",
       message,
       status: "sent",
       notificationSent,

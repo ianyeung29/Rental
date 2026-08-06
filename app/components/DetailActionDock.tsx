@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 type DetailActionDockProps = {
   contactLabel: string;
+  applyLabel: string;
   compareLabel: string;
   shareLabel: string;
   comparing: boolean;
@@ -11,11 +12,12 @@ type DetailActionDockProps = {
     share: (options?: { size?: number }) => ReactNode;
   };
   onContact: () => void;
+  onApply: () => void;
   onCompare: () => void;
   onShare: () => void;
 };
 
-export default function DetailActionDock({ contactLabel, compareLabel, shareLabel, comparing, icons, onContact, onCompare, onShare }: DetailActionDockProps) {
+export default function DetailActionDock({ contactLabel, applyLabel, compareLabel, shareLabel, comparing, icons, onContact, onApply, onCompare, onShare }: DetailActionDockProps) {
   return (
     <div className="detail-action-dock">
       <div className="detail-action-row">
@@ -23,6 +25,7 @@ export default function DetailActionDock({ contactLabel, compareLabel, shareLabe
         <button className={`outline-button full-button detail-compare-button ${comparing ? "is-active" : ""}`} type="button" onClick={onCompare} aria-pressed={comparing}>{icons.compare({ size: 16 })}{comparing ? `${compareLabel} ✓` : compareLabel}</button>
         <button className="outline-button full-button detail-share-button" type="button" onClick={onShare}>{icons.share({ size: 16 })}{shareLabel}</button>
       </div>
+      <button className="outline-button full-button detail-apply-button" type="button" onClick={onApply}>{applyLabel}</button>
     </div>
   );
 }
