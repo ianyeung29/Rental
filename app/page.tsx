@@ -103,6 +103,9 @@ type Inquiry = {
   tourScheduledAt?: string | null;
   tourTimeZone?: string;
   tourNote?: string;
+  addressRevealStatus?: "hidden" | "revealed";
+  addressRevealedAt?: string | null;
+  revealedAddress?: string;
   message: string;
   status: string;
   readAt?: string | null;
@@ -3891,15 +3894,16 @@ export default function HomePage() {
     await copySharePayload(`${shareText}\n${shareUrl}`, message);
   };
 
-  const patchInquiryState = async (id: string, body: { status?: "contacted" | "tourScheduled" | "closed"; tourScheduledAt?: string; tourTimeZone?: string; tourNote?: string }) => {
+  const patchInquiryState = async (id: string, body: { status?: "contacted" | "tourScheduled" | "closed"; revealAddress?: boolean; tourScheduledAt?: string; tourTimeZone?: string; tourNote?: string }) => {
     if (!currentUser?.emailVerified) throw new Error(locale === "zh" ? "请先验证邮箱。" : "Verify your email first.");
     const response = await fetch(`/api/inquiries/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
-    const result = await response?.json().catch(() => ({})) as { error?: string; status?: string; tourScheduledAt?: string | null; tourTimeZone?: string; tourNote?: string } | undefined;
+    const result = await response?.json().catch(() => ({})) as { error?: string; status?: string; tourScheduledAt?: string | null; tourTimeZone?: string; tourNote?: string; addressRevealStatus?: "hidden" | "revealed"; addressRevealedAt?: string | null } | undefined;
     if (!response?.ok) throw new Error(result?.error || (locale === "zh" ? "咨询状态暂时无法更新" : "Inquiry status could not be updated"));
     const applyUpdate = (item: Inquiry) => ({
       ...item,
       ...(typeof result?.status === "string" ? { status: result.status } : {}),
       ...(Object.prototype.hasOwnProperty.call(result || {}, "tourScheduledAt") ? { tourScheduledAt: result?.tourScheduledAt ?? null, tourTimeZone: result?.tourTimeZone || "UTC", tourNote: result?.tourNote || "" } : {}),
+      ...(Object.prototype.hasOwnProperty.call(result || {}, "addressRevealStatus") ? { addressRevealStatus: result?.addressRevealStatus || "hidden", addressRevealedAt: result?.addressRevealedAt ?? null } : {}),
     });
     setServerInquiries((current) => current.map((item) => item.id === id ? applyUpdate(item) : item));
     setReceivedInquiries((current) => current.map((item) => item.id === id ? applyUpdate(item) : item));
@@ -3921,6 +3925,16 @@ export default function HomePage() {
       showToast(locale === "zh" ? "看房时间已安排" : "Tour scheduled");
     } catch (error) {
       showToast(error instanceof Error ? error.message : (locale === "zh" ? "看房时间暂时无法保存" : "The tour could not be scheduled"));
+      throw error;
+    }
+  };
+
+  const revealInquiryAddress = async (id: string) => {
+    try {
+      await patchInquiryState(id, { revealAddress: true });
+      showToast(locale === "zh" ? "精确地址已分享给租客" : "Exact address shared with the renter");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : (locale === "zh" ? "精确地址暂时无法分享" : "The exact address could not be shared"));
       throw error;
     }
   };
@@ -4341,6 +4355,7 @@ export default function HomePage() {
                       <p>{locale === "zh" ? `入住 ${inquiry.moveIn} · ${inquiry.leaseLength} 个月 · ${inquiry.occupants} 位居住者` : `Move-in ${inquiry.moveIn} · ${inquiry.leaseLength} months · ${inquiry.occupants} occupant(s)`}</p>
                       <span className="message-status">{inquiryStatusLabel(inquiry.status)}</span>
                       {inquiry.tourScheduledAt && <span className="message-tour-details">{locale === "zh" ? `看房时间：${inquiryTourDateLabel(inquiry.tourScheduledAt, inquiry.tourTimeZone)}` : `Tour: ${inquiryTourDateLabel(inquiry.tourScheduledAt, inquiry.tourTimeZone)}`}{inquiry.tourTimeZone ? ` · ${inquiry.tourTimeZone}` : ""}{inquiry.tourNote ? ` · ${inquiry.tourNote}` : ""}</span>}
+                      {inquiry.revealedAddress && <div className="address-reveal-card"><strong>{locale === "zh" ? "发布者已分享精确地址" : "The owner shared the exact address"}</strong><span>{inquiry.revealedAddress}</span><small>{locale === "zh" ? "请在看房前确认时间、联系人和地址；不要在核实房源和书面租约前支付押金。" : "Confirm the time, contact, and address before the tour. Do not send a deposit before verifying the listing and written lease."}</small></div>}
                       {currentUser?.emailVerified && <div className="message-actions">{!inquiry.readAt && <button className="text-button" type="button" onClick={() => { void fetch(`/api/inquiries/${encodeURIComponent(inquiry.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ read: true }) }); setServerInquiries((current) => current.map((item) => item.id === inquiry.id ? { ...item, readAt: new Date().toISOString() } : item)); }}>{locale === "zh" ? "标记已读" : "Mark read"}</button>}{inquiry.status !== "closed" && <button className="text-button" type="button" onClick={() => { void updateInquiryStatus(inquiry.id, "closed"); }}>{locale === "zh" ? "完成咨询" : "Close inquiry"}</button>}</div>}
                     </article>
                   ))}
@@ -4751,7 +4766,7 @@ export default function HomePage() {
 
       {authOpen && <AuthDrawer locale={locale} mode={authMode} loading={authLoading} error={authError} onGoogleLogin={(accountType) => { window.location.assign(`/api/auth/google?accountType=${accountType || "user"}`); }} onClose={() => { setAuthOpen(false); setAuthError(""); }} onModeChange={(mode) => { setAuthMode(mode); setAuthError(""); }} onSubmit={handleAuthSubmit} />}
 
-      {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} applications={renterApplications} receivedApplications={receivedApplications} agentRequests={agentRequests} blockedPublishers={blockedPublishers} blockLoadingId={blockLoadingId} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} applicationActionLoadingId={applicationActionLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onUpdateProfile={handleProfileUpdate} onAgentVerificationStatusChange={handleAgentVerificationStatusChange} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} onInquiryStatusChange={(id, status) => updateInquiryStatus(id, status)} onScheduleInquiry={scheduleInquiry} onApplicationStatusChange={updateApplicationStatus} onUnblockPublisher={unblockPublisher} />}
+      {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} applications={renterApplications} receivedApplications={receivedApplications} agentRequests={agentRequests} blockedPublishers={blockedPublishers} blockLoadingId={blockLoadingId} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} applicationActionLoadingId={applicationActionLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onUpdateProfile={handleProfileUpdate} onAgentVerificationStatusChange={handleAgentVerificationStatusChange} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} onInquiryStatusChange={(id, status) => updateInquiryStatus(id, status)} onScheduleInquiry={scheduleInquiry} onRevealInquiryAddress={revealInquiryAddress} onApplicationStatusChange={updateApplicationStatus} onUnblockPublisher={unblockPublisher} />}
 
       {(toast || verificationNotice) && <div className="toast" role="status"><span className="toast-mark"><CheckIcon size={13} /></span>{toast || verificationNotice}</div>}
 
