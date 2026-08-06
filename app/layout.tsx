@@ -1,5 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import PwaRuntime from "./components/PwaRuntime";
 
 export const metadata: Metadata = {
   title: "安居 · Anjurentals rental marketplace",
@@ -9,6 +10,12 @@ export const metadata: Metadata = {
     icon: "/brand/anjurentals-mark.svg",
     shortcut: "/brand/anjurentals-mark.svg",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#142a44",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -22,6 +29,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               "<!-- THESIS: a rental search that behaves like a clear public service desk, not a low-information classified feed. OWN-WORLD: porcelain paper, enamel blue, visibility lime, tabbed panels, and precise status signals. STORY: compare a synthetic rental, understand the cost and privacy boundary, then start a qualified conversation. FIRST VIEWPORT: utility header, split search workbench, filters to the left, listing image and privacy summary to the right. FORM: comparison desk, assigned surface candidate 7, direction seed 500d0030. FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md -->",
           }}
         />
+        <PwaRuntime />
         {children}
       </body>
     </html>
