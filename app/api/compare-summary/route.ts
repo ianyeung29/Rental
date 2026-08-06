@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { buildLocalCompareSummary, CompareListingFacts, CompareSummaryLocale } from "../../lib/compare-summary";
 import { getCurrentUser } from "../../lib/auth";
+import { consumeRateLimit } from "../../lib/rate-limit";
+import { estimateOpenAICost, recordApiUsageSafely } from "../../lib/usage";
 
 type CompareListingInput = {
   id?: unknown;
@@ -26,7 +28,6 @@ const MAX_FIELD_LENGTH = 260;
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const DEFAULT_REASONING_EFFORT = "low";
 const MAX_SUMMARIES_PER_HOUR = 12;
-const summaryUsage = new Map<string, { count: number; resetAt: number }>();
 
 const OUTPUT_SCHEMA = {
   type: "object",
@@ -74,18 +75,6 @@ function normalizeListing(input: CompareListingInput, index: number): CompareLis
   };
 }
 
-function allowSummary(userId: string) {
-  const now = Date.now();
-  const existing = summaryUsage.get(userId);
-  if (!existing || existing.resetAt <= now) {
-    summaryUsage.set(userId, { count: 1, resetAt: now + 60 * 60 * 1000 });
-    return true;
-  }
-  if (existing.count >= MAX_SUMMARIES_PER_HOUR) return false;
-  existing.count += 1;
-  return true;
-}
-
 function outputText(response: unknown) {
   if (!response || typeof response !== "object") return "";
   const record = response as { output_text?: unknown; output?: unknown };
@@ -116,7 +105,13 @@ export async function POST(request: Request) {
   }
   if (!user) return NextResponse.json({ error: "Sign in before using an AI comparison." }, { status: 401 });
   if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before using an AI comparison." }, { status: 403 });
-  if (!allowSummary(user.id)) return NextResponse.json({ error: "You have reached the comparison-summary limit for this hour." }, { status: 429 });
+  let rateLimit;
+  try {
+    rateLimit = await consumeRateLimit({ key: `ai:compare-summary:${user.id}`, limit: MAX_SUMMARIES_PER_HOUR, windowSeconds: 60 * 60 });
+  } catch {
+    return NextResponse.json({ error: "Usage limits are temporarily unavailable. Please try again shortly." }, { status: 503 });
+  }
+  if (!rateLimit.allowed) return NextResponse.json({ error: "You have reached the comparison-summary limit for this hour." }, { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } });
 
   let locale: CompareSummaryLocale = "zh";
   let listings: CompareListingFacts[];
@@ -155,8 +150,22 @@ export async function POST(request: Request) {
       cache: "no-store",
     });
 
-    if (!response.ok) return NextResponse.json({ error: "The AI service could not summarize these listings right now." }, { status: 502 });
     const data = await response.json();
+    const usage = data?.usage || {};
+    await recordApiUsageSafely({
+      userId: user.id,
+      provider: "openai",
+      endpoint: "compare-summary",
+      model,
+      requestId: response.headers.get("x-request-id") || (typeof data?.id === "string" ? data.id : ""),
+      status: response.ok ? "success" : "error",
+      inputTokens: Number(usage.input_tokens || 0),
+      outputTokens: Number(usage.output_tokens || 0),
+      totalTokens: Number(usage.total_tokens || 0),
+      estimatedCostUsd: estimateOpenAICost(Number(usage.input_tokens || 0), Number(usage.output_tokens || 0)),
+      metadata: { reasoningEffort, httpStatus: response.status },
+    });
+    if (!response.ok) return NextResponse.json({ error: "The AI service could not summarize these listings right now." }, { status: 502 });
     const rawOutput = outputText(data);
     const summary = JSON.parse(rawOutput) as { headline?: unknown; summary?: unknown; bestFor?: unknown; tradeoffs?: unknown };
     const tradeoffs = Array.isArray(summary.tradeoffs)

@@ -10,10 +10,11 @@ This is a browser-first MVP slice of the Chinese-first North American rental mar
 - Synthetic listings clearly labeled as demo inventory.
 - Separate location, identity, and availability signals.
 - Approximate-area privacy language with no exact address in public content.
-- Save listings and searches with browser persistence.
-- Saved searches remain available anonymously in the browser and sync to Neon for verified signed-in users.
+- Save listings, searches, and posting drafts with browser persistence plus Neon sync for verified signed-in users.
+- Anonymous or unverified users keep a browser-local fallback; verified accounts can carry saved listings, searches, drafts, and inquiries across devices.
 - Compare up to two listings in a side-by-side view with bedrooms, bathrooms, feature tags, and a balanced AI conclusion; a labeled local comparison remains available when AI is not configured.
 - Listing detail drawer, structured inquiry flow, and a Messages view that combines local preview records with Neon-backed inquiries.
+- Phase 2 renter assistance includes a grounded bilingual inquiry-writing helper and a cached commute estimator for drive, public-transit, and walking routes from the public approximate area.
 - Five-step poster workflow with autosaved and explicitly savable drafts, private exact-address input, rental terms, photo compression, cover-photo ordering, preview, validation, and cloud publish.
 - Chinese-only posting fields for the current pilot, USD rental currency, immediate move-in by default with optional date selection, and expanded feature choices including laundry, air conditioning, dishwasher, balcony, elevator, gym, doorman, and storage.
 - AI-assisted bilingual listing polish in Step 3. The server route sends only public listing facts to OpenAI, keeps the exact address out of the request, and falls back to a labeled local formatter when no API key is configured.
@@ -27,7 +28,7 @@ This is a browser-first MVP slice of the Chinese-first North American rental mar
 
 ## Current pilot boundary
 
-The posting draft and saved listing hearts remain browser-local for now. Verified signed-in saved searches, accounts, published listings, private address details, media metadata, sessions, and inquiries use Neon; image objects use Cloudflare R2. Owner replies still use `mailto:`, while Resend handles inquiry notification and confirmation email when configured.
+Browser storage remains the anonymous/unverified fallback. Verified signed-in saved listings, saved searches, posting drafts, accounts, published listings, private address details, media metadata, sessions, and inquiries use Neon; image objects use Cloudflare R2. Owner replies still use `mailto:`, while Resend handles inquiry notification, confirmation, and password-reset email when configured.
 
 See [STAGING.md](STAGING.md) for the deployment checklist and smoke tests.
 
@@ -48,7 +49,7 @@ npm run db:seed
 
 The seed creates four clearly labeled sample listings, their private demo details, and local demo-image metadata. It is safe to run again; it does not create user accounts or real rental inventory.
 
-The database bootstrap applies the listing lifecycle columns automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql` after the earlier migration files.
+The database bootstrap applies the listing lifecycle and Phase 1 security/usage tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql` and then `db/migrations/017_phase_one_security_usage.sql` after the earlier migration files.
 
 To load synthetic agent profiles for testing the owner’s agent-selection flow:
 
@@ -99,6 +100,8 @@ APP_URL=http://localhost:3010
 Registration creates a 24-hour verification token and sends it through Resend. Users can resend the message from the account drawer. Publishing listings, uploading images, polishing copy, sending inquiries, and reporting listings require a verified email. Use a Resend `sending_access` key and verify the sending domain before sending to users; see Resend’s [Next.js guide](https://resend.com/docs/send-with-nextjs), [send API](https://resend.com/docs/api-reference/emails/send-email), and [API-key permissions](https://resend.com/docs/api-reference/api-keys/create-api-key).
 
 The public `/contact` and `/feedback` forms also send through Resend. Keep the recipient addresses server-side; the browser can only choose a validated topic and message. `SITE_CONTACT_EMAIL` is the shared fallback, while `CONTACT_RECIPIENT_EMAIL` and `FEEDBACK_RECIPIENT_EMAIL` can route the two forms separately. The sender must be a verified Resend domain, and the user’s valid email is added as `replyTo` so you can answer directly.
+
+Password reset is available at `/reset-password`. Reset requests use generic responses to avoid exposing whether an email is registered; the link expires after one hour, and changing a password revokes existing sessions. Login, password-reset, listing-polish, and comparison limits are stored in Neon rather than an in-memory server process.
 
 ## Enable Google login
 
@@ -155,16 +158,36 @@ WHERE email = 'admin@example.com';
 
 After signing in with that verified admin account, open the account avatar and choose `Admin workspace`, or go directly to `/admin/agent-verifications`. The desk reads the protected `/api/admin/agent-verifications` queue and provides `Approve verification` and `Return for updates` actions. Approval enables the verified-agent listing capacity; returning an application stores the note and leaves it in the queue for follow-up. Check the submitted license against the relevant state’s public records before approving.
 
+## Phase 1 operations
+
+- Verified accounts can request a password reset from the sign-in drawer; Resend must be configured for the email to arrive.
+- Admins can open `/admin/usage` from the account menu to review aggregate OpenAI/Google Maps calls, token counts, cache hits, gross cost estimates, daily activity, and active rate-limit windows.
+- Google Maps estimates are intentionally gross list-price estimates and do not subtract monthly free caps. The usage desk never displays API keys, full emails, private addresses, or prompt contents.
+- Keep `db/migrations/017_phase_one_security_usage.sql` in the deployment migration set if migrations are applied manually; the current bootstrap also creates these tables automatically.
+
+## Phase 2 core
+
+- The inquiry assistant uses only public listing facts and the renter’s structured answers. It can produce Chinese and English drafts, but the renter remains responsible for reviewing the message before sending it.
+- The detail drawer can estimate a route to a school, workplace, landmark, commercial district, or supermarket. It uses the selected approximate area rather than the private address, supports drive/public transit/walking, limits public requests, and reuses cached area/destination results for seven days.
+- Commute requests do not persist a destination that looks like a private street address. Do not enter a private address into the destination field.
+- The existing Phase 2 foundations for manual agent verification, listing quality checks, price comparisons, owner performance metrics, and labeled promotion requests remain in place. Automated identity/property vendors, OCR/redaction services, and paid promotion checkout are intentionally vendor/legal decisions still to be completed before production use.
+
+## Phase 3 foundation
+
+- Verified renters can maintain a private, reusable application profile from the account desk or directly inside the application drawer. Future applications can reuse contact details, move-in timing, lease preference, household size, pets, employment preference, income-range preference, and an optional general note.
+- The profile is stored in Neon and is sent to a listing owner or agent only when the renter submits an application for that specific listing. The product does not yet store identity documents, credit reports, screening results, leases, deposits, or payment details.
+- Reusable applications are the first Phase 3 slice. Document vault, compliant third-party screening, jurisdiction-specific leases/e-signature, rent payments, disputes, and property-management feeds remain gated on vendor selection, legal review, and secure private-media design.
+
 ## Production checklist
 
 - Configure R2 CORS for the exact production origin and verify the public bucket policy; do not expose the S3 credentials to the browser.
 - Set `SITE_CONTACT_EMAIL` (or both recipient overrides) in Vercel so `/contact` and `/feedback` can deliver through Resend.
-- Add password reset, login throttling, and session revocation before opening registration publicly.
+- Confirm password reset, persistent login throttling, and session revocation against the production Neon project before opening registration publicly.
 - Extend the basic moderation queue with admin UI, rate limits, audit logging, and documented response procedures before accepting public supply.
 - Replace sample inventory with reviewed seed listings for the selected pilot metro.
 - Add geocoding, verification, transactional email, and notifications after vendor decisions.
 - Add automated authorization, cross-account ownership, exact-address non-disclosure, and upload-orphan cleanup tests.
-- Put the AI polish route behind authentication, per-user usage limits, and operational monitoring before public launch.
+- Set a review/alert process for the admin usage desk before public launch; AI polish is already behind authentication, per-user usage limits, and recorded operational metrics.
 
 ## Useful checks
 

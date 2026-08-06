@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../lib/auth";
 import { buildLocationContext, DEFAULT_LOCATION_LOOKUP_OPTIONS, normalizeLocationLookupOptions } from "../../lib/location-context";
-import type { LocationContext, LocationLookupOption } from "../../lib/location-context";
+import type { LocationContext, LocationContextUsage, LocationLookupOption } from "../../lib/location-context";
 import { hasRestrictedHousingLanguage } from "../../lib/safety";
+import { consumeRateLimit } from "../../lib/rate-limit";
+import { estimateOpenAICost, recordApiUsageSafely } from "../../lib/usage";
 
 type ListingInput = {
   titleEn?: unknown;
@@ -50,7 +52,6 @@ const MAX_FIELD_LENGTH = 2_500;
 const DEFAULT_MODEL = "gpt-5.6-luna";
 const DEFAULT_REASONING_EFFORT = "low";
 const MAX_POLISHES_PER_HOUR = 20;
-const polishUsage = new Map<string, { count: number; resetAt: number }>();
 
 const OUTPUT_SCHEMA = {
   type: "object",
@@ -113,18 +114,6 @@ function normalizeInput(input: ListingInput): NormalizedListing {
 
 function hasPotentiallyDiscriminatoryLanguage(input: NormalizedListing) {
   return hasRestrictedHousingLanguage([input.descriptionEn, input.descriptionZh]);
-}
-
-function allowPolish(userId: string) {
-  const now = Date.now();
-  const existing = polishUsage.get(userId);
-  if (!existing || existing.resetAt <= now) {
-    polishUsage.set(userId, { count: 1, resetAt: now + 60 * 60 * 1000 });
-    return true;
-  }
-  if (existing.count >= MAX_POLISHES_PER_HOUR) return false;
-  existing.count += 1;
-  return true;
 }
 
 function appendIfMissing(base: string, addition: string) {
@@ -204,7 +193,13 @@ export async function POST(request: Request) {
   }
   if (!user) return NextResponse.json({ error: "Sign in before using listing polish." }, { status: 401 });
   if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before using listing polish." }, { status: 403 });
-  if (!allowPolish(user.id)) return NextResponse.json({ error: "You have reached the listing polish limit for this hour." }, { status: 429 });
+  let rateLimit;
+  try {
+    rateLimit = await consumeRateLimit({ key: `ai:polish-listing:${user.id}`, limit: MAX_POLISHES_PER_HOUR, windowSeconds: 60 * 60 });
+  } catch {
+    return NextResponse.json({ error: "Usage limits are temporarily unavailable. Please try again shortly." }, { status: 503 });
+  }
+  if (!rateLimit.allowed) return NextResponse.json({ error: "You have reached the listing polish limit for this hour." }, { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } });
   let input: NormalizedListing;
   try {
     const rawBody = await request.text();
@@ -218,6 +213,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Add a title or description before polishing." }, { status: 400 });
   }
 
+  let mapUsage: LocationContextUsage = { placesCalls: 0, routeCalls: 0, cacheHit: false };
   try {
     input.locationContext = await buildLocationContext({
       areaEn: input.areaEn,
@@ -226,6 +222,7 @@ export async function POST(request: Request) {
       boroughZh: input.boroughZh,
       locale: input.locale,
       lookupOptions: input.locationLookupOptions,
+      onUsage: (usage) => { mapUsage = usage; },
     });
   } catch {
     input.locationContext = {
@@ -238,6 +235,19 @@ export async function POST(request: Request) {
       notes: [input.locale === "zh" ? "地图服务暂时不可用；AI不会编造附近设施或交通时间。" : "Map context is temporarily unavailable; AI will not invent nearby places or travel times."],
       cached: false,
     };
+  }
+
+  if (mapUsage.placesCalls > 0 || mapUsage.routeCalls > 0 || mapUsage.cacheHit) {
+    await recordApiUsageSafely({
+      userId: user.id,
+      provider: "google_maps",
+      endpoint: "polish-listing/location-context",
+      placesCalls: mapUsage.placesCalls,
+      routeCalls: mapUsage.routeCalls,
+      cacheHit: mapUsage.cacheHit,
+      status: mapUsage.cacheHit ? "cached" : "success",
+      metadata: { lookupOptions: input.locationLookupOptions },
+    });
   }
 
   if (!process.env.OPENAI_API_KEY) {
@@ -265,8 +275,22 @@ export async function POST(request: Request) {
       cache: "no-store",
     });
 
-    if (!response.ok) return NextResponse.json({ error: "The AI service could not polish this draft right now." }, { status: 502 });
     const data = await response.json();
+    const usage = data?.usage || {};
+    await recordApiUsageSafely({
+      userId: user.id,
+      provider: "openai",
+      endpoint: "polish-listing",
+      model,
+      requestId: response.headers.get("x-request-id") || (typeof data?.id === "string" ? data.id : ""),
+      status: response.ok ? "success" : "error",
+      inputTokens: Number(usage.input_tokens || 0),
+      outputTokens: Number(usage.output_tokens || 0),
+      totalTokens: Number(usage.total_tokens || 0),
+      estimatedCostUsd: estimateOpenAICost(Number(usage.input_tokens || 0), Number(usage.output_tokens || 0)),
+      metadata: { reasoningEffort, httpStatus: response.status },
+    });
+    if (!response.ok) return NextResponse.json({ error: "The AI service could not polish this draft right now." }, { status: 502 });
     const rawOutput = outputText(data);
     const polished = JSON.parse(rawOutput) as { titleEn?: unknown; titleZh?: unknown; descriptionEn?: unknown; descriptionZh?: unknown; notes?: unknown };
     const notes = Array.isArray(polished.notes) ? polished.notes.filter((note): note is string => typeof note === "string").map((note) => text(note, 240)).filter(Boolean).slice(0, 3) : [];

@@ -54,6 +54,8 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
   const [values, setValues] = useState<ApplicationFormValues>(() => defaultValues(profileDefaults));
   const [localError, setLocalError] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileSaveMessage, setProfileSaveMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -71,6 +73,37 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
   const setValue = <K extends keyof ApplicationFormValues>(key: K, value: ApplicationFormValues[K]) => {
     setValues((current) => ({ ...current, [key]: value }));
     setLocalError("");
+    setProfileSaveMessage("");
+  };
+
+  const saveProfileForReuse = async () => {
+    setProfileSaving(true);
+    setLocalError("");
+    setProfileSaveMessage("");
+    try {
+      const response = await fetch("/api/renter-profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          preferredName: values.preferredName,
+          phone: values.phone,
+          currentCity: values.currentCity,
+          employmentStatus: values.employmentStatus,
+          incomeRange: values.incomeRange,
+          householdSize: values.occupants,
+          pets: values.pets,
+          moveIn: values.moveIn,
+          leaseLength: values.leaseLength,
+        }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error || (zh ? "申请资料暂时无法保存。" : "The application profile could not be saved."));
+      setProfileSaveMessage(zh ? "已保存，下次申请会自动带入。" : "Saved for your next application.");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : (zh ? "申请资料暂时无法保存。" : "The application profile could not be saved."));
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -97,6 +130,8 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
           {(error || localError) && <p className="form-error" role="alert">{error || localError}</p>}
           <form className="application-form" onSubmit={handleSubmit}>
             <div className="application-form-intro"><strong>{zh ? "基本资料" : "Your details"}</strong>{profileLoading ? <span>{zh ? "正在读取已保存资料…" : "Loading saved profile…"}</span> : <span>{zh ? "下次申请可直接复用" : "Reusable for your next application"}</span>}</div>
+            <div className="application-profile-save-row"><span>{zh ? "想稍后再申请？可以先保存这些资料。" : "Applying later? Save these details now."}</span><button className="outline-button" type="button" onClick={() => { void saveProfileForReuse(); }} disabled={profileSaving || loading}>{profileSaving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存申请资料" : "Save profile")}</button></div>
+            {profileSaveMessage && <p className="verification-success application-profile-save-message" role="status">{profileSaveMessage}</p>}
             <div className="form-row"><label className="field-label"><span>{zh ? "称呼" : "Preferred name"}</span><input value={values.preferredName} onChange={(event) => setValue("preferredName", event.target.value)} maxLength={100} required /></label><label className="field-label"><span>{zh ? "联系电话" : "Phone"}</span><input value={values.phone} onChange={(event) => setValue("phone", event.target.value)} maxLength={40} required /></label></div>
             <label className="field-label"><span>{zh ? "目前所在城市（可选）" : "Current city (optional)"}</span><input value={values.currentCity} onChange={(event) => setValue("currentCity", event.target.value)} maxLength={100} placeholder={zh ? "例如：皇后区" : "Example: Queens"} /></label>
             <div className="form-row"><label className="field-label"><span>{zh ? "预计入住" : "Move-in"}</span><select value={values.moveIn} onChange={(event) => setValue("moveIn", event.target.value)}><option value="immediate">{zh ? "立即入住" : "Move in immediately"}</option><option value="august">{zh ? "2026年8月" : "Aug 2026"}</option><option value="september">{zh ? "2026年9月" : "Sep 2026"}</option><option value="october">{zh ? "2026年10月" : "Oct 2026"}</option></select></label><label className="field-label"><span>{zh ? "预计租期" : "Lease length"}</span><select value={values.leaseLength} onChange={(event) => setValue("leaseLength", event.target.value)}><option value="6">{zh ? "6个月" : "6 months"}</option><option value="12">{zh ? "12个月" : "12 months"}</option><option value="24">{zh ? "24个月以上" : "24+ months"}</option><option value="undefined">{zh ? "未确定" : "Undefined"}</option></select></label></div>

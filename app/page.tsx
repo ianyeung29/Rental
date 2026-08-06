@@ -5,6 +5,7 @@ import Image from "next/image";
 import AccountDrawer from "./components/AccountDrawer";
 import ApplicationDrawer, { type ApplicationFormValues } from "./components/ApplicationDrawer";
 import AuthDrawer from "./components/AuthDrawer";
+import CommuteEstimator from "./components/CommuteEstimator";
 import DetailActionDock from "./components/DetailActionDock";
 import ListingCard from "./components/ListingCard";
 import ListingGallery from "./components/ListingGallery";
@@ -371,19 +372,23 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
     en: "Brooklyn",
     value: "Brooklyn",
     locations: [
+      { id: "brooklyn-8th-avenue", zh: "八大道", en: "8th Avenue", value: "Brooklyn 8th Avenue" },
+      { id: "sunset-park", zh: "日落公园", en: "Sunset Park", value: "Sunset Park" },
+      { id: "bensonhurst", zh: "本森赫斯特", en: "Bensonhurst", value: "Bensonhurst" },
+      { id: "homecrest", zh: "霍姆克雷斯特", en: "Homecrest", value: "Homecrest" },
+      { id: "sheepshead-bay", zh: "羊头湾", en: "Sheepshead Bay", value: "Sheepshead Bay" },
+      { id: "gravesend", zh: "格雷夫森德", en: "Gravesend", value: "Gravesend" },
+      { id: "bath-beach", zh: "巴斯海滩", en: "Bath Beach", value: "Bath Beach" },
+      { id: "bay-ridge", zh: "海湾岭", en: "Bay Ridge", value: "Bay Ridge" },
+      { id: "dyker-heights", zh: "戴克高地", en: "Dyker Heights", value: "Dyker Heights" },
+      { id: "brighton-beach", zh: "布莱顿海滩", en: "Brighton Beach", value: "Brighton Beach" },
+      { id: "midwood", zh: "中木区", en: "Midwood", value: "Midwood" },
       { id: "downtown-brooklyn", zh: "布鲁克林市中心", en: "Downtown Brooklyn", value: "Downtown Brooklyn" },
       { id: "brooklyn-heights", zh: "布鲁克林高地", en: "Brooklyn Heights", value: "Brooklyn Heights" },
       { id: "williamsburg", zh: "威廉斯堡", en: "Williamsburg", value: "Williamsburg" },
       { id: "greenpoint", zh: "绿点", en: "Greenpoint", value: "Greenpoint" },
       { id: "bushwick", zh: "布什维克", en: "Bushwick", value: "Bushwick" },
       { id: "park-slope", zh: "公园坡", en: "Park Slope", value: "Park Slope" },
-      { id: "bensonhurst", zh: "本森赫斯特", en: "Bensonhurst", value: "Bensonhurst" },
-      { id: "sunset-park", zh: "日落公园", en: "Sunset Park", value: "Sunset Park" },
-      { id: "gravesend", zh: "格雷夫森德", en: "Gravesend", value: "Gravesend" },
-      { id: "sheepshead-bay", zh: "羊头湾", en: "Sheepshead Bay", value: "Sheepshead Bay" },
-      { id: "bath-beach", zh: "巴斯海滩", en: "Bath Beach", value: "Bath Beach" },
-      { id: "homecrest", zh: "霍姆克雷斯特", en: "Homecrest", value: "Homecrest" },
-      { id: "bay-ridge", zh: "海湾岭", en: "Bay Ridge", value: "Bay Ridge" },
     ],
   },
   {
@@ -392,17 +397,20 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
     en: "Queens",
     value: "Queens",
     locations: [
-      { id: "long-island-city", zh: "长岛市", en: "Long Island City", value: "Long Island City" },
-      { id: "forest-hills", zh: "森林小丘", en: "Forest Hills", value: "Forest Hills" },
       { id: "flushing", zh: "法拉盛", en: "Flushing", value: "Flushing" },
-      { id: "murray-hill-queens", zh: "法拉盛梅里山", en: "Murray Hill", value: "Murray Hill" },
-      { id: "college-point", zh: "学院点", en: "College Point", value: "College Point" },
-      { id: "woodside", zh: "木边", en: "Woodside", value: "Woodside" },
-      { id: "astoria", zh: "阿斯托里亚", en: "Astoria", value: "Astoria" },
-      { id: "jackson-heights", zh: "杰克逊高地", en: "Jackson Heights", value: "Jackson Heights" },
       { id: "elmhurst", zh: "艾姆赫斯特", en: "Elmhurst", value: "Elmhurst" },
-      { id: "fresh-meadows", zh: "新鲜草原", en: "Fresh Meadows", value: "Fresh Meadows" },
+      { id: "rego-park", zh: "雷哥公园", en: "Rego Park", value: "Rego Park" },
+      { id: "forest-hills", zh: "森林小丘", en: "Forest Hills", value: "Forest Hills" },
+      { id: "maspeth", zh: "马斯佩斯", en: "Maspeth", value: "Maspeth" },
+      { id: "whitestone", zh: "白石", en: "Whitestone", value: "Whitestone" },
       { id: "bayside", zh: "贝赛德", en: "Bayside", value: "Bayside" },
+      { id: "fresh-meadows", zh: "新鲜草原", en: "Fresh Meadows", value: "Fresh Meadows" },
+      { id: "college-point", zh: "学院点", en: "College Point", value: "College Point" },
+      { id: "jackson-heights", zh: "杰克逊高地", en: "Jackson Heights", value: "Jackson Heights" },
+      { id: "woodside", zh: "木边", en: "Woodside", value: "Woodside" },
+      { id: "long-island-city", zh: "长岛市", en: "Long Island City", value: "Long Island City" },
+      { id: "murray-hill-queens", zh: "法拉盛梅里山", en: "Murray Hill", value: "Murray Hill" },
+      { id: "astoria", zh: "阿斯托里亚", en: "Astoria", value: "Astoria" },
     ],
   },
   {
@@ -438,13 +446,19 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
     en: "Long Island",
     value: "Long Island",
     locations: [
-      { id: "nassau", zh: "拿骚县", en: "Nassau County", value: "Nassau" },
-      { id: "suffolk", zh: "萨福克县", en: "Suffolk County", value: "Suffolk" },
       { id: "great-neck", zh: "大颈", en: "Great Neck", value: "Great Neck" },
       { id: "jericho", zh: "杰里科", en: "Jericho", value: "Jericho" },
+      { id: "syosset", zh: "西奥塞特", en: "Syosset", value: "Syosset" },
+      { id: "hicksville", zh: "希克斯维尔", en: "Hicksville", value: "Hicksville" },
+      { id: "plainview", zh: "普莱恩维尤", en: "Plainview", value: "Plainview" },
+      { id: "east-meadow", zh: "东草原", en: "East Meadow", value: "East Meadow" },
       { id: "new-hyde-park", zh: "新海德公园", en: "New Hyde Park", value: "New Hyde Park" },
       { id: "garden-city", zh: "花园城", en: "Garden City", value: "Garden City" },
-      { id: "hicksville", zh: "希克斯维尔", en: "Hicksville", value: "Hicksville" },
+      { id: "westbury", zh: "西伯里", en: "Westbury", value: "Westbury" },
+      { id: "mineola", zh: "米尼奥拉", en: "Mineola", value: "Mineola" },
+      { id: "manhasset", zh: "曼哈塞特", en: "Manhasset", value: "Manhasset" },
+      { id: "nassau", zh: "拿骚县", en: "Nassau County", value: "Nassau" },
+      { id: "suffolk", zh: "萨福克县", en: "Suffolk County", value: "Suffolk" },
       { id: "huntington", zh: "亨廷顿", en: "Huntington", value: "Huntington" },
       { id: "commack", zh: "科马克", en: "Commack", value: "Commack" },
       { id: "stony-brook", zh: "石溪", en: "Stony Brook", value: "Stony Brook" },
@@ -458,10 +472,15 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
     value: "Upstate New York",
     locations: [
       { id: "albany", zh: "奥尔巴尼", en: "Albany", value: "Albany" },
+      { id: "colonie", zh: "科勒尼", en: "Colonie", value: "Colonie" },
       { id: "buffalo", zh: "水牛城", en: "Buffalo", value: "Buffalo" },
+      { id: "williamsville", zh: "威廉斯维尔", en: "Williamsville", value: "Williamsville" },
       { id: "rochester", zh: "罗切斯特", en: "Rochester", value: "Rochester" },
+      { id: "brighton-ny", zh: "布莱顿", en: "Brighton", value: "Brighton" },
+      { id: "pittsford", zh: "匹兹福德", en: "Pittsford", value: "Pittsford" },
       { id: "syracuse", zh: "锡拉丘兹", en: "Syracuse", value: "Syracuse" },
       { id: "ithaca", zh: "伊萨卡", en: "Ithaca", value: "Ithaca" },
+      { id: "cayuga-heights", zh: "卡尤加高地", en: "Cayuga Heights", value: "Cayuga Heights" },
       { id: "saratoga-springs", zh: "萨拉托加泉", en: "Saratoga Springs", value: "Saratoga Springs" },
       { id: "kingston", zh: "金斯顿", en: "Kingston", value: "Kingston" },
     ],
@@ -528,6 +547,11 @@ const LOCATION_ALIAS_GROUPS = [
   ["伊萨卡", "伊薩卡", "ithaca"],
   ["萨拉托加泉", "薩拉托加泉", "saratoga springs"],
   ["金斯顿", "金斯頓", "kingston"],
+  ["科勒尼", "科勒尼镇", "科勒尼鎮", "colonie", "colonie ny"],
+  ["威廉斯维尔", "威廉斯維爾", "williamsville"],
+  ["布莱顿", "布萊頓", "brighton", "brighton ny"],
+  ["匹兹福德", "匹茲福德", "pittsford"],
+  ["卡尤加高地", "卡尤加高地", "cayuga heights"],
 
   ["曼哈顿中城", "曼哈頓中城", "中城", "midtown", "midtown manhattan"],
   ["曼哈顿下城", "曼哈頓下城", "下城", "downtown manhattan", "lower manhattan"],
@@ -563,6 +587,7 @@ const LOCATION_ALIAS_GROUPS = [
   ["罗斯福岛", "羅斯福島", "roosevelt island"],
   ["肉库区", "肉庫區", "肉类加工区", "肉類加工區", "meatpacking district", "meatpacking"],
 
+  ["八大道", "第八大道", "布鲁克林八大道", "布魯克林八大道", "8th avenue", "8th ave", "eighth avenue", "brooklyn 8th avenue", "8 avenue"],
   ["布鲁克林市中心", "布魯克林市中心", "downtown brooklyn"],
   ["布鲁克林高地", "布魯克林高地", "brooklyn heights"],
   ["曼哈顿桥下", "曼哈頓橋下", "dum​​bo", "dumbo", "down under the manhattan bridge overpass"],
@@ -1747,6 +1772,10 @@ export default function HomePage() {
   const [visibleResultCount, setVisibleResultCount] = useState(6);
   const [contactListing, setContactListing] = useState<Listing | null>(null);
   const [selectedInquiryComments, setSelectedInquiryComments] = useState<string[]>([]);
+  const [inquiryMessage, setInquiryMessage] = useState("");
+  const [inquiryTranslation, setInquiryTranslation] = useState("");
+  const [inquiryAssistLoading, setInquiryAssistLoading] = useState(false);
+  const [inquiryAssistError, setInquiryAssistError] = useState("");
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareSummary, setCompareSummary] = useState<CompareSummary | null>(null);
   const [compareSummaryLoading, setCompareSummaryLoading] = useState(false);
@@ -1770,6 +1799,7 @@ export default function HomePage() {
   const [verificationNotice, setVerificationNotice] = useState("");
   const wechatBrowser = isWeChatBrowser();
   const inquirySequence = useRef(0);
+  const inquiryFormRef = useRef<HTMLFormElement>(null);
   const sharedListingIdRef = useRef<string | null>(null);
   const sessionKeyRef = useRef("");
   const t = copy[locale];
@@ -2962,12 +2992,65 @@ export default function HomePage() {
     trackListingEvent(listing.id, "contact");
     setContactListing(listing);
     setSelectedInquiryComments([]);
+    setInquiryMessage("");
+    setInquiryTranslation("");
+    setInquiryAssistError("");
     setInquiryError("");
   };
 
   const closeContact = () => {
     setContactListing(null);
     setSelectedInquiryComments([]);
+    setInquiryMessage("");
+    setInquiryTranslation("");
+    setInquiryAssistError("");
+  };
+
+  const assistInquiry = async () => {
+    if (!contactListing || inquiryAssistLoading) return;
+    const form = inquiryFormRef.current;
+    if (!form) return;
+    setInquiryAssistLoading(true);
+    setInquiryAssistError("");
+    try {
+      const formData = new FormData(form);
+      const selectedCommentText = selectedInquiryComments.map((value) => {
+        const option = INQUIRY_COMMENT_OPTIONS.find((item) => item.value === value);
+        return option ? (locale === "zh" ? option.zh : option.en) : "";
+      }).filter(Boolean);
+      const response = await fetch("/api/inquiry-assist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          locale,
+          titleZh: contactListing.titleZh,
+          titleEn: contactListing.titleEn,
+          areaZh: contactListing.areaZh,
+          areaEn: contactListing.areaEn,
+          price: contactListing.price,
+          bedrooms: contactListing.bedrooms,
+          bathrooms: contactListing.bathrooms,
+          squareFeet: contactListing.squareFeet,
+          moveIn: formData.get("moveIn"),
+          leaseLength: formData.get("leaseLength"),
+          occupants: formData.get("occupants"),
+          pets: formData.get("pets"),
+          tourPreference: formData.get("tourPreference"),
+          comments: selectedCommentText,
+          currentMessage: inquiryMessage,
+        }),
+      });
+      const result = await response.json() as { messageZh?: string; messageEn?: string; error?: string };
+      if (!response.ok) throw new Error(result.error || (locale === "zh" ? "AI 咨询助手暂时不可用。" : "The inquiry assistant is unavailable right now."));
+      const message = locale === "zh" ? result.messageZh : result.messageEn;
+      const translation = locale === "zh" ? result.messageEn : result.messageZh;
+      setInquiryMessage(message || "");
+      setInquiryTranslation(translation || "");
+    } catch (error) {
+      setInquiryAssistError(error instanceof Error ? error.message : (locale === "zh" ? "AI 咨询助手暂时不可用。" : "The inquiry assistant is unavailable right now."));
+    } finally {
+      setInquiryAssistLoading(false);
+    }
   };
 
   const submitInquiry = async (event: FormEvent<HTMLFormElement>) => {
@@ -2978,7 +3061,7 @@ export default function HomePage() {
       const option = INQUIRY_COMMENT_OPTIONS.find((item) => item.value === value);
       return option ? `• ${locale === "zh" ? option.zh : option.en}` : "";
     }).filter((comment) => comment.length > 0);
-    const freeformMessage = String(formData.get("message") || "").trim();
+    const freeformMessage = inquiryMessage.trim() || String(formData.get("message") || "").trim();
     const message = [...selectedCommentText, freeformMessage].filter((comment) => comment.length > 0).join("\n");
     const inquiry: Inquiry = {
       id: `inquiry-${inquirySequence.current++}`,
@@ -4543,6 +4626,7 @@ export default function HomePage() {
               <h3 className="drawer-section-heading">{t.detailAmenities}</h3>
               <div className="tag-row drawer-tags">{listingTags(selectedListing).map((tag) => <span className="listing-tag" key={tag}>{tag}</span>)}</div>
               <div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>{listingPrivacy(selectedListing)}</p></div></div>
+              <CommuteEstimator locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
               <SafetyNotice
                 locale={locale}
                 isSample={selectedListing.source === "sample" || selectedListing.source === "demo"}
@@ -4581,7 +4665,7 @@ export default function HomePage() {
               <div className="drawer-heading"><span className="section-label">{contactListing.titleEn}</span><button className="drawer-close" type="button" onClick={closeContact} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="contact-title">{t.contactTitle}</h2>
               <p className="drawer-intro">{t.contactIntro}</p>
-              <form key={contactListing.id} className="contact-form" onSubmit={submitInquiry}>
+              <form key={contactListing.id} ref={inquiryFormRef} className="contact-form" onSubmit={submitInquiry}>
                 {inquiryError && <p className="form-error" role="alert">{inquiryError}</p>}
                 <label className="field-label" htmlFor="contact-move">{t.intendedMove}</label>
                 <select id="contact-move" name="moveIn" defaultValue={contactListing.moveIn === "immediate" ? "immediate" : moveInMonth(contactListing.moveIn) || "september"}><option value="immediate">{locale === "zh" ? "立即入住" : "Move in immediately"}</option><option value="august">{locale === "zh" ? "2026年8月" : "Aug 2026"}</option><option value="september">{locale === "zh" ? "2026年9月" : "Sep 2026"}</option><option value="october">{locale === "zh" ? "2026年10月" : "Oct 2026"}</option></select>
@@ -4600,8 +4684,14 @@ export default function HomePage() {
                   </div>
                   <p className="field-help">{locale === "zh" ? "可选择多个，选中的内容会和你的消息一起发送给发布者。" : "Choose any number; selected prompts will be sent with your message."}</p>
                 </fieldset>
+                <div className="inquiry-assistant-panel">
+                  <div className="inquiry-assistant-copy"><span className="inquiry-assistant-mark"><ShieldIcon size={15} /></span><div><strong>{locale === "zh" ? "AI 帮你整理咨询" : "AI inquiry helper"}</strong><p>{locale === "zh" ? "只使用公开房源信息和你刚刚填写的条件，不会索要敏感资料。" : "Uses only public listing facts and the answers above; it never asks for sensitive documents."}</p></div></div>
+                  <button className="outline-button inquiry-assistant-button" type="button" onClick={() => { void assistInquiry(); }} disabled={inquiryAssistLoading}>{inquiryAssistLoading ? (locale === "zh" ? "整理中…" : "Preparing…") : (locale === "zh" ? "帮我写一段" : "Help me write")}</button>
+                  {inquiryAssistError && <p className="inquiry-assistant-error" role="alert">{inquiryAssistError}</p>}
+                  {inquiryTranslation && <details className="inquiry-translation"><summary>{locale === "zh" ? "查看英文翻译" : "View Chinese translation"}</summary><p>{inquiryTranslation}</p></details>}
+                </div>
                 <label className="field-label" htmlFor="contact-message">{t.message}</label>
-                <textarea id="contact-message" name="message" placeholder={t.messagePlaceholder} rows={4} />
+                <textarea id="contact-message" name="message" placeholder={t.messagePlaceholder} rows={4} value={inquiryMessage} onChange={(event) => { setInquiryMessage(event.target.value); setInquiryTranslation(""); }} />
                 <p className="form-safety"><ShieldIcon size={15} />{locale === "zh" ? "我们不会在这个阶段要求信用资料或受保护特征。" : "We do not ask for credit files or protected traits at this stage."}</p>
                 <button className="primary-button full-button" type="submit"><ChatIcon />{t.sendInquiry}</button>
               </form>
