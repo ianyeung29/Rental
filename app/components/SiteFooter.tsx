@@ -24,6 +24,7 @@ export default function SiteFooter() {
             <a href="/about">关于安居</a>
             <a href="/contact">联系我们</a>
             <a href="/feedback">提交反馈</a>
+            <a href="/agents">经纪目录</a>
           </div>
           <div>
             <h2>找房与发布</h2>

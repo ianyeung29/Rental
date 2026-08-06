@@ -109,6 +109,11 @@ function dateOnly(value: unknown) {
   return typeof value === "string" && value ? value.slice(0, 10) : null;
 }
 
+function timestamp(value: unknown) {
+  if (value instanceof Date) return value.toISOString();
+  return typeof value === "string" && value ? value : null;
+}
+
 function stringList(value: unknown, allowed?: Set<string>) {
   if (!Array.isArray(value)) return [];
   return value
@@ -150,6 +155,15 @@ function toClientListing(row: Record<string, unknown>) {
   const role = row.poster_role === "agent" ? ["房产经纪", "Agent"] : ["房主", "Owner"];
   const isSample = row.is_sample === true;
   const isDemo = !isSample && !row.owner_id;
+  const isAgentLicenseVerified = row.agent_verified === true && row.poster_role === "agent";
+  const isEmailVerified = row.email_verified_at != null;
+  const posterVerificationScope = isSample ? "sample" as const : isAgentLicenseVerified ? "agent_license" as const : isEmailVerified ? "email" as const : "none" as const;
+  const createdAt = timestamp(row.created_at);
+  const updatedAt = timestamp(row.updated_at);
+  const freshnessDate = updatedAt || createdAt;
+  const freshnessAgeDays = freshnessDate ? Math.max(0, (Date.now() - Date.parse(freshnessDate)) / (24 * 60 * 60 * 1000)) : Number.POSITIVE_INFINITY;
+  const freshnessZh = isSample ? "示例房源 · 非真实库存" : isDemo ? "演示发布 · 仅供体验" : freshnessAgeDays <= 7 ? "本周新发布" : freshnessAgeDays <= 30 ? "近期更新" : "房源已更新";
+  const freshnessEn = isSample ? "Synthetic sample · not real inventory" : isDemo ? "Demo post · for testing only" : freshnessAgeDays <= 7 ? "New this week" : freshnessAgeDays <= 30 ? "Recently updated" : "Listing updated";
   return {
     id: String(row.id),
     source: isSample ? "sample" as const : isDemo ? "demo" as const : "remote" as const,
@@ -172,16 +186,20 @@ function toClientListing(row: Record<string, unknown>) {
     features,
     tagsZh,
     tagsEn,
-    freshnessZh: isSample ? "示例房源 · 非真实库存" : isDemo ? "演示发布 · 仅供体验" : "刚刚发布",
-    freshnessEn: isSample ? "Synthetic sample · not real inventory" : isDemo ? "Demo post · for testing only" : "Published recently",
+    freshnessZh,
+    freshnessEn,
     posterZh: isSample ? "示例房源 · 仅用于体验" : isDemo ? "演示房源 · 未登录发布" : `${role[0]} · 用户发布`,
     posterEn: isSample ? "Synthetic sample · for testing only" : isDemo ? "Demo listing · signed-out post" : `${role[1]} · user posted`,
-    posterVerified: !isSample && !isDemo,
+    posterVerified: posterVerificationScope === "agent_license" || posterVerificationScope === "email",
+    posterVerificationScope,
     privacyZh: "公开页面只显示大致区域",
     privacyEn: "Public page shows approximate area only",
     descriptionZh: String(row.description_zh || ""),
     descriptionEn: String(row.description_en || ""),
     expiresOn: dateOnly(row.expires_on),
+    createdAt,
+    updatedAt,
+    popularityScore: Number(row.popularity_score || 0),
   };
 }
 
@@ -280,14 +298,23 @@ export async function GET(request: Request) {
       ? "l.price ASC, l.created_at DESC"
       : sort === "moveIn"
         ? "CASE WHEN l.move_in = 'immediate' THEN 0 WHEN l.move_in ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN 1 ELSE 2 END, CASE WHEN l.move_in ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN l.move_in END ASC NULLS LAST, l.created_at DESC"
+        : sort === "popular"
+          ? "popularity_score DESC, l.created_at DESC"
         : sort === "verified"
-          ? "CASE WHEN l.is_sample THEN 1 ELSE 0 END, l.created_at DESC"
+          ? "CASE WHEN COALESCE(ap.is_verified, FALSE) OR u.email_verified_at IS NOT NULL THEN 0 ELSE 1 END, l.created_at DESC"
           : "l.created_at DESC";
     const rows = await sql.query(`
       SELECT
         l.id, l.owner_id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type,
         l.price, l.bedrooms, l.bathrooms, l.square_feet, l.move_in, l.lease, l.features,
-        l.tags_zh, l.tags_en, l.description_zh, l.description_en, l.poster_role, l.is_sample,
+        l.tags_zh, l.tags_en, l.description_zh, l.description_en, l.poster_role, l.is_sample, l.created_at, l.updated_at,
+        u.email_verified_at, ap.is_verified AS agent_verified,
+        (
+          SELECT COUNT(*)::int
+          FROM rental_listing_events popularity_events
+          WHERE popularity_events.listing_id = l.id
+            AND popularity_events.event_type IN ('view', 'save', 'contact', 'share', 'compare')
+        ) AS popularity_score,
         COALESCE(
           jsonb_agg(jsonb_build_object('key', m.object_key, 'url', m.public_url) ORDER BY m.sort_order)
           FILTER (WHERE m.id IS NOT NULL),
@@ -295,15 +322,30 @@ export async function GET(request: Request) {
         ) AS media
       FROM rental_listings l
       LEFT JOIN rental_listing_media m ON m.listing_id = l.id
+      LEFT JOIN rental_users u ON u.id = l.owner_id
+      LEFT JOIN rental_agent_profiles ap ON ap.user_id = l.owner_id
       WHERE l.status = 'published'
         AND l.moderation_status = 'approved'
         AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
-      GROUP BY l.id
+      GROUP BY l.id, u.email_verified_at, ap.is_verified
       ORDER BY ${orderBy}
       LIMIT $1 OFFSET $2
     `, [limit + 1, offset]);
     const hasMore = rows.length > limit;
-    const listings = rows.slice(0, limit).map((row) => toClientListing(row as Record<string, unknown>));
+    let blockedPublisherIds = new Set<string>();
+    try {
+      const viewer = await getCurrentUser();
+      if (viewer) {
+        const blockedRows = await sql.query("SELECT blocked_user_id FROM rental_user_blocks WHERE blocker_id = $1", [viewer.id]);
+        blockedPublisherIds = new Set(blockedRows.map((row) => String((row as Record<string, unknown>).blocked_user_id || "")).filter(Boolean));
+      }
+    } catch {
+      // Public browsing must remain available if an optional viewer session is stale.
+    }
+    const listings = rows
+      .filter((row) => !blockedPublisherIds.has(String((row as Record<string, unknown>).owner_id || "")))
+      .slice(0, limit)
+      .map((row) => toClientListing(row as Record<string, unknown>));
     return NextResponse.json(listings, { headers: { "X-Has-More": String(hasMore) } });
   } catch {
     return NextResponse.json({ error: "Listings could not be loaded from the database." }, { status: 502 });

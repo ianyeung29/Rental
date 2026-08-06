@@ -11,6 +11,7 @@ import ListingGallery from "./components/ListingGallery";
 import ListingAnalyticsPanel from "./components/ListingAnalyticsPanel";
 import NotificationCenter from "./components/NotificationCenter";
 import ReportDrawer from "./components/ReportDrawer";
+import SafetyNotice from "./components/SafetyNotice";
 import SiteFooter from "./components/SiteFooter";
 import StatusPanel from "./components/StatusPanel";
 import { AccountType, AgentVerificationStatus } from "./lib/account-types";
@@ -24,7 +25,7 @@ import portraitStyles from "./components/AgentPortrait.module.css";
 
 type Locale = "zh" | "en";
 type RentalType = "all" | "entire" | "privateRoom" | "sublet";
-type SortMode = "fit" | "price" | "fresh" | "moveIn" | "verified";
+type SortMode = "fit" | "price" | "fresh" | "moveIn" | "verified" | "popular";
 type WeChatShareStatus = "idle" | "outside" | "loading" | "ready" | "error";
 type WeChatShareResolution = { key: string; status: Exclude<WeChatShareStatus, "idle" | "outside">; error: "" | "not-configured" | "unavailable" };
 type CompareSummary = CompareSummaryContent & { key: string; locale: Locale; source: "openai" | "local" };
@@ -54,6 +55,7 @@ type Listing = {
   posterZh: string;
   posterEn: string;
   posterVerified?: boolean;
+  posterVerificationScope?: "email" | "agent_license" | "sample" | "none";
   privacyZh: string;
   privacyEn: string;
   source?: "sample" | "local" | "remote" | "demo";
@@ -66,6 +68,9 @@ type Listing = {
   moderationStatus?: "approved" | "under_review" | "hidden" | "rejected";
   moderationNote?: string;
   expiresOn?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  popularityScore?: number;
 };
 
 type SearchSnapshot = {
@@ -122,13 +127,19 @@ type AgentProfile = {
   portraitUrl: string;
   brokerage: string;
   licenseState: string;
-  licenseNumber: string;
   serviceAreas: string[];
   languages: string[];
   feeSummaryZh: string;
   feeSummaryEn: string;
   isVerified: boolean;
   isSample: boolean;
+};
+
+type BlockedPublisher = {
+  id: string;
+  displayName: string;
+  accountType: string;
+  blockedAt: string;
 };
 
 type AgentRequestStatus = "pending" | "accepted" | "declined" | "cancelled";
@@ -1059,6 +1070,7 @@ const copy = {
     fresh: "最近更新",
     soonest: "最快入住",
     verifiedFirst: "优先已验证",
+    popular: "最受关注",
     popularAreas: "热门区域",
     popularBoroughs: "先选择行政区或地区",
     popularPlaces: "选择热门城市 / 社区",
@@ -1077,6 +1089,7 @@ const copy = {
     availability: "近期确认有房",
     photoCount: "张照片",
     verifiedEmail: "邮箱已验证",
+    verifiedAgent: "执照已核验",
     sampleSignal: "示例体验",
     localSignal: "本地预览",
     identity: "身份信号",
@@ -1209,6 +1222,7 @@ const copy = {
     fresh: "Recently updated",
     soonest: "Soonest move-in",
     verifiedFirst: "Verified first",
+    popular: "Most viewed",
     popularAreas: "Popular areas",
     popularBoroughs: "Start with a borough or region",
     popularPlaces: "Choose a popular city or neighborhood",
@@ -1227,6 +1241,7 @@ const copy = {
     availability: "Availability recent",
     photoCount: "photos",
     verifiedEmail: "Verified email",
+    verifiedAgent: "License checked",
     sampleSignal: "Sample preview",
     localSignal: "Local preview",
     identity: "Identity signal",
@@ -1695,12 +1710,14 @@ export default function HomePage() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [accountOpen, setAccountOpen] = useState(false);
-  const [dashboardTab, setDashboardTab] = useState<"listings" | "inquiries" | "applications" | "agentRequests">("listings");
+  const [dashboardTab, setDashboardTab] = useState<"listings" | "inquiries" | "applications" | "agentRequests" | "safety">("listings");
   const [dashboardListings, setDashboardListings] = useState<DashboardListing[]>([]);
   const [receivedInquiries, setReceivedInquiries] = useState<DashboardInquiry[]>([]);
   const [renterApplications, setRenterApplications] = useState<DashboardApplication[]>([]);
   const [receivedApplications, setReceivedApplications] = useState<DashboardApplication[]>([]);
   const [agentRequests, setAgentRequests] = useState<AgentRequest[]>([]);
+  const [blockedPublishers, setBlockedPublishers] = useState<BlockedPublisher[]>([]);
+  const [blockLoadingId, setBlockLoadingId] = useState<string | null>(null);
   const [canManageAgentRequests, setCanManageAgentRequests] = useState(false);
   const [agentRequestLoadingId, setAgentRequestLoadingId] = useState<string | null>(null);
   const [applicationActionLoadingId, setApplicationActionLoadingId] = useState<string | null>(null);
@@ -1794,6 +1811,18 @@ export default function HomePage() {
     ? new Date(savedAlertLastSentAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US", { dateStyle: "medium", timeStyle: "short" })
     : (locale === "zh" ? "尚未发送" : "Not sent yet");
   const listingQuality = useMemo(() => {
+    const qualityListings = [...remoteListings, ...customListings, ...(remoteListings.length > 0 ? [] : LISTINGS)];
+    const draftArea = `${draft.areaZh} ${draft.areaEn}`.trim();
+    const areaVariants = draftArea ? locationSearchVariants(draftArea) : [];
+    const comparablePrices = areaVariants.length === 0 ? [] : qualityListings
+      .filter((listing) => listing.source !== "sample" && listing.price > 0 && areaVariants.some((variant) => listingLocationSearchText(listing).includes(variant)) && (!draft.bedrooms || listing.bedrooms === draft.bedrooms))
+      .map((listing) => listing.price)
+      .sort((a, b) => a - b);
+    const medianPrice = comparablePrices.length > 0 ? comparablePrices[Math.floor(comparablePrices.length / 2)] : 0;
+    const draftPrice = Number(draft.price);
+    const priceLooksReasonable = draftPrice > 0 && (comparablePrices.length < 2 || (medianPrice > 0 && draftPrice >= medianPrice * 0.55 && draftPrice <= medianPrice * 1.75));
+    const photoReferences = draft.photoKeys.length > 0 ? draft.photoKeys : draft.photos;
+    const description = `${draft.descriptionZh} ${draft.descriptionEn}`.trim();
     const checks = [
       { key: "title", done: Boolean(draft.titleZh.trim() || draft.titleEn.trim()), zh: "标题清楚", en: "Clear title" },
       { key: "area", done: Boolean(draft.areaZh.trim() || draft.areaEn.trim()), zh: "公开区域", en: "Public area" },
@@ -1802,8 +1831,14 @@ export default function HomePage() {
       { key: "description", done: draft.descriptionZh.trim().length >= 80 || draft.descriptionEn.trim().length >= 80, zh: "详细介绍", en: "Detailed description" },
       { key: "moveIn", done: draft.moveInMode === "immediate" || Boolean(draft.moveInDate), zh: "入住时间", en: "Move-in timing" },
     ];
+    checks.push(
+      { key: "descriptionClarity", done: description.length >= 120 && /[.!?。！？]/.test(description), zh: "描述清晰易读", en: "Clear, readable description" },
+      { key: "size", done: Boolean(draft.squareFeet), zh: "标注建筑面积", en: "Square footage included" },
+      { key: "duplicatePhotos", done: photoReferences.length > 0 && new Set(photoReferences).size === photoReferences.length, zh: "照片没有重复", en: "No duplicate photos" },
+      { key: "priceReview", done: priceLooksReasonable, zh: comparablePrices.length >= 2 ? "租金与附近房源相符" : "租金已填写", en: comparablePrices.length >= 2 ? "Rent is in the local range" : "Rent is provided" },
+    );
     return { checks, score: Math.round((checks.filter((check) => check.done).length / checks.length) * 100) };
-  }, [draft.areaEn, draft.areaZh, draft.descriptionEn, draft.descriptionZh, draft.features.length, draft.moveInDate, draft.moveInMode, draft.photos.length, draft.titleEn, draft.titleZh]);
+  }, [customListings, draft.areaEn, draft.areaZh, draft.bedrooms, draft.descriptionEn, draft.descriptionZh, draft.features.length, draft.moveInDate, draft.moveInMode, draft.photoKeys, draft.photos, draft.price, draft.squareFeet, draft.titleEn, draft.titleZh, remoteListings]);
 
   useEffect(() => {
     if (!sharePosterUrl) return;
@@ -1840,7 +1875,7 @@ export default function HomePage() {
           rentalType: urlType === "entire" || urlType === "privateRoom" || urlType === "sublet" ? urlType : "all",
           moveIn: params.get("move") === "august" || params.get("move") === "september" || params.get("move") === "october" ? params.get("move") || "" : "",
           activeFeatures: (params.get("features") || "").split(",").filter((feature): feature is string => POST_FEATURE_KEYS.includes(feature as typeof POST_FEATURE_KEYS[number])),
-          sortMode: urlSort === "price" || urlSort === "fresh" || urlSort === "moveIn" || urlSort === "verified" ? urlSort : "fit",
+          sortMode: urlSort === "price" || urlSort === "fresh" || urlSort === "moveIn" || urlSort === "verified" || urlSort === "popular" ? urlSort : "fit",
         };
         const storedSnapshotRecord = storedSearchSnapshot && typeof storedSearchSnapshot === "object" ? storedSearchSnapshot as Partial<SearchSnapshot> : null;
         const localSnapshot: SearchSnapshot | null = storedSnapshotRecord ? {
@@ -1854,7 +1889,7 @@ export default function HomePage() {
           rentalType: storedSnapshotRecord.rentalType === "entire" || storedSnapshotRecord.rentalType === "privateRoom" || storedSnapshotRecord.rentalType === "sublet" ? storedSnapshotRecord.rentalType : "all",
           moveIn: storedSnapshotRecord.moveIn === "august" || storedSnapshotRecord.moveIn === "september" || storedSnapshotRecord.moveIn === "october" ? storedSnapshotRecord.moveIn : "",
           activeFeatures: Array.isArray(storedSnapshotRecord.activeFeatures) ? storedSnapshotRecord.activeFeatures.filter((feature): feature is string => typeof feature === "string" && POST_FEATURE_KEYS.includes(feature as typeof POST_FEATURE_KEYS[number])) : [],
-          sortMode: storedSnapshotRecord.sortMode === "price" || storedSnapshotRecord.sortMode === "fresh" || storedSnapshotRecord.sortMode === "moveIn" || storedSnapshotRecord.sortMode === "verified" ? storedSnapshotRecord.sortMode : "fit",
+          sortMode: storedSnapshotRecord.sortMode === "price" || storedSnapshotRecord.sortMode === "fresh" || storedSnapshotRecord.sortMode === "moveIn" || storedSnapshotRecord.sortMode === "verified" || storedSnapshotRecord.sortMode === "popular" ? storedSnapshotRecord.sortMode : "fit",
         } : null;
         const initialSearch = hasUrlSearch ? urlSnapshot : localSnapshot;
         if (storedLocale === "zh" || storedLocale === "en") setLocale(storedLocale);
@@ -2082,7 +2117,7 @@ export default function HomePage() {
       setAgentProfilesLoading(true);
       setAgentProfilesError("");
       try {
-        const response = await fetch("/api/agents", { cache: "no-store" });
+        const response = await fetch("/api/agents?purpose=selection", { cache: "no-store" });
         const result = await response.json() as AgentProfile[] | { error?: string };
         if (!response.ok) throw new Error((result as { error?: string }).error || "Agent profiles could not be loaded.");
         if (!cancelled) setAgentProfiles(Array.isArray(result) ? result : []);
@@ -2236,18 +2271,20 @@ export default function HomePage() {
       setDashboardLoading(true);
       setDashboardError("");
       try {
-        const [listingsResponse, inquiriesResponse, applicationsResponse, agentRequestsResponse] = await Promise.all([
+        const [listingsResponse, inquiriesResponse, applicationsResponse, agentRequestsResponse, blocksResponse] = await Promise.all([
           fetch("/api/my/listings", { cache: "no-store" }),
           fetch("/api/inquiries?scope=received", { cache: "no-store" }),
           fetch("/api/applications", { cache: "no-store" }),
           fetch("/api/agent-requests?scope=incoming", { cache: "no-store" }),
+          fetch("/api/blocks", { cache: "no-store" }),
         ]);
         if (!listingsResponse.ok || !inquiriesResponse.ok) throw new Error("Dashboard data is unavailable right now.");
-        const [listings, inquiries, applicationPayload, agentRequestPayload] = await Promise.all([
+        const [listings, inquiries, applicationPayload, agentRequestPayload, blockPayload] = await Promise.all([
           listingsResponse.json(),
           inquiriesResponse.json(),
           applicationsResponse.ok ? applicationsResponse.json() : Promise.resolve(null),
           agentRequestsResponse.ok ? agentRequestsResponse.json() : Promise.resolve(null),
+          blocksResponse.ok ? blocksResponse.json() : Promise.resolve(null),
         ]);
         const applicationsResult = applicationPayload && typeof applicationPayload === "object" ? applicationPayload as { submitted?: unknown; received?: unknown } : null;
         const incomingAgentRequests = agentRequestPayload && typeof agentRequestPayload === "object" ? agentRequestPayload as { canManage?: unknown; requests?: unknown } : null;
@@ -2258,6 +2295,7 @@ export default function HomePage() {
           setReceivedApplications(Array.isArray(applicationsResult?.received) ? applicationsResult.received as DashboardApplication[] : []);
           setCanManageAgentRequests(incomingAgentRequests?.canManage === true);
           setAgentRequests(Array.isArray(incomingAgentRequests?.requests) ? incomingAgentRequests.requests as AgentRequest[] : []);
+          setBlockedPublishers(Array.isArray(blockPayload) ? blockPayload as BlockedPublisher[] : []);
           if (incomingAgentRequests?.canManage !== true) setDashboardTab((current) => current === "agentRequests" ? "listings" : current);
         }
       } catch (error) {
@@ -2366,14 +2404,25 @@ export default function HomePage() {
       return matchesLocation && matchesPrice && matchesBedrooms && matchesBathrooms && matchesSquareFeet && matchesType && matchesMoveIn && matchesFeatures;
     });
 
+    const freshnessValue = (listing: Listing) => Date.parse(String(listing.updatedAt || listing.createdAt || "")) || 0;
+    const fitScore = (listing: Listing) => {
+      const locationMatch = queryVariants.length > 0 && queryVariants.some((variant) => listingLocationSearchText(listing).includes(variant));
+      const featureMatch = activeFeatures.filter((feature) => listing.features.includes(feature)).length;
+      const bedroomMatch = bedrooms && listing.bedrooms === bedrooms ? 2 : 0;
+      const bathroomMatch = bathrooms && listing.bathrooms === bathrooms ? 2 : 0;
+      const sizeMatch = minSqft || maxSqft ? 1 : 0;
+      return Number(locationMatch) * 5 + featureMatch * 2 + bedroomMatch + bathroomMatch + sizeMatch + Number(Boolean(listing.posterVerified)) + Math.min(Number(listing.popularityScore || 0), 10) / 10;
+    };
     return [...filtered].sort((a, b) => {
-      if (sortMode === "price") return a.price - b.price;
+      if (sortMode === "price") return a.price - b.price || allListings.indexOf(a) - allListings.indexOf(b);
+      if (sortMode === "popular") return Number(b.popularityScore || 0) - Number(a.popularityScore || 0) || freshnessValue(b) - freshnessValue(a);
+      if (sortMode === "fresh") return freshnessValue(b) - freshnessValue(a) || allListings.indexOf(a) - allListings.indexOf(b);
       if (sortMode === "verified") return Number(Boolean(b.posterVerified)) - Number(Boolean(a.posterVerified)) || allListings.indexOf(a) - allListings.indexOf(b);
       if (sortMode === "moveIn") {
         const moveInValue = (value: string) => value === "immediate" ? 0 : isDateOnly(value) ? new Date(`${value}T00:00:00.000Z`).getTime() : Number.POSITIVE_INFINITY;
         return moveInValue(a.moveIn) - moveInValue(b.moveIn) || allListings.indexOf(a) - allListings.indexOf(b);
       }
-      return allListings.indexOf(a) - allListings.indexOf(b);
+      return fitScore(b) - fitScore(a) || allListings.indexOf(a) - allListings.indexOf(b);
     });
   }, [activeFeatures, allListings, appliedLocation, bathrooms, bedrooms, maxPrice, maxSqft, minPrice, minSqft, moveIn, rentalType, sortMode]);
 
@@ -2490,6 +2539,8 @@ export default function HomePage() {
     setRenterApplications([]);
     setReceivedApplications([]);
     setAgentRequests([]);
+    setBlockedPublishers([]);
+    setBlockLoadingId(null);
     setCanManageAgentRequests(false);
     setApplicationListing(null);
     setApplicationError("");
@@ -3024,6 +3075,58 @@ export default function HomePage() {
       setReportError(error instanceof Error ? error.message : "The report could not be submitted.");
     } finally {
       setReportLoading(false);
+    }
+  };
+
+  const blockSelectedPublisher = async () => {
+    if (!selectedListing || selectedListing.source !== "remote" || blockLoadingId) return;
+    if (!currentUser) {
+      setSelectedListing(null);
+      setAuthMode("login");
+      setAuthError(locale === "zh" ? "请先登录，再屏蔽发布者。" : "Sign in before blocking a publisher.");
+      setAuthOpen(true);
+      return;
+    }
+    setBlockLoadingId(selectedListing.id);
+    try {
+      const response = await fetch("/api/blocks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId: selectedListing.id }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "The publisher could not be blocked.");
+      const blockedResponse = await fetch("/api/blocks", { cache: "no-store" });
+      if (blockedResponse.ok) {
+        const blockedResult = await blockedResponse.json();
+        if (Array.isArray(blockedResult)) setBlockedPublishers(blockedResult as BlockedPublisher[]);
+      }
+      setSelectedListing(null);
+      showToast(locale === "zh" ? "已屏蔽发布者，之后的搜索不会显示其房源。" : "Publisher blocked; future searches will hide their listings.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "The publisher could not be blocked.");
+    } finally {
+      setBlockLoadingId(null);
+    }
+  };
+
+  const unblockPublisher = async (id: string) => {
+    if (blockLoadingId) return;
+    setBlockLoadingId(id);
+    try {
+      const response = await fetch("/api/blocks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockedUserId: id }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "The publisher could not be unblocked.");
+      setBlockedPublishers((current) => current.filter((publisher) => publisher.id !== id));
+      showToast(locale === "zh" ? "已取消屏蔽发布者。" : "Publisher unblocked.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "The publisher could not be unblocked.");
+    } finally {
+      setBlockLoadingId(null);
     }
   };
 
@@ -3936,6 +4039,7 @@ export default function HomePage() {
                   <option value="fresh">{t.fresh}</option>
                   <option value="moveIn">{t.soonest}</option>
                   <option value="verified">{t.verifiedFirst}</option>
+                  <option value="popular">{t.popular}</option>
                 </select>
               </label>
             </div>
@@ -3974,7 +4078,7 @@ export default function HomePage() {
                       lease: locale === "zh" ? "租期" : "lease",
                       locationChecked: t.locationChecked,
                       availability: t.availability,
-                      verifiedEmail: t.verifiedEmail,
+                      verifiedEmail: listing.posterVerificationScope === "agent_license" ? t.verifiedAgent : t.verifiedEmail,
                       photoCount: t.photoCount,
                       approximate: t.approximate,
                       view: t.view,
@@ -4275,7 +4379,7 @@ export default function HomePage() {
                       {!agentProfilesLoading && !agentProfilesError && agentProfiles.length > 0 && <div className="agent-profile-options" role="radiogroup" aria-label={locale === "zh" ? "选择经纪" : "Choose an agent"}>
                         {agentProfiles.map((profile) => <label className={`agent-profile-option ${draft.agentProfileId === profile.id ? "active" : ""}`} key={profile.id}>
                           <input type="radio" name="agent-profile" value={profile.id} checked={draft.agentProfileId === profile.id} onChange={() => updateDraft({ agentProfileId: profile.id })} />
-                          <span className={portraitStyles.profileOptionBody}><span className={portraitStyles.profileAvatar} aria-hidden="true">{profile.portraitUrl ? <Image src={profile.portraitUrl} alt="" width={42} height={42} unoptimized /> : (locale === "zh" ? profile.displayNameZh : profile.displayNameEn).slice(0, 1)}</span><span className="agent-profile-copy"><span className="agent-profile-topline"><strong>{locale === "zh" ? profile.displayNameZh : profile.displayNameEn}</strong><span className={`agent-verification-chip ${profile.isVerified ? "verified" : "sample"}`}>{profile.isVerified ? (locale === "zh" ? "已核验" : "Verified") : (locale === "zh" ? "示例档案" : "Sample profile")}</span></span><small>{profile.brokerage} · {profile.licenseState} {profile.licenseNumber}</small><p>{profile.serviceAreas.slice(0, 3).join(" · ")} · {profile.languages.join(" / ")}</p></span></span>
+                          <span className={portraitStyles.profileOptionBody}><span className={portraitStyles.profileAvatar} aria-hidden="true">{profile.portraitUrl ? <Image src={profile.portraitUrl} alt="" width={42} height={42} unoptimized /> : (locale === "zh" ? profile.displayNameZh : profile.displayNameEn).slice(0, 1)}</span><span className="agent-profile-copy"><span className="agent-profile-topline"><strong>{locale === "zh" ? profile.displayNameZh : profile.displayNameEn}</strong><span className={`agent-verification-chip ${profile.isVerified ? "verified" : "sample"}`}>{profile.isVerified ? (locale === "zh" ? "已核验" : "Verified") : (locale === "zh" ? "示例档案" : "Sample profile")}</span></span><small>{profile.brokerage} · {profile.licenseState} · {locale === "zh" ? "州执照已核验" : "State license checked"}</small><p>{profile.serviceAreas.slice(0, 3).join(" · ")} · {profile.languages.join(" / ")}</p></span></span>
                         </label>)}
                       </div>}
                       {!agentProfilesLoading && !agentProfilesError && agentProfiles.length === 0 && <div className="agent-profile-empty" role="note"><strong>{locale === "zh" ? "暂时没有可选经纪" : "No agents are available yet"}</strong><p>{locale === "zh" ? "你仍然可以提交匹配请求；经纪目录准备好后，再选择具体人选。" : "You can still submit a matching request and choose a specific agent when the directory is ready."}</p></div>}
@@ -4421,7 +4525,7 @@ export default function HomePage() {
               <div className="detail-price"><strong>{formatPrice(selectedListing)}</strong><span>{t.month}</span></div>
               <p className="cost-note"><CheckIcon size={13} />{t.costNote}</p>
               <div className="detail-assurance" aria-label={locale === "zh" ? "房源信号" : "Listing signals"}>
-                <span className="assurance-item"><span className="assurance-icon verified"><CheckIcon size={12} /></span>{selectedListing.posterVerified ? t.verifiedEmail : selectedListing.source === "sample" ? t.sampleSignal : t.localSignal}</span>
+                <span className="assurance-item"><span className="assurance-icon verified"><CheckIcon size={12} /></span>{selectedListing.posterVerificationScope === "agent_license" ? t.verifiedAgent : selectedListing.posterVerificationScope === "email" ? t.verifiedEmail : selectedListing.source === "sample" ? t.sampleSignal : t.localSignal}</span>
                 <span className="assurance-item"><span className="assurance-icon photo"><GalleryIcon size={12} /></span>{selectedPhotos.length} {t.photoCount}</span>
                 <span className="assurance-item"><span className="assurance-icon privacy"><LockIcon size={12} /></span>{t.approximate}</span>
               </div>
@@ -4439,6 +4543,13 @@ export default function HomePage() {
               <h3 className="drawer-section-heading">{t.detailAmenities}</h3>
               <div className="tag-row drawer-tags">{listingTags(selectedListing).map((tag) => <span className="listing-tag" key={tag}>{tag}</span>)}</div>
               <div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>{listingPrivacy(selectedListing)}</p></div></div>
+              <SafetyNotice
+                locale={locale}
+                isSample={selectedListing.source === "sample" || selectedListing.source === "demo"}
+                isBlocked={false}
+                onReport={openReportForListing}
+                onBlock={() => { void blockSelectedPublisher(); }}
+              />
               <DetailActionDock
                 contactLabel={t.requestTour}
                 applyLabel={locale === "zh" ? "提交租赁申请" : "Submit rental application"}
@@ -4503,7 +4614,7 @@ export default function HomePage() {
 
       {authOpen && <AuthDrawer locale={locale} mode={authMode} loading={authLoading} error={authError} onGoogleLogin={(accountType) => { window.location.assign(`/api/auth/google?accountType=${accountType || "user"}`); }} onClose={() => { setAuthOpen(false); setAuthError(""); }} onModeChange={(mode) => { setAuthMode(mode); setAuthError(""); }} onSubmit={handleAuthSubmit} />}
 
-      {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} applications={renterApplications} receivedApplications={receivedApplications} agentRequests={agentRequests} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} applicationActionLoadingId={applicationActionLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onUpdateProfile={handleProfileUpdate} onAgentVerificationStatusChange={handleAgentVerificationStatusChange} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} onInquiryStatusChange={(id, status) => updateInquiryStatus(id, status)} onScheduleInquiry={scheduleInquiry} onApplicationStatusChange={updateApplicationStatus} />}
+      {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} applications={renterApplications} receivedApplications={receivedApplications} agentRequests={agentRequests} blockedPublishers={blockedPublishers} blockLoadingId={blockLoadingId} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} applicationActionLoadingId={applicationActionLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onUpdateProfile={handleProfileUpdate} onAgentVerificationStatusChange={handleAgentVerificationStatusChange} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} onInquiryStatusChange={(id, status) => updateInquiryStatus(id, status)} onScheduleInquiry={scheduleInquiry} onApplicationStatusChange={updateApplicationStatus} onUnblockPublisher={unblockPublisher} />}
 
       {(toast || verificationNotice) && <div className="toast" role="status"><span className="toast-mark"><CheckIcon size={13} /></span>{toast || verificationNotice}</div>}
 

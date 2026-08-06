@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { emailIsConfigured, sendInquiryConfirmation, sendInquiryNotification } from "../../lib/email";
+import { emailAlertsAllowed } from "../../lib/notification-preferences";
 
 const MAX_BODY_LENGTH = 4_000;
 
@@ -140,7 +141,7 @@ export async function POST(request: Request) {
     let notificationSent = false;
     let confirmationSent = false;
     if (emailIsConfigured()) {
-      if (listing.owner_id && emailInput.recipientEmail && !emailInput.recipientEmail.endsWith(".invalid")) {
+      if (listing.owner_id && await emailAlertsAllowed(String(listing.owner_id), "inquiry_alerts") && emailInput.recipientEmail && !emailInput.recipientEmail.endsWith(".invalid")) {
         try {
           await sendInquiryNotification(emailInput);
           notificationSent = true;
@@ -148,7 +149,7 @@ export async function POST(request: Request) {
           // The inquiry is already stored; email delivery can be retried after configuration is fixed.
         }
       }
-      try {
+      if (await emailAlertsAllowed(user.id, "inquiry_alerts")) try {
         await sendInquiryConfirmation({ ...emailInput, recipientEmail: user.email, recipientName: user.displayName });
         confirmationSent = true;
       } catch {

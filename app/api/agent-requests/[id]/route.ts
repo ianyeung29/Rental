@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { getCurrentUser } from "../../../lib/auth";
 import { emailIsConfigured, sendAgentRequestResponse } from "../../../lib/email";
+import { emailAlertsAllowed } from "../../../lib/notification-preferences";
 
 const MAX_BODY_LENGTH = 2_000;
 
@@ -43,7 +44,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     await ensureDatabaseSchema();
     const requestRows = await sql.query(`
-      SELECT ar.id, ar.listing_id, ar.fee_plan, ar.fee_amount, ar.status,
+      SELECT ar.id, ar.listing_id, ar.owner_id, ar.fee_plan, ar.fee_amount, ar.status,
              l.title_zh, l.title_en, l.area_zh, l.area_en,
              owner.display_name AS owner_name, owner.email AS owner_email,
              ap.display_name_zh AS agent_profile_name_zh, ap.display_name_en AS agent_profile_name_en
@@ -67,7 +68,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     let notificationSent = false;
     const ownerEmail = String(agentRequest.owner_email || "");
-    if (emailIsConfigured() && ownerEmail && !ownerEmail.endsWith(".invalid")) {
+    if (emailIsConfigured() && await emailAlertsAllowed(String(agentRequest.owner_id || ""), "agent_response_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
       try {
         await sendAgentRequestResponse({
           recipientEmail: ownerEmail,

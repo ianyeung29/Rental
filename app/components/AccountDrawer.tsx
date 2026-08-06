@@ -8,7 +8,7 @@ import { toChineseLocationLabel } from "../lib/location-labels";
 import portraitStyles from "./AgentPortrait.module.css";
 
 type Locale = "zh" | "en";
-type DashboardTab = "listings" | "inquiries" | "applications" | "agentRequests";
+type DashboardTab = "listings" | "inquiries" | "applications" | "agentRequests" | "safety";
 type AgentRequestStatus = "pending" | "accepted" | "declined" | "cancelled";
 
 type AccountUser = {
@@ -95,6 +95,13 @@ type DashboardInquiry = {
   requesterEmail?: string;
 };
 
+type BlockedPublisher = {
+  id: string;
+  displayName: string;
+  accountType: string;
+  blockedAt: string;
+};
+
 type DashboardApplication = {
   id: string;
   listingId: string;
@@ -129,6 +136,8 @@ type AccountDrawerProps = {
   applications: DashboardApplication[];
   receivedApplications: DashboardApplication[];
   agentRequests: DashboardAgentRequest[];
+  blockedPublishers: BlockedPublisher[];
+  blockLoadingId: string | null;
   canManageAgentRequests: boolean;
   agentRequestLoadingId: string | null;
   applicationActionLoadingId: string | null;
@@ -150,6 +159,7 @@ type AccountDrawerProps = {
   onInquiryStatusChange: (id: string, status: "contacted" | "closed") => Promise<void>;
   onScheduleInquiry: (id: string, input: { scheduledAt: string; timeZone: string; note: string }) => Promise<void>;
   onApplicationStatusChange: (id: string, status: "reviewing" | "approved" | "declined" | "withdrawn", note: string) => Promise<void>;
+  onUnblockPublisher: (id: string) => void;
 };
 
 const AGENT_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024;
@@ -163,7 +173,7 @@ function CloseIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onApplicationStatusChange, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentVerificationStatusChange }: AccountDrawerProps) {
+export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, blockedPublishers, blockLoadingId, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onApplicationStatusChange, onUnblockPublisher, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentVerificationStatusChange }: AccountDrawerProps) {
   const zh = locale === "zh";
   const initial = user.displayName.trim().slice(0, 1).toUpperCase() || "U";
   const listingLimit = listingLimitFor(user.accountType, user.agentVerified);
@@ -469,6 +479,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <button className={tab === "inquiries" ? "active" : ""} type="button" role="tab" aria-selected={tab === "inquiries"} onClick={() => onTabChange("inquiries")}>{zh ? "收到的咨询" : "Received inquiries"}<span>{inquiries.length}</span></button>
             <button className={tab === "applications" ? "active" : ""} type="button" role="tab" aria-selected={tab === "applications"} onClick={() => onTabChange("applications")}>{zh ? "租赁申请" : "Applications"}<span>{applications.length + receivedApplications.filter((application) => application.status !== "declined" && application.status !== "withdrawn").length}</span></button>
             {canManageAgentRequests && <button className={tab === "agentRequests" ? "active" : ""} type="button" role="tab" aria-selected={tab === "agentRequests"} onClick={() => onTabChange("agentRequests")}>{zh ? "经纪请求" : "Agent requests"}<span>{agentRequests.filter((request) => request.status === "pending").length}</span></button>}
+            <button className={tab === "safety" ? "active" : ""} type="button" role="tab" aria-selected={tab === "safety"} onClick={() => onTabChange("safety")}>{zh ? "安全设置" : "Safety"}<span>{blockedPublishers.length}</span></button>
           </div>
           {error && <p className="form-error" role="alert">{error}</p>}
           {loading ? <div className="dashboard-loading" aria-live="polite"><span /><span /><span /></div> : tab === "listings" ? (
@@ -554,6 +565,13 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
                   </div>
                 </section>}
               </div>
+          ) : tab === "safety" ? (
+            <section className="account-safety-panel" aria-labelledby="account-safety-title">
+              <div className="account-profile-heading"><div><span className="section-label">{zh ? "可控的安全" : "SAFETY CONTROLS"}</span><h3 id="account-safety-title">{zh ? "已屏蔽的发布者" : "Blocked publishers"}</h3><p>{zh ? "屏蔽会影响你之后的公开搜索，不会向对方发送通知。你可以随时取消屏蔽。" : "Blocking removes a publisher’s listings from your future public searches. They are not notified, and you can reverse it anytime."}</p></div></div>
+              {blockedPublishers.length === 0 ? <div className="drawer-empty account-safety-empty"><h3>{zh ? "暂时没有屏蔽对象" : "No blocked publishers"}</h3><p>{zh ? "如果房源或沟通让你不舒服，可以在房源详情的安全提示中屏蔽发布者。" : "If a listing or conversation feels unsafe, use the safety checklist in the listing detail to block its publisher."}</p></div> : <div className="blocked-publisher-list">
+                {blockedPublishers.map((publisher) => <article className="blocked-publisher-row" key={publisher.id}><div><strong>{publisher.displayName}</strong><small>{publisher.accountType === "agent" ? (zh ? "经纪账号" : "Agent account") : (zh ? "用户账号" : "User account")} · {publisher.blockedAt ? new Date(publisher.blockedAt).toLocaleDateString(zh ? "zh-CN" : "en-US") : ""}</small></div><button className="text-button" type="button" onClick={() => onUnblockPublisher(publisher.id)} disabled={blockLoadingId === publisher.id}>{blockLoadingId === publisher.id ? (zh ? "处理中…" : "Working…") : (zh ? "取消屏蔽" : "Unblock")}</button></article>)}
+              </div>}
+            </section>
           ) : (
             agentRequests.length === 0 ? <div className="drawer-empty"><h3>{zh ? "还没有经纪请求" : "No agent requests"}</h3><p>{zh ? "房主请求你的经纪协助后，内容会在这里显示。" : "Owner requests for your assistance will appear here."}</p></div> :
               <div className="dashboard-list agent-request-list">

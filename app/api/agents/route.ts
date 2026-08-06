@@ -15,19 +15,20 @@ function toAgentProfile(row: Record<string, unknown>) {
     portraitUrl: String(row.portrait_url || ""),
     brokerage: String(row.brokerage || ""),
     licenseState: String(row.license_state || ""),
-    licenseNumber: String(row.license_number || ""),
     serviceAreas: stringList(row.service_areas),
     languages: stringList(row.languages),
     feeSummaryZh: String(row.fee_summary_zh || ""),
     feeSummaryEn: String(row.fee_summary_en || ""),
     isVerified: row.is_verified === true,
     isSample: row.is_sample === true,
+    verificationScope: "agent_license" as const,
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!sql) return NextResponse.json({ error: "DATABASE_URL is not configured on the server yet." }, { status: 503 });
-  if (!demoModeEnabled()) {
+  const purpose = new URL(request.url).searchParams.get("purpose") === "selection" ? "selection" : "directory";
+  if (purpose === "selection" && !demoModeEnabled()) {
     let user;
     try {
       user = await getCurrentUser();
@@ -40,12 +41,15 @@ export async function GET() {
 
   try {
     await ensureDatabaseSchema();
+    const visibility = purpose === "selection" && demoModeEnabled()
+      ? "is_active = TRUE AND (is_verified = TRUE OR is_sample = TRUE)"
+      : "is_active = TRUE AND is_verified = TRUE AND is_sample = FALSE";
     const rows = await sql.query(`
-      SELECT id, display_name_zh, display_name_en, portrait_url, brokerage, license_state, license_number,
+      SELECT id, display_name_zh, display_name_en, portrait_url, brokerage, license_state,
              service_areas, languages, fee_summary_zh, fee_summary_en, is_verified, is_sample
       FROM rental_agent_profiles
-      WHERE is_active = TRUE
-      ORDER BY is_verified DESC, display_name_zh ASC
+      WHERE ${visibility}
+      ORDER BY display_name_zh ASC
     `);
     return NextResponse.json(rows.map((row) => toAgentProfile(row as Record<string, unknown>)));
   } catch {

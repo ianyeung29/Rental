@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
-import { emailIsConfigured, sendSavedSearchAlert } from "../../../lib/email";
+import { emailIsConfigured, sendListingExpirationAlert, sendSavedSearchAlert } from "../../../lib/email";
+import { emailAlertsAllowed } from "../../../lib/notification-preferences";
 
 function list(value: unknown) {
   if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
@@ -71,9 +72,12 @@ export async function GET(request: Request) {
     const searches = await sql.query(`
       SELECT s.user_id, s.location, s.min_price, s.max_price, s.min_sqft, s.max_sqft, s.bedrooms, s.bathrooms,
              s.rental_type, s.move_in, s.features, s.last_alert_at,
-             u.email, u.display_name
+             u.email, u.display_name,
+             COALESCE(p.email_enabled, TRUE) AS email_enabled,
+             COALESCE(p.saved_search_alerts, TRUE) AS saved_search_alerts
       FROM rental_saved_searches s
       JOIN rental_users u ON u.id = s.user_id
+      LEFT JOIN rental_notification_preferences p ON p.user_id = s.user_id
       WHERE s.alert_frequency = 'daily'
         AND u.email_verified_at IS NOT NULL
         AND (s.last_alert_at IS NULL OR s.last_alert_at < NOW() - INTERVAL '20 hours')
@@ -101,7 +105,7 @@ export async function GET(request: Request) {
       }).slice(0, 8) as Record<string, unknown>[];
       if (matchesForSearch.length > 0) {
         const titles = matchesForSearch.map((listing) => String(listing.title_zh || listing.title_en || "新房源"));
-        if (emailIsConfigured()) {
+        if (emailIsConfigured() && search.email_enabled !== false && search.saved_search_alerts !== false && await emailAlertsAllowed(String(search.user_id), "saved_search_alerts")) {
           try {
             await sendSavedSearchAlert({ email: String(search.email), displayName: String(search.display_name || ""), location: String(search.location || ""), listingTitles: titles });
             sent += 1;
@@ -117,7 +121,47 @@ export async function GET(request: Request) {
       await sql.query("UPDATE rental_saved_searches SET last_alert_at = NOW() WHERE user_id = $1", [String(search.user_id)]);
       processed += 1;
     }
-    return NextResponse.json({ ok: true, processed, sent, emailFailed, configuredEmail: emailIsConfigured() });
+    const expirationRows = await sql.query(`
+      SELECT l.id, l.owner_id, l.title_zh, l.title_en, l.expires_on,
+             u.email, u.display_name,
+             COALESCE(p.email_enabled, TRUE) AS email_enabled,
+             COALESCE(p.listing_expiration_alerts, TRUE) AS listing_expiration_alerts
+      FROM rental_listings l
+      JOIN rental_users u ON u.id = l.owner_id
+      LEFT JOIN rental_notification_preferences p ON p.user_id = l.owner_id
+      WHERE l.status IN ('published', 'paused')
+        AND l.expires_on BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
+        AND u.email_verified_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM rental_listing_expiration_alerts sent_alert
+          WHERE sent_alert.listing_id = l.id AND sent_alert.expires_on = l.expires_on
+        )
+      ORDER BY l.expires_on ASC
+      LIMIT 500
+    `);
+    let expirationProcessed = 0;
+    for (const row of expirationRows as Record<string, unknown>[]) {
+      const ownerId = String(row.owner_id || "");
+      const expiresOn = String(row.expires_on || "").slice(0, 10);
+      const titleZh = String(row.title_zh || row.title_en || "房源");
+      const titleEn = String(row.title_en || row.title_zh || "your listing");
+      if (!ownerId || !expiresOn) continue;
+      await sql.query(`
+        INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
+        VALUES ($1, $2, 'listingExpiration', '房源即将到期', 'Listing expiring soon', $3, $4, '/#account')
+      `, [`notification-${randomUUID()}`, ownerId, `「${titleZh}」将在 ${expiresOn} 到期，请及时续期或修改房源。`, `“${titleEn}” expires on ${expiresOn}. Renew or update it from your account desk.`]);
+      if (emailIsConfigured() && row.email_enabled !== false && row.listing_expiration_alerts !== false && await emailAlertsAllowed(ownerId, "listing_expiration_alerts")) {
+        try {
+          await sendListingExpirationAlert({ email: String(row.email || ""), displayName: String(row.display_name || ""), listingTitle: titleZh, expiresOn });
+          sent += 1;
+        } catch {
+          emailFailed += 1;
+        }
+      }
+      await sql.query("INSERT INTO rental_listing_expiration_alerts (listing_id, user_id, expires_on) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", [String(row.id), ownerId, expiresOn]);
+      expirationProcessed += 1;
+    }
+    return NextResponse.json({ ok: true, processed, expirationProcessed, sent, emailFailed, configuredEmail: emailIsConfigured() });
   } catch {
     return NextResponse.json({ error: "Saved search alerts could not be processed right now." }, { status: 502 });
   }

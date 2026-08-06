@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { emailIsConfigured, sendApplicationStatusUpdate } from "../../../lib/email";
+import { emailAlertsAllowed } from "../../../lib/notification-preferences";
 
 const OWNER_STATUSES = new Set(["reviewing", "approved", "declined"]);
 
@@ -74,7 +75,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         VALUES ($1, $2, 'application', $3, $4, $5, $6, '/#messages')
       `, [`notification-${randomUUID()}`, recipientId, titleZh, titleEn, `「${listingTitleZh}」的租赁申请状态已更新。`, `The application for “${listingTitleEn}” was updated.`]);
     }
-    if (requestedStatus && emailIsConfigured()) {
+    if (requestedStatus && emailIsConfigured() && await emailAlertsAllowed(recipientId, "agent_response_alerts")) {
       const recipientEmail = isOwner ? String(application.requester_email || "") : String(application.owner_email || "");
       if (recipientEmail && !recipientEmail.endsWith(".invalid")) {
         try {
