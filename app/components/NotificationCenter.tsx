@@ -10,6 +10,7 @@ type NotificationPreferences = {
   inquiryAlerts: boolean;
   listingExpirationAlerts: boolean;
   agentResponseAlerts: boolean;
+  pushEnabled: boolean;
   updatedAt: string | null;
 };
 type PreferenceKey = keyof Omit<NotificationPreferences, "updatedAt">;
@@ -20,8 +21,11 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   inquiryAlerts: true,
   listingExpirationAlerts: true,
   agentResponseAlerts: true,
+  pushEnabled: false,
   updatedAt: null,
 };
+
+type PushStatus = "idle" | "checking" | "unsupported" | "denied" | "subscribed" | "error";
 
 function BellIcon() {
   return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 10a6 6 0 0 1 12 0v4l2 3H4l2-3v-4Z" stroke="currentColor" strokeWidth="1.7" /><path d="M10 20h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="square" /></svg>;
@@ -43,6 +47,9 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
   const [preferencesSaving, setPreferencesSaving] = useState<PreferenceKey | null>(null);
   const [error, setError] = useState("");
   const [preferencesError, setPreferencesError] = useState("");
+  const [pushStatus, setPushStatus] = useState<PushStatus>("idle");
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushError, setPushError] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -78,6 +85,31 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
     const timer = window.setTimeout(() => { void load(); }, 0);
     return () => window.clearTimeout(timer);
   }, [authenticated, open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open || !authenticated) return;
+    let cancelled = false;
+    const checkSubscription = async () => {
+      if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+        if (!cancelled) setPushStatus("unsupported");
+        return;
+      }
+      if (Notification.permission === "denied") {
+        if (!cancelled) setPushStatus("denied");
+        return;
+      }
+      setPushStatus("checking");
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (!cancelled) setPushStatus(subscription ? "subscribed" : "idle");
+      } catch {
+        if (!cancelled) setPushStatus("error");
+      }
+    };
+    void checkSubscription();
+    return () => { cancelled = true; };
+  }, [authenticated, open]);
 
   const markRead = async (id: string) => {
     setNotifications((current) => current.map((item) => item.id === id ? { ...item, readAt: new Date().toISOString() } : item));
@@ -117,6 +149,67 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
     if (!authenticated) { onRequireAuth(); return; }
     setOpen(true);
   };
+
+  const enablePushNotifications = async () => {
+    if (!authenticated) { onRequireAuth(); return; }
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setPushStatus("unsupported");
+      return;
+    }
+    setPushLoading(true);
+    setPushError("");
+    try {
+      const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
+      if (permission !== "granted") {
+        setPushStatus("denied");
+        if (permission === "denied") setPushError(zh ? "浏览器已阻止通知；请在网站权限中重新允许。" : "Notifications are blocked. Re-enable them in this site’s browser permissions.");
+        return;
+      }
+      const keyResponse = await fetch("/api/push/vapid-public-key", { cache: "no-store" });
+      const keyResult = await keyResponse.json() as { publicKey?: string; error?: string };
+      if (!keyResponse.ok || !keyResult.publicKey) throw new Error(keyResult.error || (zh ? "通知服务尚未配置。" : "Browser notifications are not configured yet."));
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(keyResult.publicKey) });
+      const response = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscription: subscription.toJSON(), userAgent: navigator.userAgent }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || (zh ? "通知订阅失败。" : "Browser notification subscription failed."));
+      setPreferences((current) => ({ ...current, pushEnabled: true }));
+      setPushStatus("subscribed");
+    } catch (pushEnableError) {
+      setPushStatus("error");
+      setPushError(pushEnableError instanceof Error ? pushEnableError.message : (zh ? "通知暂时无法启用。" : "Browser notifications could not be enabled."));
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  const disablePushNotifications = async () => {
+    setPushLoading(true);
+    setPushError("");
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      const response = await fetch("/api/push/subscribe", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: subscription?.endpoint || "" }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || (zh ? "通知关闭失败。" : "Browser notifications could not be disabled."));
+      await subscription?.unsubscribe();
+      setPreferences((current) => ({ ...current, pushEnabled: false }));
+      setPushStatus("idle");
+    } catch (pushDisableError) {
+      setPushStatus("error");
+      setPushError(pushDisableError instanceof Error ? pushDisableError.message : (zh ? "通知暂时无法关闭。" : "Browser notifications could not be disabled."));
+    } finally {
+      setPushLoading(false);
+    }
+  };
   const preferenceItems: Array<{ key: PreferenceKey; zh: string; en: string }> = [
     { key: "savedSearchAlerts", zh: "保存搜索有新房源", en: "New matches for saved searches" },
     { key: "inquiryAlerts", zh: "咨询和看房进展", en: "Inquiry and tour updates" },
@@ -142,6 +235,10 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
             {preferencesLoading ? <div className="notification-preferences-loading" aria-live="polite">{zh ? "正在加载设置…" : "Loading settings…"}</div> : <>
               <label className="notification-toggle"><span><strong>{zh ? "启用邮件提醒" : "Email alerts"}</strong><small>{zh ? "关闭后不会收到任何分类邮件。" : "Turn off all email alerts."}</small></span><input type="checkbox" checked={preferences.emailEnabled} disabled={preferencesSaving !== null} onChange={(event) => { void savePreference("emailEnabled", event.target.checked); }} /></label>
               <div className={`notification-preference-list ${preferences.emailEnabled ? "" : "is-disabled"}`}>{preferenceItems.map((item) => <label className="notification-toggle" key={item.key}><span>{zh ? item.zh : item.en}</span><input type="checkbox" checked={preferences[item.key]} disabled={!preferences.emailEnabled || preferencesSaving !== null} onChange={(event) => { void savePreference(item.key, event.target.checked); }} /></label>)}</div>
+              <section className="push-notification-control" aria-labelledby="push-notification-title">
+                <div><span className="section-label">DEVICE SIGNAL</span><h4 id="push-notification-title">{zh ? "浏览器通知" : "Browser notifications"}</h4><p>{zh ? "在新咨询、保存搜索匹配或看房提醒出现时，在设备上收到即时通知。" : "Get an instant device notice for new inquiries, saved-search matches, and tour reminders."}</p>{pushError && <p className="push-notification-status" role="alert">{pushError}</p>}{pushStatus === "denied" && !pushError && <p className="push-notification-status">{zh ? "通知权限已关闭，请在浏览器设置中重新允许。" : "Notification permission is blocked; re-enable it in browser settings."}</p>}{pushStatus === "unsupported" && <p className="push-notification-status">{zh ? "此浏览器暂不支持浏览器通知。" : "This browser does not support push notifications."}</p>}</div>
+                {pushStatus === "subscribed" ? <button className="outline-button" type="button" disabled={pushLoading} onClick={() => { void disablePushNotifications(); }}>{pushLoading ? (zh ? "处理中…" : "Working…") : (zh ? "关闭通知" : "Turn off")}</button> : <button className="outline-button" type="button" disabled={pushLoading || pushStatus === "unsupported" || pushStatus === "denied" || pushStatus === "checking"} onClick={() => { void enablePushNotifications(); }}>{pushLoading || pushStatus === "checking" ? (zh ? "处理中…" : "Working…") : (zh ? "启用通知" : "Enable")}</button>}
+              </section>
             </>}
           </section>}
           {loading ? <div className="dashboard-loading" aria-live="polite"><span /><span /><span /></div> : notifications.length === 0 ? <div className="drawer-empty"><div className="empty-icon" aria-hidden="true"><BellIcon /></div><h3>{zh ? "暂无通知" : "No notifications"}</h3><p>{zh ? "新的咨询或搜索提醒会在这里出现。" : "New inquiries and saved-search alerts will appear here."}</p></div> : <div className="notification-list">{notifications.map((item) => <article className={`notification-item ${item.readAt ? "is-read" : "is-unread"}`} key={item.id}><div><div className="notification-item-top"><strong>{zh ? item.titleZh : item.titleEn}</strong><time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleDateString(zh ? "zh-CN" : "en-US")}</time></div><p>{zh ? item.bodyZh : item.bodyEn}</p></div><div className="notification-item-actions">{item.link && <a className="link-button" href={item.link} onClick={() => { if (!item.readAt) void markRead(item.id); setOpen(false); }}>{zh ? "查看" : "Open"}</a>}{!item.readAt && <button className="text-button" type="button" onClick={() => void markRead(item.id)}>{zh ? "标记已读" : "Mark read"}</button>}</div></article>)}</div>}
@@ -149,4 +246,11 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
       </aside>
     </div>}
   </>;
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((character) => character.charCodeAt(0)));
 }

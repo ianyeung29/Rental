@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../lib/auth";
 import { consumeRateLimit } from "../../lib/rate-limit";
 import { estimateOpenAICost, recordApiUsageSafely } from "../../lib/usage";
+import { isExactOccupantCount } from "../../lib/renter-options";
 
 type InquiryInput = {
   locale?: unknown;
@@ -167,6 +168,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Please send valid inquiry details." }, { status: 400 });
   }
+  if (!isExactOccupantCount(input.occupants)) return NextResponse.json({ error: "Choose the exact number of occupants." }, { status: 400 });
 
   const local = localMessages(input);
   if (!process.env.OPENAI_API_KEY) return NextResponse.json({ ...local, source: "local" });

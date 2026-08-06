@@ -389,6 +389,20 @@ export async function ensureDatabaseSchema() {
         inquiry_alerts BOOLEAN NOT NULL DEFAULT TRUE,
         listing_expiration_alerts BOOLEAN NOT NULL DEFAULT TRUE,
         agent_response_alerts BOOLEAN NOT NULL DEFAULT TRUE,
+        push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query("ALTER TABLE rental_notification_preferences ADD COLUMN IF NOT EXISTS push_enabled BOOLEAN NOT NULL DEFAULT FALSE");
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_push_subscriptions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES rental_users(id) ON DELETE CASCADE,
+        endpoint TEXT NOT NULL UNIQUE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        user_agent TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
@@ -456,6 +470,7 @@ export async function ensureDatabaseSchema() {
     await sql.query("CREATE INDEX IF NOT EXISTS rental_applications_status_idx ON rental_applications(status, updated_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_notifications_user_idx ON rental_notifications(user_id, read_at, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_notification_preferences_updated_idx ON rental_notification_preferences(updated_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_push_subscriptions_user_idx ON rental_push_subscriptions(user_id, updated_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_expiration_alerts_user_idx ON rental_listing_expiration_alerts(user_id, expires_on)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_events_listing_idx ON rental_listing_events(listing_id, event_type, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_events_user_idx ON rental_listing_events(user_id, created_at DESC)");

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { emailIsConfigured, sendListingExpirationAlert, sendSavedSearchAlert } from "../../../lib/email";
 import { emailAlertsAllowed } from "../../../lib/notification-preferences";
+import { sendPushToUser } from "../../../lib/push";
 
 function list(value: unknown) {
   if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
@@ -117,6 +118,12 @@ export async function GET(request: Request) {
           INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
           VALUES ($1, $2, 'savedSearch', '保存的搜索有新房源', 'New listings for your saved search', $3, $4, '/#rentals')
         `, [`notification-${randomUUID()}`, String(search.user_id), `你的搜索发现了 ${titles.length} 套新房源。`, `${titles.length} new listings match your saved search.`]);
+        await sendPushToUser(String(search.user_id), {
+          title: "安居 / Anjurentals",
+          body: `${titles.length} 套新房源符合你的保存搜索。 / ${titles.length} new listings match your saved search.`,
+          url: "/#rentals",
+          tag: `saved-search-${String(search.user_id)}`,
+        }).catch(() => undefined);
       }
       await sql.query("UPDATE rental_saved_searches SET last_alert_at = NOW() WHERE user_id = $1", [String(search.user_id)]);
       processed += 1;
@@ -150,6 +157,12 @@ export async function GET(request: Request) {
         INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
         VALUES ($1, $2, 'listingExpiration', '房源即将到期', 'Listing expiring soon', $3, $4, '/#account')
       `, [`notification-${randomUUID()}`, ownerId, `「${titleZh}」将在 ${expiresOn} 到期，请及时续期或修改房源。`, `“${titleEn}” expires on ${expiresOn}. Renew or update it from your account desk.`]);
+      await sendPushToUser(ownerId, {
+        title: "安居 / Anjurentals",
+        body: `「${titleZh}」即将到期。 / “${titleEn}” is expiring soon.`,
+        url: "/#account",
+        tag: `listing-expiration-${String(row.id)}`,
+      }).catch(() => undefined);
       if (emailIsConfigured() && row.email_enabled !== false && row.listing_expiration_alerts !== false && await emailAlertsAllowed(ownerId, "listing_expiration_alerts")) {
         try {
           await sendListingExpirationAlert({ email: String(row.email || ""), displayName: String(row.display_name || ""), listingTitle: titleZh, expiresOn });

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "anjurentals-pwa-v1";
+const CACHE_VERSION = "anjurentals-pwa-v2";
 const APP_SHELL = [
   "/",
   "/about",
@@ -17,7 +17,6 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_VERSION).then(async (cache) => {
       await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
-      await self.skipWaiting();
     }),
   );
 });
@@ -33,6 +32,40 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
+});
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    const parsed = event.data ? event.data.json() : {};
+    payload = parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    payload = { body: event.data ? event.data.text() : "" };
+  }
+  const title = typeof payload.title === "string" && payload.title ? payload.title : "安居 / Anjurentals";
+  const options = {
+    body: typeof payload.body === "string" ? payload.body : "有新的房源动态。",
+    icon: "/icons/anjurentals-192.png",
+    badge: "/icons/anjurentals-192.png",
+    tag: typeof payload.tag === "string" ? payload.tag : "anjurentals-update",
+    data: { url: typeof payload.url === "string" ? payload.url : "/" },
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => "focus" in client);
+      if (existing) {
+        existing.navigate(targetUrl);
+        return existing.focus();
+      }
+      return self.clients.openWindow(targetUrl);
+    }),
+  );
 });
 
 self.addEventListener("fetch", (event) => {

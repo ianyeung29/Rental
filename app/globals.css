@@ -75,11 +75,17 @@ a { color: inherit; text-decoration: none; }
 .pwa-install-copy strong { font-size: 14px; }
 .pwa-install-copy span { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .pwa-install-button { padding: 10px 14px; color: var(--ink); background: var(--lime); border: 1px solid var(--lime-dark); font-weight: 700; white-space: nowrap; }
+.pwa-install-button:disabled { cursor: wait; opacity: .65; }
 .pwa-dismiss-button { align-self: flex-start; padding: 0 4px; color: var(--muted); background: transparent; border: 0; font-size: 22px; line-height: 1; }
+.pwa-update-prompt { position: fixed; top: 12px; left: 50%; z-index: 81; display: flex; align-items: center; gap: 14px; width: min(480px, calc(100% - 24px)); padding: 12px 14px; transform: translateX(-50%); border: 1px solid var(--blue); background: var(--ink); color: var(--paper); box-shadow: 8px 8px 0 rgba(20, 42, 68, .16); }
+.pwa-update-prompt .pwa-install-copy span { color: rgba(255, 253, 249, .78); }
+.pwa-ios-prompt { width: min(540px, calc(100% - 24px)); }
+.pwa-ios-steps { padding-top: 5px; color: var(--ink) !important; font-weight: 700; }
 
 @media (max-width: 560px) {
   .pwa-install-prompt { right: 12px; bottom: 12px; width: calc(100% - 24px); }
   .pwa-install-button { padding-inline: 12px; }
+  .pwa-update-prompt { top: 10px; }
 }
 
 .skip-link {
@@ -1231,7 +1237,17 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .notification-preference-list { margin-top: 2px; padding-left: 12px; border-left: 2px solid var(--blue-wash); }
 .notification-preference-list.is-disabled { opacity: .5; }
 .notification-preferences-loading { padding: 10px 0; color: var(--muted); font-size: 10px; }
+.push-notification-control { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-top: 14px; padding: 13px; border: 1px solid var(--blue); background: var(--blue-wash); }
+.push-notification-control h4 { margin: 5px 0 3px; color: var(--ink); font-size: 13px; letter-spacing: -.025em; }
+.push-notification-control p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.push-notification-control .outline-button { flex: 0 0 auto; padding: 9px 12px; }
+.push-notification-status { margin-top: 6px !important; color: var(--blue) !important; font-weight: 700; }
 .notification-list { display: grid; gap: 0; margin-top: 22px; border-top: 1px solid var(--line-strong); }
+.draft-recovery-notice { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin: 14px 0; padding: 12px 13px; border: 1px solid var(--blue); background: var(--blue-wash); }
+.draft-recovery-notice > div { display: grid; gap: 4px; }
+.draft-recovery-notice strong { color: var(--ink); font-size: 11px; }
+.draft-recovery-notice span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.draft-recovery-notice .text-button { flex: 0 0 auto; padding: 0; white-space: nowrap; }
 .notification-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 15px 0; border-bottom: 1px solid var(--line); }
 .notification-item.is-unread { padding-left: 13px; border-left: 1px solid var(--blue); background: var(--blue-wash); }
 .notification-item.is-read { color: var(--muted); }
@@ -1252,6 +1268,7 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .saved-search-manager-controls .field-label { min-width: 150px; margin: 0; }
 .saved-search-manager-controls select { display: block; width: 100%; min-height: 36px; margin-top: 7px; padding: 0 25px 0 9px; border: 1px solid var(--line-strong); color: var(--ink); background: #fff; font-size: 10px; font-weight: 700; }
 .saved-search-manager-controls small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.saved-search-manager-note { color: var(--muted); font-size: 9px; line-height: 1.5; }
 .saved-search-manager-actions { display: flex; align-items: center; gap: 16px; padding-top: 11px; border-top: 1px solid #cbdafa; }
 .analytics-panel { margin-top: 22px; padding-top: 21px; border-top: 1px solid var(--line); }
 .analytics-panel > .account-profile-heading { margin-bottom: 17px; }
