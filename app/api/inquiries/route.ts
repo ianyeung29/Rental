@@ -33,12 +33,15 @@ function inquiryFromRow(row: Record<string, unknown>, received: boolean) {
     tourScheduledAt: dateTime(row.tour_scheduled_at),
     tourTimeZone: String(row.tour_timezone || "UTC"),
     tourNote: String(row.tour_note || ""),
+    addressRevealStatus: String(row.address_reveal_status || "hidden"),
+    addressRevealedAt: dateTime(row.address_revealed_at),
     message: String(row.message || ""),
     status: String(row.status || "sent"),
     readAt: (received ? row.owner_read_at : row.requester_read_at) instanceof Date
       ? (received ? row.owner_read_at as Date : row.requester_read_at as Date).toISOString()
       : (received ? row.owner_read_at : row.requester_read_at) ? String(received ? row.owner_read_at : row.requester_read_at) : null,
     ...(received ? { requesterName: String(row.requester_name || ""), requesterEmail: String(row.requester_email || "") } : {}),
+    ...(!received && row.revealed_address ? { revealedAddress: String(row.revealed_address) } : {}),
   };
 }
 
@@ -58,7 +61,7 @@ export async function GET(request: Request) {
     const rows = received
       ? await sql.query(`
           SELECT i.id, i.listing_id, i.move_in, i.lease_length, i.occupants, i.pets,
-                 i.tour_preference, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at,
+                 i.tour_preference, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.address_reveal_status, i.address_revealed_at, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at,
                  l.title_zh, l.title_en, u.display_name AS requester_name, u.email AS requester_email
           FROM rental_inquiries i
           JOIN rental_listings l ON l.id = i.listing_id
@@ -68,9 +71,12 @@ export async function GET(request: Request) {
         `, [user.id])
       : await sql.query(`
           SELECT i.id, i.listing_id, i.move_in, i.lease_length, i.occupants, i.pets,
-                 i.tour_preference, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at, l.title_zh, l.title_en
+                 i.tour_preference, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.address_reveal_status, i.address_revealed_at,
+                 CASE WHEN i.address_reveal_status = 'revealed' THEN pd.private_address ELSE '' END AS revealed_address,
+                 i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at, l.title_zh, l.title_en
           FROM rental_inquiries i
           JOIN rental_listings l ON l.id = i.listing_id
+          LEFT JOIN rental_listing_private_details pd ON pd.listing_id = i.listing_id
           WHERE i.requester_id = $1
           ORDER BY i.created_at DESC
         `, [user.id]);
@@ -178,6 +184,8 @@ export async function POST(request: Request) {
       tourScheduledAt: null,
       tourTimeZone: "UTC",
       tourNote: "",
+      addressRevealStatus: "hidden",
+      addressRevealedAt: null,
       message,
       status: "sent",
       notificationSent,

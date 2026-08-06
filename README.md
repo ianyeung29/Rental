@@ -24,6 +24,7 @@ This is a browser-first MVP slice of the Chinese-first North American rental mar
 - Listing lifecycle is enforced server-side: paused and expired listings are removed from public search and cannot receive new inquiries or reports; existing legacy `unpublished` rows are treated as paused.
 - Signed-in renters can report remote listings; admin-role API routes expose a small moderation queue with report status updates.
 - Listing inquiries remain in the renter and owner dashboards and can send Resend notifications and confirmation emails when email delivery is configured.
+- Owners can explicitly share the exact address from a scheduled inquiry; renters see it only in their authenticated Messages view, and the reveal is recorded without copying the address into the audit log.
 - Responsive desktop/mobile composition with reduced-motion and keyboard-focus handling.
 - Installable PWA shell with an offline fallback, an explicit update prompt, local draft recovery, and an iPhone Safari install guide.
 - Verified users can opt into browser push notifications for new inquiries, saved-search matches, listing expiry reminders, applications, and tour reminders.
@@ -51,7 +52,7 @@ npm run db:seed
 
 The seed creates four clearly labeled sample listings, their private demo details, and local demo-image metadata. It is safe to run again; it does not create user accounts or real rental inventory.
 
-The database bootstrap applies the listing lifecycle, Phase 1 security/usage tables, and PWA notification tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql`, `db/migrations/017_phase_one_security_usage.sql`, and `db/migrations/018_pwa_retention.sql` after the earlier migration files.
+The database bootstrap applies the listing lifecycle, Phase 1 security/usage tables, PWA notification tables, and address-reveal tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql`, `db/migrations/017_phase_one_security_usage.sql`, `db/migrations/018_pwa_retention.sql`, and `db/migrations/019_address_reveal.sql` after the earlier migration files.
 
 To load synthetic agent profiles for testing the owner’s agent-selection flow:
 
@@ -186,6 +187,7 @@ After signing in with that verified admin account, open the account avatar and c
 
 - The inquiry assistant uses only public listing facts and the renter’s structured answers. It can produce Chinese and English drafts, but the renter remains responsible for reviewing the message before sending it.
 - The detail drawer can estimate a route to a school, workplace, landmark, commercial district, or supermarket. It uses the selected approximate area rather than the private address, supports drive/public transit/walking, limits public requests, and reuses cached area/destination results for seven days.
+- A listing owner can schedule a tour and then explicitly share the private exact address with that inquiry's renter. The renter sees it only after authenticated account loading; the reveal action is permission-checked and audit-recorded without storing an address copy in the event table.
 - Commute requests do not persist a destination that looks like a private street address. Do not enter a private address into the destination field.
 - The existing Phase 2 foundations for manual agent verification, listing quality checks, price comparisons, owner performance metrics, and labeled promotion requests remain in place. Automated identity/property vendors, OCR/redaction services, and paid promotion checkout are intentionally vendor/legal decisions still to be completed before production use.
 

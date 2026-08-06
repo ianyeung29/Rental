@@ -92,6 +92,8 @@ type DashboardInquiry = {
   tourScheduledAt?: string | null;
   tourTimeZone?: string;
   tourNote?: string;
+  addressRevealStatus?: "hidden" | "revealed";
+  addressRevealedAt?: string | null;
   requesterName?: string;
   requesterEmail?: string;
 };
@@ -172,6 +174,7 @@ type AccountDrawerProps = {
   onAgentRequestDecision: (id: string, status: "accepted" | "declined") => void;
   onInquiryStatusChange: (id: string, status: "contacted" | "closed") => Promise<void>;
   onScheduleInquiry: (id: string, input: { scheduledAt: string; timeZone: string; note: string }) => Promise<void>;
+  onRevealInquiryAddress: (id: string) => Promise<void>;
   onApplicationStatusChange: (id: string, status: "reviewing" | "approved" | "declined" | "withdrawn", note: string) => Promise<void>;
   onUnblockPublisher: (id: string) => void;
 };
@@ -202,7 +205,7 @@ function CloseIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, blockedPublishers, blockLoadingId, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onApplicationStatusChange, onUnblockPublisher, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentVerificationStatusChange }: AccountDrawerProps) {
+export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, blockedPublishers, blockLoadingId, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onRevealInquiryAddress, onApplicationStatusChange, onUnblockPublisher, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentVerificationStatusChange }: AccountDrawerProps) {
   const zh = locale === "zh";
   const initial = user.displayName.trim().slice(0, 1).toUpperCase() || "U";
   const listingLimit = listingLimitFor(user.accountType, user.agentVerified);
@@ -368,6 +371,17 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
       setScheduleNote("");
     } catch (error) {
       setScheduleError(error instanceof Error ? error.message : (zh ? "看房时间暂时无法保存。" : "The tour could not be scheduled."));
+    } finally {
+      setInquiryActionId(null);
+    }
+  };
+  const handleRevealAddress = async (inquiry: DashboardInquiry) => {
+    if (!window.confirm(zh ? "只在你确认看房安排后分享精确地址。现在分享给这位租客吗？" : "Share the exact address only after confirming the tour arrangement. Share it with this renter now?")) return;
+    setInquiryActionId(inquiry.id);
+    try {
+      await onRevealInquiryAddress(inquiry.id);
+    } catch {
+      // The parent displays the localized error toast.
     } finally {
       setInquiryActionId(null);
     }
@@ -638,11 +652,13 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
                       {inquiry.pets && <small>{zh ? "宠物" : "Pets"}: {inquiry.pets}</small>}
                       {inquiry.message && <blockquote>{inquiry.message}</blockquote>}
                       {inquiry.tourScheduledAt && <small className="inquiry-tour-details">{zh ? "看房时间" : "Tour"}: {inquiryTourDateLabel(inquiry.tourScheduledAt, inquiry.tourTimeZone)}{inquiry.tourTimeZone ? ` · ${inquiry.tourTimeZone}` : ""}{inquiry.tourNote ? ` · ${inquiry.tourNote}` : ""}</small>}
+                      {inquiry.addressRevealStatus === "revealed" && <small className="inquiry-address-state revealed">{zh ? "精确地址已分享给租客" : "Exact address shared with renter"}</small>}
                     </div>
                     <div className="dashboard-row-actions">
                       <a className="link-button" href={`mailto:${inquiry.requesterEmail || ""}`}>{zh ? "回复" : "Reply"}</a>
                       {inquiryStatus === "sent" && <button className="text-button" type="button" onClick={() => { void handleInquiryStatusChange(inquiry.id, "contacted"); }} disabled={isBusy}>{zh ? "标记已联系" : "Mark contacted"}</button>}
                       {inquiryStatus !== "closed" && <button className="outline-button" type="button" onClick={() => openSchedule(inquiry)} disabled={isBusy}>{inquiry.tourScheduledAt ? (zh ? "修改看房" : "Edit tour") : (zh ? "安排看房" : "Schedule tour")}</button>}
+                      {inquiry.tourScheduledAt && inquiry.addressRevealStatus !== "revealed" && <button className="outline-button address-reveal-action" type="button" onClick={() => { void handleRevealAddress(inquiry); }} disabled={isBusy}>{isBusy ? (zh ? "处理中…" : "Working…") : (zh ? "分享精确地址" : "Share exact address")}</button>}
                       {inquiryStatus !== "closed" && <button className="text-button" type="button" onClick={() => { void handleInquiryStatusChange(inquiry.id, "closed"); }} disabled={isBusy}>{zh ? "完成咨询" : "Close inquiry"}</button>}
                     </div>
                     {schedulingInquiryId === inquiry.id && <form className="inquiry-schedule-form" onSubmit={handleScheduleSubmit}>

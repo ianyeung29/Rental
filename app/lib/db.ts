@@ -231,6 +231,9 @@ export async function ensureDatabaseSchema() {
         tour_timezone TEXT NOT NULL DEFAULT 'UTC',
         tour_note TEXT NOT NULL DEFAULT '',
         tour_reminder_sent_at TIMESTAMPTZ,
+        address_reveal_status TEXT NOT NULL DEFAULT 'hidden',
+        address_revealed_at TIMESTAMPTZ,
+        address_revealed_by TEXT REFERENCES rental_users(id) ON DELETE SET NULL,
         message TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'sent',
         owner_read_at TIMESTAMPTZ,
@@ -239,6 +242,21 @@ export async function ensureDatabaseSchema() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS address_reveal_status TEXT NOT NULL DEFAULT 'hidden'");
+    await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS address_revealed_at TIMESTAMPTZ");
+    await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS address_revealed_by TEXT REFERENCES rental_users(id) ON DELETE SET NULL");
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_address_reveal_events (
+        id TEXT PRIMARY KEY,
+        inquiry_id TEXT NOT NULL REFERENCES rental_inquiries(id) ON DELETE CASCADE,
+        listing_id TEXT NOT NULL REFERENCES rental_listings(id) ON DELETE CASCADE,
+        actor_id TEXT REFERENCES rental_users(id) ON DELETE SET NULL,
+        recipient_id TEXT REFERENCES rental_users(id) ON DELETE SET NULL,
+        action TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_address_reveal_events_inquiry_idx ON rental_address_reveal_events(inquiry_id, created_at DESC)");
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_renter_profiles (
         user_id TEXT PRIMARY KEY REFERENCES rental_users(id) ON DELETE CASCADE,

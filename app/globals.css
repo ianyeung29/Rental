@@ -760,6 +760,8 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .inquiry-row { flex-wrap: wrap; }
 .inquiry-row .inquiry-schedule-form { flex-basis: 100%; }
 .inquiry-tour-details { margin-top: 9px; padding: 8px 10px; border: 1px solid #d6e49a; color: var(--lime-dark) !important; background: #f4f8d4; }
+.inquiry-address-state { margin-top: 8px; padding: 7px 9px; border: 1px solid #cbdafa; color: var(--blue-dark) !important; background: var(--blue-wash); font-weight: 700; }
+.address-reveal-action { border-color: var(--blue); color: var(--blue-dark); }
 .inquiry-schedule-form { display: grid; gap: 10px; margin-top: 2px; padding: 13px; border: 1px solid #cbdafa; background: var(--blue-wash); }
 .inquiry-schedule-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .inquiry-schedule-heading strong { color: var(--ink); font-size: 11px; }
@@ -800,6 +802,10 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .message-item p { margin: 8px 0 10px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .message-status { color: var(--lime-dark); font-size: 10px; font-weight: 700; }
 .message-tour-details { display: block; margin-top: 7px; color: var(--blue-dark); font-size: 10px; line-height: 1.5; }
+.address-reveal-card { display: grid; gap: 6px; margin-top: 12px; padding: 12px; border: 1px solid #d6e49a; border-left: 3px solid var(--lime-dark); background: #f8fbe8; }
+.address-reveal-card strong { color: var(--ink); font-size: 11px; }
+.address-reveal-card span { color: var(--ink); font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.address-reveal-card small { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .compare-drawer { width: min(940px, 100%); }
 .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
 .compare-card { padding: 12px; border: 1px solid var(--line); background: #fff; }
