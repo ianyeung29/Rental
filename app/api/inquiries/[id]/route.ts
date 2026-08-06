@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { emailIsConfigured, sendInquiryStatusUpdate } from "../../../lib/email";
+import { emailAlertsAllowed } from "../../../lib/notification-preferences";
 
 const ALLOWED_STATUSES = new Set(["sent", "contacted", "tourScheduled", "closed"]);
 
@@ -98,7 +99,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
           VALUES ($1, $2, 'inquiry', $3, $4, $5, $6, $7)
         `, [`notification-${randomUUID()}`, recipientId, "看房时间已安排", "Tour scheduled", `「${String(inquiry.title_zh || inquiry.title_en || "房源")}」已安排看房时间，请查看消息详情。`, `A tour was scheduled for “${String(inquiry.title_en || inquiry.title_zh || "your inquiry")}”. Open messages for the details.`, "/#messages"]);
       }
-      if (isOwner && emailIsConfigured() && inquiry.requester_email && scheduledAt) {
+      if (isOwner && emailIsConfigured() && await emailAlertsAllowed(String(inquiry.requester_id || ""), "inquiry_alerts") && inquiry.requester_email && scheduledAt) {
         try {
           await sendInquiryStatusUpdate({
             recipientEmail: String(inquiry.requester_email),

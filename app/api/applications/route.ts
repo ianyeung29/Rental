@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { emailIsConfigured, sendApplicationNotification, sendApplicationStatusUpdate } from "../../lib/email";
+import { emailAlertsAllowed } from "../../lib/notification-preferences";
 
 const MAX_BODY_LENGTH = 8_000;
 
@@ -183,7 +184,7 @@ export async function POST(request: Request) {
     let confirmationSent = false;
     if (emailIsConfigured()) {
       const ownerEmail = String(listing.contact_email || listing.owner_email || "");
-      if (ownerEmail && !ownerEmail.endsWith(".invalid")) {
+      if (await emailAlertsAllowed(String(listing.owner_id || ""), "inquiry_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
         try {
           await sendApplicationNotification({
             recipientEmail: ownerEmail,
@@ -206,7 +207,7 @@ export async function POST(request: Request) {
           // Keep the application saved; the owner can still see it in the dashboard.
         }
       }
-      try {
+      if (await emailAlertsAllowed(context.user.id, "inquiry_alerts")) try {
         await sendApplicationStatusUpdate({
           recipientEmail: context.user.email,
           recipientName: preferredName,

@@ -436,3 +436,20 @@ export async function sendModerationDecision(input: {
   });
   if (error) throw resendFailure(error, "Resend could not send the moderation decision.");
 }
+
+export async function sendListingExpirationAlert(input: { email: string; displayName: string; listingTitle: string; expiresOn: string }) {
+  const { apiKey, from, appUrl } = config();
+  const resend = new Resend(apiKey);
+  const name = escapeHtml(input.displayName || "房源发布者");
+  const title = escapeHtml(input.listingTitle || "你的房源");
+  const expiresOn = escapeHtml(input.expiresOn);
+  const text = `你好 ${input.displayName || "房源发布者"}，\n\n房源「${input.listingTitle || "你的房源"}」将在 ${input.expiresOn} 到期并从公开搜索中隐藏。\n\n登录安居工作台续期或修改房源：${appUrl}/#account`;
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.email],
+    subject: `房源即将到期 · ${input.listingTitle || "你的房源"}`,
+    text,
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">房源即将到期</h1><p style="font-size:15px;line-height:1.7">你好 ${name}，房源「${title}」将在 ${expiresOn} 到期。</p><p style="padding:16px;background:#fff3ee;font-size:13px;line-height:1.7">到期后房源会从公开搜索中隐藏。你可以在安居工作台续期、暂停或修改房源。</p><p style="margin:28px 0"><a href="${appUrl}/#account" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">打开房源工作台</a></p></main></body></html>`,
+  });
+  if (error) throw resendFailure(error, "Resend could not send the listing expiration alert.");
+}

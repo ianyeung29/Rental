@@ -27,6 +27,7 @@ export default function PublicPageShell({ title, description, children }: Public
 
           <nav className="public-nav" aria-label="公共导航">
             <Link href="/">找房</Link>
+            <Link href="/agents">经纪目录</Link>
             <a href="/about">关于安居</a>
             <a href="/contact">联系我们</a>
             <a href="/feedback">反馈</a>
