@@ -2,11 +2,12 @@ import { cookies } from "next/headers";
 import { createHash, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { ensureDatabaseSchema, sql } from "./db";
-import { emailIsConfigured, sendVerificationEmail } from "./email";
+import { emailIsConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email";
 import { AccountType, AgentVerificationStatus, isVerifiedAgent, normalizeAccountType, normalizeAgentVerificationStatus } from "./account-types";
 
 const SESSION_COOKIE = "rental_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
 const scryptAsync = promisify(scrypt);
 
 export type AuthUser = {
@@ -91,6 +92,18 @@ async function createVerificationToken(userId: string) {
   await db.query("DELETE FROM rental_email_verifications WHERE user_id = $1 AND used_at IS NULL", [userId]);
   await db.query(
     "INSERT INTO rental_email_verifications (id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)",
+    [randomUUID(), userId, tokenHash(token), expiresAt.toISOString()],
+  );
+  return token;
+}
+
+async function createPasswordResetToken(userId: string) {
+  const db = database();
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_SECONDS * 1000);
+  await db.query("DELETE FROM rental_password_resets WHERE user_id = $1 AND used_at IS NULL", [userId]);
+  await db.query(
+    "INSERT INTO rental_password_resets (id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)",
     [randomUUID(), userId, tokenHash(token), expiresAt.toISOString()],
   );
   return token;
@@ -261,6 +274,46 @@ export async function resendVerificationEmail(userId: string) {
   const verification = await sendVerificationIfConfigured(String(row.email), String(row.display_name), token);
   if (!verification.sent) throw new AuthError(verification.error || "Resend could not send the verification email.", 502);
   return { sent: true, alreadyVerified: false };
+}
+
+export async function requestPasswordReset(emailValue: string) {
+  await ensureDatabaseSchema();
+  const db = database();
+  const email = normalizeEmail(emailValue);
+  if (!/^\S+@\S+\.\S+$/.test(email)) return { accepted: true };
+  const rows = await db.query("SELECT id, email, display_name FROM rental_users WHERE email = $1 LIMIT 1", [email]);
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (!row) return { accepted: true };
+  const token = await createPasswordResetToken(String(row.id));
+  if (!emailIsConfigured()) {
+    console.error("[auth] password reset email skipped because Resend is not configured");
+    return { accepted: true };
+  }
+  try {
+    await sendPasswordResetEmail({ email: String(row.email), displayName: String(row.display_name || ""), token });
+  } catch (error) {
+    console.error("[auth] password reset email failed", error);
+  }
+  return { accepted: true };
+}
+
+export async function resetPasswordWithToken(tokenValue: string, password: string) {
+  await ensureDatabaseSchema();
+  const db = database();
+  const token = tokenValue.trim();
+  if (!token) throw new AuthError("This password reset link is invalid or expired.", 400);
+  if (password.length < 8 || password.length > 128) throw new AuthError("Use a password between 8 and 128 characters.");
+  const rows = await db.query(`
+    UPDATE rental_password_resets
+    SET used_at = NOW()
+    WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+    RETURNING user_id
+  `, [tokenHash(token)]);
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (!row) throw new AuthError("This password reset link is invalid or expired.", 400);
+  const userId = String(row.user_id);
+  await db.query("UPDATE rental_users SET password_hash = $1, updated_at = NOW() WHERE id = $2", [await hashPassword(password), userId]);
+  await db.query("DELETE FROM rental_sessions WHERE user_id = $1", [userId]);
 }
 
 export async function destroyCurrentSession() {

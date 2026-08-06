@@ -127,6 +127,19 @@ type DashboardApplication = {
   ownerEmail?: string;
 };
 
+type RenterProfile = {
+  preferredName: string;
+  phone: string;
+  currentCity: string;
+  employmentStatus: string;
+  incomeRange: string;
+  householdSize: string;
+  pets: string;
+  moveIn: string;
+  leaseLength: string;
+  note: string;
+};
+
 type AccountDrawerProps = {
   locale: Locale;
   user: AccountUser;
@@ -165,6 +178,21 @@ type AccountDrawerProps = {
 const AGENT_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024;
 const AGENT_PORTRAIT_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
+function defaultRenterProfile(user: Pick<AccountUser, "displayName" | "phone">): RenterProfile {
+  return {
+    preferredName: user.displayName,
+    phone: user.phone || "",
+    currentCity: "",
+    employmentStatus: "preferNotToSay",
+    incomeRange: "preferNotToSay",
+    householdSize: "1",
+    pets: "no",
+    moveIn: "immediate",
+    leaseLength: "12",
+    note: "",
+  };
+}
+
 function CloseIcon({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -193,6 +221,13 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   const [profilePhone, setProfilePhone] = useState(user.phone || "");
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [renterProfile, setRenterProfile] = useState<RenterProfile>(() => defaultRenterProfile(user));
+  const [renterProfileDraft, setRenterProfileDraft] = useState<RenterProfile>(() => defaultRenterProfile(user));
+  const [renterProfileEditing, setRenterProfileEditing] = useState(false);
+  const [renterProfileLoading, setRenterProfileLoading] = useState(() => user.emailVerified);
+  const [renterProfileSaving, setRenterProfileSaving] = useState(false);
+  const [renterProfileError, setRenterProfileError] = useState("");
+  const [renterProfileSaved, setRenterProfileSaved] = useState(false);
   const [verificationApplication, setVerificationApplication] = useState<AgentVerificationApplication | null>(null);
   const [verificationState, setVerificationState] = useState("");
   const [verificationNumber, setVerificationNumber] = useState("");
@@ -245,6 +280,35 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
       return value;
     }
   };
+  const updateRenterProfile = <K extends keyof RenterProfile>(key: K, value: RenterProfile[K]) => {
+    setRenterProfileDraft((current) => ({ ...current, [key]: value }));
+    setRenterProfileError("");
+    setRenterProfileSaved(false);
+  };
+  const handleRenterProfileSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setRenterProfileSaving(true);
+    setRenterProfileError("");
+    setRenterProfileSaved(false);
+    try {
+      const response = await fetch("/api/renter-profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(renterProfileDraft),
+      });
+      const result = await response.json().catch(() => ({})) as { profile?: Partial<RenterProfile>; error?: string };
+      if (!response.ok || !result.profile) throw new Error(result.error || (zh ? "租客申请资料暂时无法保存。" : "Renter application profile could not be saved."));
+      const nextProfile = { ...renterProfileDraft, ...result.profile };
+      setRenterProfile(nextProfile);
+      setRenterProfileDraft(nextProfile);
+      setRenterProfileEditing(false);
+      setRenterProfileSaved(true);
+    } catch (error) {
+      setRenterProfileError(error instanceof Error ? error.message : (zh ? "租客申请资料暂时无法保存。" : "Renter application profile could not be saved."));
+    } finally {
+      setRenterProfileSaving(false);
+    }
+  };
   const applicationStatusLabel = (status: string) => {
     if (status === "reviewing") return zh ? "审核中" : "Reviewing";
     if (status === "approved") return zh ? "已通过" : "Approved";
@@ -254,6 +318,11 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   };
   const applicationStatusClass = (status: string) => status === "approved" ? "published" : status === "declined" || status === "withdrawn" ? "closed" : status === "reviewing" ? "contacted" : "unpublished";
   const applicationDateLabel = (value: string) => value ? new Date(value).toLocaleDateString(zh ? "zh-CN" : "en-US") : "—";
+  const renterMoveInLabel = (value: string) => value === "immediate" ? (zh ? "立即入住" : "Move in immediately") : value === "august" ? (zh ? "2026年8月" : "Aug 2026") : value === "september" ? (zh ? "2026年9月" : "Sep 2026") : value === "october" ? (zh ? "2026年10月" : "Oct 2026") : value || (zh ? "未填写" : "Not set");
+  const renterLeaseLabel = (value: string) => value === "6" ? (zh ? "6个月" : "6 months") : value === "12" ? (zh ? "12个月" : "12 months") : value === "24" ? (zh ? "24个月以上" : "24+ months") : value === "undefined" ? (zh ? "未确定" : "Undefined") : value || (zh ? "未填写" : "Not set");
+  const renterPetsLabel = (value: string) => value === "yes" ? (zh ? "有宠物" : "Pets" ) : value === "no" ? (zh ? "没有" : "No pets") : value || (zh ? "未填写" : "Not set");
+  const renterEmploymentLabel = (value: string) => ({ employed: zh ? "受雇工作" : "Employed", selfEmployed: zh ? "自雇" : "Self-employed", student: zh ? "学生" : "Student", retired: zh ? "退休" : "Retired", betweenJobs: zh ? "正在寻找工作" : "Between jobs", preferNotToSay: zh ? "不便说明" : "Prefer not to say" }[value] || value || (zh ? "未填写" : "Not set"));
+  const renterIncomeLabel = (value: string) => ({ preferNotToSay: zh ? "不便说明" : "Prefer not to say", under2500: zh ? "$2,500 以下" : "Under $2,500", "2500-3999": "$2,500–$3,999", "4000-5999": "$4,000–$5,999", "6000plus": zh ? "$6,000 以上" : "$6,000+" }[value] || value || (zh ? "未填写" : "Not set"));
   const openSchedule = (inquiry: DashboardInquiry) => {
     const candidate = inquiry.tourScheduledAt ? new Date(inquiry.tourScheduledAt) : new Date(Date.now() + 24 * 60 * 60 * 1000);
     const date = Number.isNaN(candidate.getTime()) ? new Date(Date.now() + 24 * 60 * 60 * 1000) : candidate;
@@ -336,6 +405,27 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
       .finally(() => { if (!cancelled) setVerificationLoading(false); });
     return () => { cancelled = true; };
   }, [user.accountType]);
+  useEffect(() => {
+    let cancelled = false;
+    const fallback = defaultRenterProfile({ displayName: user.displayName, phone: user.phone });
+    if (!user.emailVerified) {
+      return () => { cancelled = true; };
+    }
+    fetch("/api/renter-profile", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(zh ? "租客申请资料暂时无法读取。" : "Renter application profile could not be loaded.");
+        const result = await response.json() as { profile?: Partial<RenterProfile> };
+        if (!cancelled) {
+          setRenterProfileError("");
+          const nextProfile = { ...fallback, ...(result.profile || {}) };
+          setRenterProfile(nextProfile);
+          setRenterProfileDraft(nextProfile);
+        }
+      })
+      .catch((error) => { if (!cancelled) setRenterProfileError(error instanceof Error ? error.message : (zh ? "租客申请资料暂时无法读取。" : "Renter application profile could not be loaded.")); })
+      .finally(() => { if (!cancelled) setRenterProfileLoading(false); });
+    return () => { cancelled = true; };
+  }, [user.displayName, user.emailVerified, user.phone, zh]);
   useEffect(() => {
     return () => {
       if (portraitPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(portraitPreviewUrl);
@@ -426,6 +516,10 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <span><strong>{zh ? "安全审核队列" : "Safety review queue"}</strong><small>{zh ? "查看举报，留下审核说明，并隐藏或恢复房源。" : "Review reports, add notes, and hide or restore listings."}</small></span>
             <b aria-hidden="true">→</b>
           </Link>}
+          {user.role === "admin" && <Link className="admin-access-panel" href="/admin/usage" onClick={onClose}>
+            <span><strong>{zh ? "API 使用与成本" : "API usage and cost"}</strong><small>{zh ? "查看 AI、地图调用、缓存命中和限流情况。" : "Monitor AI, map calls, cache hits, and persistent limits."}</small></span>
+            <b aria-hidden="true">→</b>
+          </Link>}
           <section className="account-profile-panel" aria-labelledby="private-profile-title">
             <div className="account-profile-heading">
               <div><span className="section-label">{zh ? "私密资料" : "PRIVATE PROFILE"}</span><h3 id="private-profile-title">{zh ? "我的资料" : "My profile"}</h3><p>{zh ? "仅你可见，不会出现在公开房源页。" : "Private to your account; it is not shown on public listings."}</p></div>
@@ -441,6 +535,32 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
               <label className="profile-field"><span className="profile-field-label" id="profile-phone-label">{zh ? "电话（可选）" : "Phone (optional)"}</span><input id="profile-phone" aria-labelledby="profile-phone-label" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} autoComplete="tel" maxLength={32} inputMode="tel" placeholder={zh ? "例如 516-555-0123" : "e.g. 516-555-0123"} /></label>
               <label className="profile-field"><span className="profile-field-label" id="profile-email-label">{zh ? "登录邮箱" : "Sign-in email"}</span><input id="profile-email" aria-labelledby="profile-email-label" value={user.email} readOnly disabled /><small>{zh ? "邮箱用于登录；如需更改，之后需要重新验证。" : "Used for sign-in; changing it will require a separate re-verification flow."}</small></label>
               <div className="profile-form-actions"><button className="outline-button" type="button" onClick={() => { setProfileName(user.displayName); setProfilePhone(user.phone || ""); setProfileError(""); setProfileEditing(false); }} disabled={profileSaving}>{zh ? "取消" : "Cancel"}</button><button className="primary-button" type="submit" disabled={profileSaving}>{profileSaving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存资料" : "Save profile")}</button></div>
+            </form>}
+          </section>
+          <section className="account-profile-panel renter-profile-panel" aria-labelledby="renter-profile-title">
+            <div className="account-profile-heading">
+              <div><span className="section-label">{zh ? "可复用申请" : "REUSABLE APPLICATION"}</span><h3 id="renter-profile-title">{zh ? "租客申请资料" : "Renter application profile"}</h3><p>{zh ? "保存一次，下次提交申请时自动带入。资料只在你提交申请时发送给对应房主或经纪。" : "Save once and reuse these details in future applications. They are shared only when you submit to a specific owner or agent."}</p></div>
+              {user.emailVerified && !renterProfileEditing && <button className="text-button" type="button" onClick={() => { setRenterProfileError(""); setRenterProfileSaved(false); setRenterProfileEditing(true); }}>{zh ? "编辑申请资料" : "Edit application profile"}</button>}
+            </div>
+            {renterProfileSaved && <p className="verification-success" role="status">{zh ? "租客申请资料已保存，下次申请可以直接复用。" : "Your renter application profile is saved and ready to reuse."}</p>}
+            {renterProfileError && <p className="form-error" role="alert">{renterProfileError}</p>}
+            {!user.emailVerified ? <div className="profile-privacy-note"><strong>{zh ? "验证邮箱后即可保存" : "Verify your email to save this profile"}</strong><p>{zh ? "验证邮箱后，你可以预先保存入住偏好，提交申请时不用重复填写。" : "After email verification, you can save your renter preferences before applying."}</p></div> : renterProfileLoading ? <p className="field-help">{zh ? "正在读取已保存的申请资料…" : "Loading your saved application profile…"}</p> : !renterProfileEditing ? <div className="profile-summary renter-profile-summary">
+              <div><span>{zh ? "称呼" : "Preferred name"}</span><strong>{renterProfile.preferredName || (zh ? "未填写" : "Not set")}</strong></div>
+              <div><span>{zh ? "联系电话" : "Phone"}</span><strong>{renterProfile.phone || (zh ? "未填写" : "Not set")}</strong></div>
+              <div><span>{zh ? "目前所在城市" : "Current city"}</span><strong>{renterProfile.currentCity || (zh ? "未填写" : "Not set")}</strong></div>
+              <div><span>{zh ? "预计入住" : "Move-in"}</span><strong>{renterMoveInLabel(renterProfile.moveIn)}</strong></div>
+              <div><span>{zh ? "预计租期" : "Lease length"}</span><strong>{renterLeaseLabel(renterProfile.leaseLength)}</strong></div>
+              <div><span>{zh ? "居住人数" : "Occupants"}</span><strong>{renterProfile.householdSize || (zh ? "未填写" : "Not set")}</strong></div>
+              <div><span>{zh ? "宠物" : "Pets"}</span><strong>{renterPetsLabel(renterProfile.pets)}</strong></div>
+              <div><span>{zh ? "工作情况 / 收入" : "Employment / income"}</span><strong>{renterEmploymentLabel(renterProfile.employmentStatus)} · {renterIncomeLabel(renterProfile.incomeRange)}</strong></div>
+            </div> : <form className="profile-form renter-profile-form" onSubmit={handleRenterProfileSubmit}>
+              <div className="form-row"><label className="profile-field"><span className="profile-field-label">{zh ? "称呼" : "Preferred name"}</span><input value={renterProfileDraft.preferredName} onChange={(event) => updateRenterProfile("preferredName", event.target.value)} autoComplete="name" maxLength={100} required /></label><label className="profile-field"><span className="profile-field-label">{zh ? "联系电话" : "Phone"}</span><input value={renterProfileDraft.phone} onChange={(event) => updateRenterProfile("phone", event.target.value)} autoComplete="tel" maxLength={40} inputMode="tel" required /></label></div>
+              <label className="profile-field"><span className="profile-field-label">{zh ? "目前所在城市（可选）" : "Current city (optional)"}</span><input value={renterProfileDraft.currentCity} onChange={(event) => updateRenterProfile("currentCity", event.target.value)} maxLength={100} placeholder={zh ? "例如：皇后区" : "Example: Queens"} /></label>
+              <div className="form-row"><label className="profile-field"><span className="profile-field-label">{zh ? "预计入住" : "Move-in"}</span><select value={renterProfileDraft.moveIn} onChange={(event) => updateRenterProfile("moveIn", event.target.value)}><option value="immediate">{zh ? "立即入住" : "Move in immediately"}</option><option value="august">{zh ? "2026年8月" : "Aug 2026"}</option><option value="september">{zh ? "2026年9月" : "Sep 2026"}</option><option value="october">{zh ? "2026年10月" : "Oct 2026"}</option></select></label><label className="profile-field"><span className="profile-field-label">{zh ? "预计租期" : "Lease length"}</span><select value={renterProfileDraft.leaseLength} onChange={(event) => updateRenterProfile("leaseLength", event.target.value)}><option value="6">{zh ? "6个月" : "6 months"}</option><option value="12">{zh ? "12个月" : "12 months"}</option><option value="24">{zh ? "24个月以上" : "24+ months"}</option><option value="undefined">{zh ? "未确定" : "Undefined"}</option></select></label></div>
+              <div className="form-row"><label className="profile-field"><span className="profile-field-label">{zh ? "居住人数" : "Occupants"}</span><select value={renterProfileDraft.householdSize} onChange={(event) => updateRenterProfile("householdSize", event.target.value)}><option value="1">1</option><option value="2">2</option><option value="3+">3+</option></select></label><label className="profile-field"><span className="profile-field-label">{zh ? "宠物" : "Pets"}</span><select value={renterProfileDraft.pets} onChange={(event) => updateRenterProfile("pets", event.target.value)}><option value="no">{zh ? "没有" : "No pets"}</option><option value="yes">{zh ? "有宠物" : "Pets"}</option></select></label></div>
+              <div className="form-row"><label className="profile-field"><span className="profile-field-label">{zh ? "工作情况" : "Employment"}</span><select value={renterProfileDraft.employmentStatus} onChange={(event) => updateRenterProfile("employmentStatus", event.target.value)}><option value="employed">{zh ? "受雇工作" : "Employed"}</option><option value="selfEmployed">{zh ? "自雇" : "Self-employed"}</option><option value="student">{zh ? "学生" : "Student"}</option><option value="retired">{zh ? "退休" : "Retired"}</option><option value="betweenJobs">{zh ? "正在寻找工作" : "Between jobs"}</option><option value="preferNotToSay">{zh ? "不便说明" : "Prefer not to say"}</option></select></label><label className="profile-field"><span className="profile-field-label">{zh ? "月收入范围" : "Monthly income range"}</span><select value={renterProfileDraft.incomeRange} onChange={(event) => updateRenterProfile("incomeRange", event.target.value)}><option value="preferNotToSay">{zh ? "不便说明" : "Prefer not to say"}</option><option value="under2500">{zh ? "$2,500 以下" : "Under $2,500"}</option><option value="2500-3999">$2,500–$3,999</option><option value="4000-5999">$4,000–$5,999</option><option value="6000plus">{zh ? "$6,000 以上" : "$6,000+"}</option></select></label></div>
+              <label className="profile-field"><span className="profile-field-label">{zh ? "给房主的通用备注（可选）" : "Reusable note (optional)"}</span><textarea value={renterProfileDraft.note} onChange={(event) => updateRenterProfile("note", event.target.value)} maxLength={1_000} rows={3} placeholder={zh ? "例如：希望安排周末看房。" : "Example: I prefer a weekend tour."} /></label>
+              <div className="profile-form-actions"><button className="outline-button" type="button" onClick={() => { setRenterProfileDraft(renterProfile); setRenterProfileError(""); setRenterProfileEditing(false); }} disabled={renterProfileSaving}>{zh ? "取消" : "Cancel"}</button><button className="primary-button" type="submit" disabled={renterProfileSaving}>{renterProfileSaving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存申请资料" : "Save application profile")}</button></div>
             </form>}
           </section>
           <section className="account-quota-panel" aria-label={zh ? "房源发布额度" : "Listing publishing capacity"}>

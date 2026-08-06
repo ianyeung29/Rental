@@ -52,6 +52,21 @@ export async function sendVerificationEmail(input: { email: string; displayName:
   if (error) throw resendFailure(error, "Resend could not send the verification email.");
 }
 
+export async function sendPasswordResetEmail(input: { email: string; displayName: string; token: string }) {
+  const { apiKey, from, appUrl } = config();
+  const resetUrl = `${appUrl}/reset-password?token=${encodeURIComponent(input.token)}`;
+  const name = escapeHtml(input.displayName || "there");
+  const resend = new Resend(apiKey);
+  const { error } = await resend.emails.send({
+    from,
+    to: [input.email],
+    subject: "Reset your Anjurentals password / 重置安居密码",
+    text: `Hello ${input.displayName || "there"},\n\nReset your Anjurentals password here:\n${resetUrl}\n\nThis link expires in one hour. If you did not request this, you can ignore this email.`,
+    html: `<!doctype html><html lang="en"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:30px;line-height:1.15;margin:24px 0 12px">Reset your password</h1><p style="font-size:15px;line-height:1.7">Hello ${name}, use the button below to choose a new Anjurentals password. 此链接将在一小时后失效。</p><p style="margin:28px 0"><a href="${resetUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">Reset password / 重置密码</a></p><p style="color:#637384;font-size:12px;line-height:1.6">If you did not request this, you can ignore this email. 如果不是你本人操作，请忽略此邮件。<br><br>${resetUrl}</p></main></body></html>`,
+  });
+  if (error) throw resendFailure(error, "Resend could not send the password reset email.");
+}
+
 type InquiryEmailInput = {
   recipientEmail: string;
   recipientName: string;

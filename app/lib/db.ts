@@ -322,6 +322,45 @@ export async function ensureDatabaseSchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_password_resets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES rental_users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        used_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_rate_limits (
+        scope_key TEXT PRIMARY KEY,
+        window_started_at TIMESTAMPTZ NOT NULL,
+        request_count INTEGER NOT NULL DEFAULT 0,
+        blocked_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_api_usage (
+        id TEXT PRIMARY KEY,
+        user_id TEXT REFERENCES rental_users(id) ON DELETE SET NULL,
+        provider TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        model TEXT NOT NULL DEFAULT '',
+        request_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'success',
+        input_tokens BIGINT NOT NULL DEFAULT 0,
+        output_tokens BIGINT NOT NULL DEFAULT 0,
+        total_tokens BIGINT NOT NULL DEFAULT 0,
+        places_calls INTEGER NOT NULL DEFAULT 0,
+        route_calls INTEGER NOT NULL DEFAULT 0,
+        cache_hit BOOLEAN NOT NULL DEFAULT FALSE,
+        estimated_cost_usd NUMERIC(12, 6) NOT NULL DEFAULT 0,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
     await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS owner_read_at TIMESTAMPTZ");
     await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS requester_read_at TIMESTAMPTZ");
     await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS tour_scheduled_at TIMESTAMPTZ");
@@ -399,6 +438,10 @@ export async function ensureDatabaseSchema() {
     await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS rental_users_google_subject_idx ON rental_users(google_subject) WHERE google_subject IS NOT NULL");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_users_account_type_idx ON rental_users(account_type, agent_verification_status)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_email_verifications_user_idx ON rental_email_verifications(user_id, expires_at)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_password_resets_user_idx ON rental_password_resets(user_id, expires_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_rate_limits_updated_idx ON rental_rate_limits(updated_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_api_usage_created_idx ON rental_api_usage(created_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_api_usage_provider_idx ON rental_api_usage(provider, endpoint, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_listings_user_idx ON rental_saved_listings(user_id, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_listings_listing_idx ON rental_saved_listings(listing_id, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_searches_alert_idx ON rental_saved_searches(alert_frequency, last_alert_at)");

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { AccountType } from "../lib/account-types";
 
@@ -58,6 +59,7 @@ export default function AuthDrawer({ locale, mode, loading, error, onGoogleLogin
             {error && <p className="form-error" role="alert">{error}</p>}
             <button className="primary-button full-button" type="submit" disabled={loading}>{loading ? (zh ? "处理中…" : "Working…") : (isRegister ? (zh ? "创建账户" : "Create account") : (zh ? "登录" : "Sign in"))}</button>
           </form>
+          {!isRegister && <p className="auth-forgot-password"><Link className="text-button" href="/reset-password" onClick={onClose}>{zh ? "忘记密码？" : "Forgot password?"}</Link></p>}
           <div className="auth-divider" aria-hidden="true"><span>{zh ? "或" : "OR"}</span></div>
           <button className="google-button" type="button" onClick={() => onGoogleLogin(isRegister ? accountType : "user")} disabled={loading}><GoogleIcon />{isRegister ? (accountType === "agent" ? (zh ? "使用 Google 注册经纪账户" : "Register agent account with Google") : (zh ? "使用 Google 注册普通账户" : "Register regular account with Google")) : (zh ? "使用 Google 登录" : "Continue with Google")}</button>
           <div className="auth-switch">
