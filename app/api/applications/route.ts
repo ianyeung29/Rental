@@ -4,6 +4,8 @@ import { getCurrentUser } from "../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { emailIsConfigured, sendApplicationNotification, sendApplicationStatusUpdate } from "../../lib/email";
 import { emailAlertsAllowed } from "../../lib/notification-preferences";
+import { sendPushToUser } from "../../lib/push";
+import { isExactOccupantCount } from "../../lib/renter-options";
 
 const MAX_BODY_LENGTH = 8_000;
 
@@ -109,6 +111,7 @@ export async function POST(request: Request) {
     const message = text(body.message, 1_000);
     const currentCity = text(body.currentCity, 100);
     if (!listingId || !preferredName || !phone || !moveIn || !leaseLength || !occupants || !pets) return NextResponse.json({ error: "Complete the required application details first." }, { status: 400 });
+    if (!isExactOccupantCount(occupants)) return NextResponse.json({ error: "Choose the exact number of occupants." }, { status: 400 });
     await ensureDatabaseSchema();
     const listingRows = await context.db.query(`
       SELECT l.id, l.owner_id, l.title_zh, l.title_en, l.area_zh, l.area_en,
@@ -176,7 +179,13 @@ export async function POST(request: Request) {
       await context.db.query(`
         INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
         VALUES ($1, $2, 'application', '收到新的租赁申请', 'New rental application', $3, $4, '/#messages')
-      `, [`notification-${randomUUID()}`, String(listing.owner_id), `有人申请了「${String(listing.title_zh || listing.title_en || "你的房源")}」。`, `Someone applied to “${String(listing.title_en || listing.title_zh || "your listing")}”.`]);
+      `, [`notification-${randomUUID()}`, String(listing.owner_id), `有人申请了「${String(listing.title_zh || listing.title_en || "你的房源")}」。`, `Someone applied to “${String(listing.title_en || listing.title_zh || "your listing")}".`]);
+      await sendPushToUser(String(listing.owner_id), {
+        title: "安居 / Anjurentals",
+        body: `有人申请了「${String(listing.title_zh || listing.title_en || "你的房源")}」。 / New rental application received.`,
+        url: "/#messages",
+        tag: `application-${savedId}`,
+      }).catch(() => undefined);
     }
     const savedRows = await context.db.query(`${APPLICATION_SELECT} WHERE a.id = $1 LIMIT 1`, [savedId]);
     const application = savedRows[0] ? applicationFromRow(savedRows[0] as Record<string, unknown>, false) : { id: savedId, listingId, listingTitle: String(listing.title_zh || listing.title_en || "Rental listing"), status: "submitted" };

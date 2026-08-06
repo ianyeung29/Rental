@@ -22,6 +22,7 @@ import { configureWeChatShare, isWeChatBrowser, toAbsoluteUrl } from "./lib/wech
 import { buildLocalCompareSummary, CompareListingFacts, CompareSummaryContent } from "./lib/compare-summary";
 import { DEFAULT_LOCATION_LOOKUP_OPTIONS, LOCATION_LOOKUP_OPTIONS, MAX_LOCATION_LOOKUP_OPTIONS } from "./lib/location-context";
 import type { LocationContext, LocationLookupOption } from "./lib/location-context";
+import { OCCUPANT_OPTIONS } from "./lib/renter-options";
 import portraitStyles from "./components/AgentPortrait.module.css";
 
 type Locale = "zh" | "en";
@@ -291,11 +292,14 @@ const EMPTY_DRAFT: ListingDraft = {
 };
 
 function draftHasContent(value: ListingDraft) {
+  const photos = Array.isArray(value?.photos) ? value.photos : [];
+  const photoKeys = Array.isArray(value?.photoKeys) ? value.photoKeys : [];
+  const features = Array.isArray(value?.features) ? value.features : [];
   return Boolean(
     value.titleEn || value.titleZh || value.areaEn || value.areaZh || value.privateAddress || value.price ||
       value.moveInDate || value.lease !== EMPTY_DRAFT.lease || value.squareFeet || value.descriptionEn || value.descriptionZh ||
-      value.photos.length || value.photoKeys.length || value.contactName || value.contactEmail || value.agentProfileId || value.expiresOn ||
-      value.features.length || value.agentService !== EMPTY_DRAFT.agentService || value.agentFeePlan !== EMPTY_DRAFT.agentFeePlan || value.agentFeeAmount,
+      photos.length || photoKeys.length || value.contactName || value.contactEmail || value.agentProfileId || value.expiresOn ||
+      features.length || value.agentService !== EMPTY_DRAFT.agentService || value.agentFeePlan !== EMPTY_DRAFT.agentFeePlan || value.agentFeeAmount,
   );
 }
 
@@ -307,6 +311,7 @@ const STORAGE_KEYS = {
   customListings: "rental-marketplace.custom-listings",
   inquiries: "rental-marketplace.inquiries",
   draft: "rental-marketplace.listing-draft",
+  draftMeta: "rental-marketplace.listing-draft-meta",
   editingListingId: "rental-marketplace.editing-listing-id",
 };
 
@@ -1687,6 +1692,10 @@ function todayDateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function draftTimestamp() {
+  return Date.now();
+}
+
 function addDaysToDateOnly(value: string, days: number) {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() + days);
@@ -1760,6 +1769,7 @@ export default function HomePage() {
   const [reportError, setReportError] = useState("");
   const [draft, setDraft] = useState<ListingDraft>(EMPTY_DRAFT);
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [draftRecoveryNotice, setDraftRecoveryNotice] = useState<"local" | "account" | "offline" | null>(null);
   const [editingListingId, setEditingListingId] = useState<string | null>(null);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
@@ -1882,6 +1892,7 @@ export default function HomePage() {
         const storedSavedIds = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.savedIds) || "[]");
         const storedInquiries = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.inquiries) || "[]");
         const storedDraft = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.draft) || "null");
+        const storedDraftMeta = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.draftMeta) || "null");
         const storedSearchSnapshot = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.savedSearchSnapshot) || "null");
         const storedEditingListingId = window.localStorage.getItem(STORAGE_KEYS.editingListingId);
         const params = new URLSearchParams(window.location.search);
@@ -1945,6 +1956,8 @@ export default function HomePage() {
             photos: Array.isArray(storedDraftRecord.photos) ? storedDraftRecord.photos : [],
             photoKeys: Array.isArray(storedDraftRecord.photoKeys) ? storedDraftRecord.photoKeys.filter((key): key is string => typeof key === "string") : [],
           });
+          setDraftSavedAt(storedDraftMeta && typeof storedDraftMeta.updatedAt === "number" ? storedDraftMeta.updatedAt : Date.now());
+          setDraftRecoveryNotice("local");
         }
         if (initialSearch) {
           setLocationInput(initialSearch.location);
@@ -2022,9 +2035,13 @@ export default function HomePage() {
       let syncComplete = true;
       let localDraft: ListingDraft | null = null;
       let localEditingListingId: string | null = null;
+      let localDraftUpdatedAt = Number.NaN;
       try {
         const storedDraft = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.draft) || "null");
         if (storedDraft && typeof storedDraft === "object") localDraft = storedDraft as ListingDraft;
+        const storedDraftMeta = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.draftMeta) || "null") as { updatedAt?: unknown } | null;
+        if (typeof storedDraftMeta?.updatedAt === "number") localDraftUpdatedAt = storedDraftMeta.updatedAt;
+        if (!Number.isFinite(localDraftUpdatedAt) && localDraft && draftHasContent(localDraft) && draftSavedAt) localDraftUpdatedAt = draftSavedAt;
         localEditingListingId = window.localStorage.getItem(STORAGE_KEYS.editingListingId);
       } catch {
         // Local state is optional; the account state remains authoritative.
@@ -2062,10 +2079,16 @@ export default function HomePage() {
         }
 
         if (draftResponse.ok) {
-          const draftResult = await draftResponse.json() as { draft?: unknown; editingListingId?: unknown } | null;
-          if (draftResult?.draft && typeof draftResult.draft === "object") {
-            setDraft({ ...EMPTY_DRAFT, ...(draftResult.draft as Partial<ListingDraft>), currency: "USD" });
-            setEditingListingId(typeof draftResult.editingListingId === "string" ? draftResult.editingListingId : null);
+          const draftResult = await draftResponse.json() as { draft?: unknown; editingListingId?: unknown; updatedAt?: unknown } | null;
+          const draftPayload = draftResult?.draft && typeof draftResult.draft === "object" ? draftResult.draft : null;
+          const serverDraftHasContent = Boolean(draftPayload && draftHasContent(draftPayload as ListingDraft));
+          const serverDraftUpdatedAt = draftResult?.updatedAt ? Date.parse(String(draftResult.updatedAt)) : Number.NaN;
+          const localDraftIsNewer = Boolean(localDraft && draftHasContent(localDraft) && Number.isFinite(localDraftUpdatedAt) && Number.isFinite(serverDraftUpdatedAt) && localDraftUpdatedAt > serverDraftUpdatedAt);
+          if (serverDraftHasContent && !localDraftIsNewer && draftPayload) {
+            setDraft({ ...EMPTY_DRAFT, ...(draftPayload as Partial<ListingDraft>), currency: "USD" });
+            setEditingListingId(typeof draftResult?.editingListingId === "string" ? draftResult.editingListingId : null);
+            setDraftSavedAt(Number.isFinite(serverDraftUpdatedAt) ? serverDraftUpdatedAt : Date.now());
+            setDraftRecoveryNotice("account");
           } else if (localDraft && draftHasContent(localDraft)) {
             const migrationResponse = await fetch("/api/my/draft", {
               method: "PUT",
@@ -2073,11 +2096,19 @@ export default function HomePage() {
               body: JSON.stringify({ draft: localDraft, editingListingId: localEditingListingId }),
             });
             if (migrationResponse.ok) {
-              const migrated = await migrationResponse.json() as { draft?: unknown; editingListingId?: unknown };
+              const migrated = await migrationResponse.json() as { draft?: unknown; editingListingId?: unknown; updatedAt?: unknown };
               if (migrated.draft && typeof migrated.draft === "object") setDraft({ ...EMPTY_DRAFT, ...(migrated.draft as Partial<ListingDraft>), currency: "USD" });
               setEditingListingId(typeof migrated.editingListingId === "string" ? migrated.editingListingId : localEditingListingId);
+              setDraftSavedAt(migrated.updatedAt ? Date.parse(String(migrated.updatedAt)) : Date.now());
+              setDraftRecoveryNotice("account");
+            } else {
+              syncComplete = false;
+              setDraftRecoveryNotice("offline");
             }
           }
+        } else if (localDraft && draftHasContent(localDraft)) {
+          syncComplete = false;
+          setDraftRecoveryNotice("offline");
         }
 
         if (inquiryResponse.ok) {
@@ -2128,6 +2159,7 @@ export default function HomePage() {
         }
       } catch {
         // The browser remains usable if an account sync is temporarily unavailable.
+        if (!cancelled && localDraft && draftHasContent(localDraft)) setDraftRecoveryNotice("offline");
       } finally {
         if (!cancelled) setAccountSyncReady(syncComplete);
       }
@@ -2136,7 +2168,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, hydrated, savedIds, savedSearch, savedSearchSnapshot]);
+  }, [currentUser, draftSavedAt, hydrated, savedIds, savedSearch, savedSearchSnapshot]);
 
   useEffect(() => {
     if (!postOpen || draft.agentService !== "agentMatch" || (!demoMode && !currentUser?.emailVerified)) {
@@ -2176,6 +2208,8 @@ export default function HomePage() {
         window.localStorage.setItem(STORAGE_KEYS.inquiries, JSON.stringify(inquiries));
         if (draftHasContent(draft) || editingListingId) window.localStorage.setItem(STORAGE_KEYS.draft, JSON.stringify(draft));
         else window.localStorage.removeItem(STORAGE_KEYS.draft);
+        if (draftHasContent(draft) || editingListingId) window.localStorage.setItem(STORAGE_KEYS.draftMeta, JSON.stringify({ updatedAt: draftSavedAt || Date.now(), editingListingId }));
+        else window.localStorage.removeItem(STORAGE_KEYS.draftMeta);
         if (editingListingId) window.localStorage.setItem(STORAGE_KEYS.editingListingId, editingListingId);
         else window.localStorage.removeItem(STORAGE_KEYS.editingListingId);
       } else {
@@ -2184,12 +2218,13 @@ export default function HomePage() {
         window.localStorage.removeItem(STORAGE_KEYS.savedSearchSnapshot);
         window.localStorage.removeItem(STORAGE_KEYS.inquiries);
         window.localStorage.removeItem(STORAGE_KEYS.draft);
+        window.localStorage.removeItem(STORAGE_KEYS.draftMeta);
         window.localStorage.removeItem(STORAGE_KEYS.editingListingId);
       }
     } catch {
       // A full local storage quota should not block browsing or searching.
     }
-  }, [accountSyncReady, currentUser, draft, editingListingId, hydrated, inquiries, locale, savedIds, savedSearch, savedSearchSnapshot]);
+  }, [accountSyncReady, currentUser, draft, draftSavedAt, editingListingId, hydrated, inquiries, locale, savedIds, savedSearch, savedSearchSnapshot]);
 
   useEffect(() => {
     if (!accountSyncReady || !currentUser?.emailVerified || (!draftHasContent(draft) && !editingListingId)) return;
@@ -2465,7 +2500,7 @@ export default function HomePage() {
 
   const updateDraft = (updates: Partial<ListingDraft>) => {
     setDraft((current) => ({ ...current, ...updates }));
-    setDraftSavedAt(1);
+    setDraftSavedAt(draftTimestamp());
     setPostError("");
     setAiPolishError("");
     if (Object.prototype.hasOwnProperty.call(updates, "areaEn") || Object.prototype.hasOwnProperty.call(updates, "areaZh") || Object.prototype.hasOwnProperty.call(updates, "areaGroupId") || Object.prototype.hasOwnProperty.call(updates, "areaLocationId") || Object.prototype.hasOwnProperty.call(updates, "locationLookupOptions")) {
@@ -3524,12 +3559,20 @@ export default function HomePage() {
     setAiPolishNotes([]);
     setLocationContext(null);
     setDraftSavedAt(null);
+    setDraftRecoveryNotice(null);
+    try {
+      window.localStorage.removeItem(STORAGE_KEYS.draft);
+      window.localStorage.removeItem(STORAGE_KEYS.draftMeta);
+      window.localStorage.removeItem(STORAGE_KEYS.editingListingId);
+    } catch {
+      // Local storage is optional.
+    }
     if (currentUser?.emailVerified) await fetch("/api/my/draft", { method: "DELETE" }).catch(() => undefined);
     showToast(locale === "zh" ? "草稿已清除" : "Draft cleared");
   };
 
   const saveDraftAndClose = async () => {
-    setDraftSavedAt(1);
+    setDraftSavedAt(draftTimestamp());
     const synced = await persistDraftNow();
     setPostOpen(false);
     showToast(!currentUser?.emailVerified
@@ -3917,7 +3960,7 @@ export default function HomePage() {
             <a href="#messages" onClick={(event) => { event.preventDefault(); setMessagesOpen(true); }}>{t.messages}{messageInquiries.length > 0 ? ` ${messageInquiries.length}` : ""}</a>
           </nav>
           <div className="topbar-actions">
-            <button className="language-switch" type="button" onClick={() => { setCompareSummary(null); setCompareSummaryError(""); setLocale((current) => current === "zh" ? "en" : "zh"); }} aria-label={locale === "zh" ? "Switch to English" : "切换到中文"}>
+            <button className="language-switch" type="button" onClick={() => { setCompareSummary(null); setCompareSummaryError(""); setLocale((current) => { const next = current === "zh" ? "en" : "zh"; window.dispatchEvent(new CustomEvent("rental-locale-change", { detail: next })); return next; }); }} aria-label={locale === "zh" ? "Switch to English" : "切换到中文"}>
               <span className="language-dot" aria-hidden="true" />
               {locale === "zh" ? "English" : "中文"}
             </button>
@@ -4259,6 +4302,7 @@ export default function HomePage() {
               {currentUser?.emailVerified && savedSearch && savedSearchSnapshot && <section className="saved-search-manager" aria-labelledby="saved-search-manager-title">
                 <div className="saved-search-manager-heading"><div><span className="section-label">SEARCH ALERT</span><h3 id="saved-search-manager-title">{locale === "zh" ? "搜索提醒" : "Search alert"}</h3><p>{savedSearchDescription(savedSearchSnapshot)}</p></div><span className={`status-chip ${savedAlertFrequency === "daily" ? "published" : "unpublished"}`}>{savedAlertFrequency === "daily" ? (locale === "zh" ? "每日" : "Daily") : (locale === "zh" ? "已暂停" : "Paused")}</span></div>
                 <div className="saved-search-manager-controls"><label className="field-label" htmlFor="saved-alert-frequency">{locale === "zh" ? "提醒频率" : "Alert frequency"}<select id="saved-alert-frequency" value={savedAlertFrequency} onChange={(event) => { void updateSavedSearchAlert(event.target.value === "daily" ? "daily" : "off"); }}><option value="off">{locale === "zh" ? "暂停提醒" : "Paused"}</option><option value="daily">{locale === "zh" ? "每日提醒" : "Every day"}</option></select></label><small>{locale === "zh" ? `上次处理：${savedSearchLastAlertLabel}` : `Last processed: ${savedSearchLastAlertLabel}`}</small></div>
+                <small className="saved-search-manager-note">{locale === "zh" ? "每日匹配会出现在站内通知；Resend 配置完成且邮件提醒开启后，也会发送到邮箱。" : "Daily matches appear in your in-app inbox; with Resend configured and email alerts enabled, they are also sent by email."}</small>
                 <div className="saved-search-manager-actions"><button className="outline-button" type="button" onClick={editSavedSearch}>{locale === "zh" ? "编辑条件" : "Edit criteria"}</button><button className="text-button" type="button" onClick={() => { void removeSavedSearch(); }}>{locale === "zh" ? "删除保存的搜索" : "Remove saved search"}</button></div>
               </section>}
               {savedListings.length === 0 ? (
@@ -4361,6 +4405,7 @@ export default function HomePage() {
               <div className="drawer-heading"><span className="section-label">POSTER WORKFLOW</span><button className="drawer-close" type="button" onClick={() => setPostOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="post-title">{editingListingId ? (locale === "zh" ? "编辑房源" : "Edit listing") : t.postTitle}</h2>
               <p className="drawer-intro">{t.postIntro}</p>
+              {draftRecoveryNotice && <div className="draft-recovery-notice" role="status"><div><strong>{draftRecoveryNotice === "local" ? (locale === "zh" ? "已恢复本机草稿" : "Draft restored from this device") : draftRecoveryNotice === "account" ? (locale === "zh" ? "已恢复账号草稿" : "Draft restored from your account") : (locale === "zh" ? "网络暂时不可用，草稿已保留" : "You’re offline; your draft is safe")}</strong><span>{draftRecoveryNotice === "local" ? (locale === "zh" ? "你可以继续编辑，网络恢复后会自动尝试同步。" : "Continue editing; we’ll retry account sync when the connection returns.") : draftRecoveryNotice === "account" ? (locale === "zh" ? "上次保存的内容已加载，可以继续发布。" : "Your last saved version is loaded and ready to continue.") : (locale === "zh" ? "草稿保存在此设备上，不会因为离线而丢失。" : "This draft is stored on this device and won’t be lost while offline.")}</span></div><button className="text-button" type="button" onClick={() => setDraftRecoveryNotice(null)}>{locale === "zh" ? "知道了" : "Got it"}</button></div>}
                 {demoMode && !currentUser && <div className="demo-mode-notice" role="note"><strong>{locale === "zh" ? "演示模式" : "Demo mode"}</strong><span>{locale === "zh" ? "无需登录即可发布；请填写联系人信息。" : "No sign-in is needed for this demonstration; enter contact details below."}</span></div>}
                 <div className="post-progress"><span>{locale === "zh" ? `第 ${postStep} 步，共 5 步` : `Step ${postStep} of 5`}</span><span>{editingListingId ? (locale === "zh" ? "编辑模式" : "Editing") : draftSavedAt ? (locale === "zh" ? (currentUser?.emailVerified ? "草稿已同步" : "草稿已自动保存") : (currentUser?.emailVerified ? "Draft synced" : "Draft autosaved")) : (currentUser?.emailVerified ? (locale === "zh" ? "账号草稿" : "Account draft") : (locale === "zh" ? "本地草稿" : "Local draft"))}</span></div>
               <div className="stage-list">
@@ -4671,7 +4716,7 @@ export default function HomePage() {
                 <select id="contact-move" name="moveIn" defaultValue={contactListing.moveIn === "immediate" ? "immediate" : moveInMonth(contactListing.moveIn) || "september"}><option value="immediate">{locale === "zh" ? "立即入住" : "Move in immediately"}</option><option value="august">{locale === "zh" ? "2026年8月" : "Aug 2026"}</option><option value="september">{locale === "zh" ? "2026年9月" : "Sep 2026"}</option><option value="october">{locale === "zh" ? "2026年10月" : "Oct 2026"}</option></select>
                 <label className="field-label" htmlFor="contact-lease">{t.leaseLength}</label>
                 <select id="contact-lease" name="leaseLength" defaultValue="12"><option value="6">{locale === "zh" ? "6个月" : "6 months"}</option><option value="12">{locale === "zh" ? "12个月" : "12 months"}</option><option value="24">{locale === "zh" ? "24个月以上" : "24+ months"}</option><option value="undefined">{locale === "zh" ? "未确定" : "Undefined"}</option></select>
-                <div className="form-row"><div><label className="field-label" htmlFor="contact-occupants">{t.occupants}</label><select id="contact-occupants" name="occupants" defaultValue="1"><option value="1">1</option><option value="2">2</option><option value="3+">3+</option></select></div><div><label className="field-label" htmlFor="contact-pets">{t.petsQuestion}</label><select id="contact-pets" name="pets" defaultValue="no"><option value="no">{t.noPets}</option><option value="yes">{t.yesPets}</option></select></div></div>
+                <div className="form-row"><div><label className="field-label" htmlFor="contact-occupants">{t.occupants}</label><select id="contact-occupants" name="occupants" defaultValue="1">{OCCUPANT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select></div><div><label className="field-label" htmlFor="contact-pets">{t.petsQuestion}</label><select id="contact-pets" name="pets" defaultValue="no"><option value="no">{t.noPets}</option><option value="yes">{t.yesPets}</option></select></div></div>
                 <label className="field-label" htmlFor="contact-tour">{locale === "zh" ? "看房偏好" : "Tour preference"}</label>
                 <select id="contact-tour" name="tourPreference" defaultValue="flexible"><option value="flexible">{locale === "zh" ? "时间灵活" : "Flexible"}</option><option value="weekday">{locale === "zh" ? "工作日" : "Weekdays"}</option><option value="weekend">{locale === "zh" ? "周末" : "Weekends"}</option></select>
                 <fieldset className="inquiry-comment-options">

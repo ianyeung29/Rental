@@ -8,6 +8,7 @@ export type NotificationPreferences = {
   inquiryAlerts: boolean;
   listingExpirationAlerts: boolean;
   agentResponseAlerts: boolean;
+  pushEnabled: boolean;
   updatedAt: string | null;
 };
 
@@ -17,6 +18,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   inquiryAlerts: true,
   listingExpirationAlerts: true,
   agentResponseAlerts: true,
+  pushEnabled: false,
   updatedAt: null,
 };
 
@@ -33,6 +35,7 @@ export function preferencesFromRow(row?: Record<string, unknown>): NotificationP
     inquiryAlerts: row.inquiry_alerts !== false,
     listingExpirationAlerts: row.listing_expiration_alerts !== false,
     agentResponseAlerts: row.agent_response_alerts !== false,
+    pushEnabled: row.push_enabled === true,
     updatedAt: iso(row.updated_at),
   };
 }
@@ -48,4 +51,3 @@ export async function emailAlertsAllowed(userId: string, category: NotificationP
   const row = rows[0] as Record<string, unknown> | undefined;
   return row ? row.email_enabled !== false && row[category] !== false : true;
 }
-

@@ -3,13 +3,14 @@ import { getCurrentUser } from "../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { preferencesFromRow } from "../../lib/notification-preferences";
 
-const BOOLEAN_KEYS = new Set(["emailEnabled", "savedSearchAlerts", "inquiryAlerts", "listingExpirationAlerts", "agentResponseAlerts"]);
+const BOOLEAN_KEYS = new Set(["emailEnabled", "savedSearchAlerts", "inquiryAlerts", "listingExpirationAlerts", "agentResponseAlerts", "pushEnabled"]);
 const COLUMN_BY_KEY = {
   emailEnabled: "email_enabled",
   savedSearchAlerts: "saved_search_alerts",
   inquiryAlerts: "inquiry_alerts",
   listingExpirationAlerts: "listing_expiration_alerts",
   agentResponseAlerts: "agent_response_alerts",
+  pushEnabled: "push_enabled",
 } as const;
 
 async function verifiedUser() {
@@ -30,12 +31,12 @@ export async function GET() {
   if (result.error) return result.error;
   try {
     await ensureDatabaseSchema();
-    const rows = await sql!.query("SELECT email_enabled, saved_search_alerts, inquiry_alerts, listing_expiration_alerts, agent_response_alerts, updated_at FROM rental_notification_preferences WHERE user_id = $1 LIMIT 1", [result.user.id]);
+    const rows = await sql!.query("SELECT email_enabled, saved_search_alerts, inquiry_alerts, listing_expiration_alerts, agent_response_alerts, push_enabled, updated_at FROM rental_notification_preferences WHERE user_id = $1 LIMIT 1", [result.user.id]);
     if (rows.length === 0) {
       const inserted = await sql!.query(`
         INSERT INTO rental_notification_preferences (user_id)
         VALUES ($1)
-        RETURNING email_enabled, saved_search_alerts, inquiry_alerts, listing_expiration_alerts, agent_response_alerts, updated_at
+        RETURNING email_enabled, saved_search_alerts, inquiry_alerts, listing_expiration_alerts, agent_response_alerts, push_enabled, updated_at
       `, [result.user.id]);
       return NextResponse.json(preferencesFromRow(inserted[0] as Record<string, unknown>));
     }
@@ -59,7 +60,7 @@ export async function PATCH(request: Request) {
       INSERT INTO rental_notification_preferences (user_id)
       VALUES ($1)
       ON CONFLICT (user_id) DO UPDATE SET ${columns}, updated_at = NOW()
-      RETURNING email_enabled, saved_search_alerts, inquiry_alerts, listing_expiration_alerts, agent_response_alerts, updated_at
+      RETURNING email_enabled, saved_search_alerts, inquiry_alerts, listing_expiration_alerts, agent_response_alerts, push_enabled, updated_at
     `, [result.user.id, ...values]);
     return NextResponse.json(preferencesFromRow(rows[0] as Record<string, unknown>));
   } catch {

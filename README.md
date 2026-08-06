@@ -25,6 +25,8 @@ This is a browser-first MVP slice of the Chinese-first North American rental mar
 - Signed-in renters can report remote listings; admin-role API routes expose a small moderation queue with report status updates.
 - Listing inquiries remain in the renter and owner dashboards and can send Resend notifications and confirmation emails when email delivery is configured.
 - Responsive desktop/mobile composition with reduced-motion and keyboard-focus handling.
+- Installable PWA shell with an offline fallback, an explicit update prompt, local draft recovery, and an iPhone Safari install guide.
+- Verified users can opt into browser push notifications for new inquiries, saved-search matches, listing expiry reminders, applications, and tour reminders.
 
 ## Current pilot boundary
 
@@ -49,7 +51,7 @@ npm run db:seed
 
 The seed creates four clearly labeled sample listings, their private demo details, and local demo-image metadata. It is safe to run again; it does not create user accounts or real rental inventory.
 
-The database bootstrap applies the listing lifecycle and Phase 1 security/usage tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql` and then `db/migrations/017_phase_one_security_usage.sql` after the earlier migration files.
+The database bootstrap applies the listing lifecycle, Phase 1 security/usage tables, and PWA notification tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql`, `db/migrations/017_phase_one_security_usage.sql`, and `db/migrations/018_pwa_retention.sql` after the earlier migration files.
 
 To load synthetic agent profiles for testing the owner’s agent-selection flow:
 
@@ -82,6 +84,21 @@ GOOGLE_MAPS_SERVER_API_KEY=your_restricted_server_key
 Enable Places API (New) and Routes API for that key, restrict it to those APIs, and keep it out of `NEXT_PUBLIC_*` variables. The site sends only the selected borough/area to Google; it never sends the private street address. The generated copy describes nearby places as area references and station times as approximate walks, so the poster should review them before publishing. Without this key, AI polish continues without unverified nearby or transit claims. See Google’s [Places Text Search (New)](https://developers.google.com/maps/documentation/places/web-service/text-search) and [Routes API](https://developers.google.com/maps/documentation/routes) documentation.
 
 The posting wizard lets the poster choose up to three nearby lookup categories. Clearing all categories skips Google Maps for that polish. Successful area/category results are stored in the Neon `rental_location_context_cache` table for seven days, so later posters using the same approximate area and categories do not repeat the lookup.
+
+## Saved-search email alerts and browser push
+
+Saved searches can be switched to `Every day` from the saved desk. Vercel calls `/api/alerts/digest` once per day using the `CRON_SECRET`; the job matches newly published listings against the saved location, rent, bedroom, bathroom, square-footage, rental-type, move-in, and feature filters. It sends through Resend only when the account and category email preferences allow it, and also creates an in-app notification.
+
+Browser push is optional. Generate one VAPID key pair and add the public key and private key to the local `.env.local` and the Vercel project environment:
+
+```bash
+npx web-push generate-vapid-keys
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=your_public_key
+VAPID_PRIVATE_KEY=your_private_key
+VAPID_SUBJECT=mailto:hello@anjurentals.com
+```
+
+The public key may be exposed to the browser; the private key must remain server-only. A verified user can enable the device from the notification drawer. Each browser device gets its own subscription, expired subscriptions are cleaned up automatically, and no push message is sent until the user grants permission.
 
 ## Enable Resend email verification
 

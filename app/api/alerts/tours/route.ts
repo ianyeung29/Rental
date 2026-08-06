@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { emailIsConfigured, sendTourReminder } from "../../../lib/email";
+import { sendPushToUser } from "../../../lib/push";
 
 export async function GET(request: Request) {
   const configuredSecret = process.env.CRON_SECRET?.trim();
@@ -45,6 +46,12 @@ export async function GET(request: Request) {
           INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
           VALUES ($1, $2, 'tourReminder', '看房提醒', 'Tour reminder', $3, $4, '/#messages')
         `, [`notification-${randomUUID()}`, recipient.id, `明天将查看「${listingTitleZh}」，请确认时间安排。`, `Your tour for “${listingTitleEn}” is scheduled for tomorrow. Please confirm the time.`]);
+        await sendPushToUser(recipient.id, {
+          title: "安居 / Anjurentals",
+          body: `明天看房：${listingTitleZh}。 / Tour tomorrow: ${listingTitleEn}.`,
+          url: "/#messages",
+          tag: `tour-${String(row.id)}`,
+        }).catch(() => undefined);
         if (emailIsConfigured() && recipient.email && !recipient.email.endsWith(".invalid")) {
           try {
             await sendTourReminder({ recipientEmail: recipient.email, recipientName: recipient.name, listingTitle: recipient.title, scheduledAt, timeZone, note });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
+import { isExactOccupantCount } from "../../lib/renter-options";
 
 function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -63,13 +64,15 @@ export async function PATCH(request: Request) {
     currentCity: text(body.currentCity, 100),
     employmentStatus: text(body.employmentStatus, 40),
     incomeRange: text(body.incomeRange, 40),
-    householdSize: text(body.householdSize, 20) || "1",
+    householdSize: text(body.householdSize, 20),
     pets: text(body.pets, 40) || "no",
     moveIn: text(body.moveIn, 80),
     leaseLength: text(body.leaseLength, 40),
     note: text(body.note, 1_000),
   };
   if (profile.preferredName.length < 1 || profile.phone.length < 3) return NextResponse.json({ error: "Add a name and phone number before saving your renter profile." }, { status: 400 });
+  if (!profile.householdSize) profile.householdSize = "1";
+  if (!isExactOccupantCount(profile.householdSize)) return NextResponse.json({ error: "Choose the exact number of occupants." }, { status: 400 });
   try {
     await ensureDatabaseSchema();
     const rows = await context.db.query(`

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { exactOccupantOrDefault, OCCUPANT_OPTIONS } from "../lib/renter-options";
 
 type Locale = "zh" | "en";
 
@@ -62,8 +63,11 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
     fetch("/api/renter-profile", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) return;
-        const result = await response.json() as { profile?: Partial<ApplicationFormValues> };
-        if (!cancelled && result.profile) setValues((current) => ({ ...current, ...result.profile }));
+        const result = await response.json() as { profile?: Partial<ApplicationFormValues> & { householdSize?: string } };
+        if (!cancelled && result.profile) {
+          const savedOccupants = result.profile.occupants ?? result.profile.householdSize;
+          setValues((current) => ({ ...current, ...result.profile, occupants: exactOccupantOrDefault(savedOccupants ?? current.occupants) }));
+        }
       })
       .catch(() => undefined)
       .finally(() => { if (!cancelled) setProfileLoading(false); });
@@ -135,7 +139,7 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
             <div className="form-row"><label className="field-label"><span>{zh ? "称呼" : "Preferred name"}</span><input value={values.preferredName} onChange={(event) => setValue("preferredName", event.target.value)} maxLength={100} required /></label><label className="field-label"><span>{zh ? "联系电话" : "Phone"}</span><input value={values.phone} onChange={(event) => setValue("phone", event.target.value)} maxLength={40} required /></label></div>
             <label className="field-label"><span>{zh ? "目前所在城市（可选）" : "Current city (optional)"}</span><input value={values.currentCity} onChange={(event) => setValue("currentCity", event.target.value)} maxLength={100} placeholder={zh ? "例如：皇后区" : "Example: Queens"} /></label>
             <div className="form-row"><label className="field-label"><span>{zh ? "预计入住" : "Move-in"}</span><select value={values.moveIn} onChange={(event) => setValue("moveIn", event.target.value)}><option value="immediate">{zh ? "立即入住" : "Move in immediately"}</option><option value="august">{zh ? "2026年8月" : "Aug 2026"}</option><option value="september">{zh ? "2026年9月" : "Sep 2026"}</option><option value="october">{zh ? "2026年10月" : "Oct 2026"}</option></select></label><label className="field-label"><span>{zh ? "预计租期" : "Lease length"}</span><select value={values.leaseLength} onChange={(event) => setValue("leaseLength", event.target.value)}><option value="6">{zh ? "6个月" : "6 months"}</option><option value="12">{zh ? "12个月" : "12 months"}</option><option value="24">{zh ? "24个月以上" : "24+ months"}</option><option value="undefined">{zh ? "未确定" : "Undefined"}</option></select></label></div>
-            <div className="form-row"><label className="field-label"><span>{zh ? "居住人数" : "Occupants"}</span><select value={values.occupants} onChange={(event) => setValue("occupants", event.target.value)}><option value="1">1</option><option value="2">2</option><option value="3+">3+</option></select></label><label className="field-label"><span>{zh ? "是否有宠物" : "Pets"}</span><select value={values.pets} onChange={(event) => setValue("pets", event.target.value)}><option value="no">{zh ? "没有" : "No pets"}</option><option value="yes">{zh ? "有宠物" : "Yes"}</option></select></label></div>
+            <div className="form-row"><label className="field-label"><span>{zh ? "居住人数" : "Occupants"}</span><select value={values.occupants} onChange={(event) => setValue("occupants", event.target.value)}>{OCCUPANT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select></label><label className="field-label"><span>{zh ? "是否有宠物" : "Pets"}</span><select value={values.pets} onChange={(event) => setValue("pets", event.target.value)}><option value="no">{zh ? "没有" : "No pets"}</option><option value="yes">{zh ? "有宠物" : "Yes"}</option></select></label></div>
             <div className="form-row"><label className="field-label"><span>{zh ? "工作情况" : "Employment"}</span><select value={values.employmentStatus} onChange={(event) => setValue("employmentStatus", event.target.value)}><option value="employed">{zh ? "受雇工作" : "Employed"}</option><option value="selfEmployed">{zh ? "自雇" : "Self-employed"}</option><option value="student">{zh ? "学生" : "Student"}</option><option value="retired">{zh ? "退休" : "Retired"}</option><option value="betweenJobs">{zh ? "正在寻找工作" : "Between jobs"}</option><option value="preferNotToSay">{zh ? "不便说明" : "Prefer not to say"}</option></select></label><label className="field-label"><span>{zh ? "月收入范围" : "Monthly income range"}</span><select value={values.incomeRange} onChange={(event) => setValue("incomeRange", event.target.value)}><option value="preferNotToSay">{zh ? "不便说明" : "Prefer not to say"}</option><option value="under2500">{zh ? "$2,500 以下" : "Under $2,500"}</option><option value="2500-3999">$2,500–$3,999</option><option value="4000-5999">$4,000–$5,999</option><option value="6000plus">{zh ? "$6,000 以上" : "$6,000+"}</option></select></label></div>
             <label className="field-label"><span>{zh ? "给房主的补充说明（可选）" : "Note for the owner (optional)"}</span><textarea value={values.message} onChange={(event) => setValue("message", event.target.value)} rows={4} maxLength={1_000} placeholder={zh ? "例如：希望尽快看房，或有具体入住安排。" : "Example: I would like to see the home soon, or have a specific move-in plan."} /></label>
             <button className="primary-button full-button" type="submit" disabled={loading}>{loading ? (zh ? "提交中…" : "Submitting…") : (zh ? "提交申请" : "Submit application")}</button>
