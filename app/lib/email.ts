@@ -468,3 +468,30 @@ export async function sendListingExpirationAlert(input: { email: string; display
   });
   if (error) throw resendFailure(error, "Resend could not send the listing expiration alert.");
 }
+
+export async function sendUsageAlertEmail(input: { recipients: string[]; provider: string; metric: string; message: string; period: string }) {
+  const { apiKey, from, appUrl } = config();
+  const recipients = input.recipients.map((value) => value.trim()).filter(Boolean).slice(0, 10);
+  if (!recipients.length) throw new EmailError("No verified admin recipients are configured for usage alerts.");
+  const resend = new Resend(apiKey);
+  const subject = `Anjurentals usage alert · ${input.provider} · ${input.metric}`;
+  const text = [
+    "Anjurentals usage alert",
+    "",
+    `Provider: ${input.provider}`,
+    `Metric: ${input.metric}`,
+    `Period: ${input.period}`,
+    `Status: ${input.message}`,
+    "",
+    `Open the admin usage desk: ${appUrl}/admin/usage`,
+  ].join("\n");
+  const details = escapeHtml(text).replace(/\n/g, "<br>");
+  const { error } = await resend.emails.send({
+    from,
+    to: recipients,
+    subject,
+    text,
+    html: `<!doctype html><html lang="en"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">Usage threshold alert</h1><p style="padding:16px;background:#fffceb;font-size:13px;line-height:1.7">${details}</p><p style="margin:28px 0"><a href="${appUrl}/admin/usage" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">Open usage desk</a></p></main></body></html>`,
+  });
+  if (error) throw resendFailure(error, "Resend could not send the usage alert.");
+}

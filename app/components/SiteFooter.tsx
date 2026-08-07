@@ -35,6 +35,7 @@ export default function SiteFooter() {
           <div>
             <h2>信任与规则</h2>
             <a href="/legal#privacy">隐私说明</a>
+            <a href="/legal#security">安全与平台边界</a>
             <a href="/legal#terms">使用条款</a>
             <a href="/legal#fair-housing">公平住房</a>
           </div>

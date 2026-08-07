@@ -4,6 +4,7 @@ import { buildLocationContext, DEFAULT_LOCATION_LOOKUP_OPTIONS, normalizeLocatio
 import type { LocationContext, LocationContextUsage, LocationLookupOption } from "../../lib/location-context";
 import { hasRestrictedHousingLanguage } from "../../lib/safety";
 import { consumeRateLimit } from "../../lib/rate-limit";
+import { recordApplicationErrorSafely } from "../../lib/monitoring";
 import { estimateOpenAICost, recordApiUsageSafely } from "../../lib/usage";
 
 type ListingInput = {
@@ -75,7 +76,7 @@ const SYSTEM_PROMPT = `You are a careful bilingual rental-listing editor for a h
 
 Rewrite only the facts supplied by the poster. Do not invent rent, square footage, amenities, transit access, views, availability, verification, photos, exact addresses, contact details, or legal promises. Preserve numbers, dates, and approximate-location language. The marketplace uses USD by default, so do not add a currency code to user-facing listing copy. Keep the English and Simplified Chinese versions aligned. If one language is missing, translate conservatively from the supplied facts.
 
-The optional locationContext contains provider-returned facts for the selected area. When routeOrigin is privateAddress, the server used the private address only to improve route accuracy; the exact address is not included in this input and must never appear in the output. Use nearby places only as area references. A destination with minutes is still an approximate route: describe drive destinations as approximate driving time and walk destinations as approximate walking time. Do not turn these facts into a guaranteed commute, an exact-address disclosure, or a guarantee of service frequency. If locationContext is empty or has no facts, do not add nearby, destination, or transportation claims.
+The optional locationContext contains provider-returned facts for the selected area. When routeOrigin is privateAddress, the server used the private address only to improve route accuracy; the exact address is not included in this input and must never appear in the output. Use nearby places only as area references. A destination with minutes is still an approximate route: describe drive destinations as approximate driving time, walk destinations as approximate walking time, and transit destinations as approximate public-transit time. Transit lines on a destination are the lines returned for that route; lines on a station are lines serving that station, not a guarantee that every line reaches the destination. Do not turn these facts into a guaranteed commute, an exact-address disclosure, or a guarantee of service frequency. If locationContext is empty or has no facts, do not add nearby, destination, or transportation claims.
 
 Remove or rewrite discriminatory housing preferences or screening language. The marketplace supports Chinese-language outreach, but listings must not restrict housing based on protected traits or imply that only a particular ethnicity, nationality, family status, disability status, religion, sex, or similar group may rent. Mention a short review note when you had to soften or remove a risky claim.
 
@@ -121,6 +122,12 @@ function appendIfMissing(base: string, addition: string) {
   return addition && base.includes(addition) ? "" : addition;
 }
 
+function transitLineLabel(line: { name: string; shortName?: string; vehicleType?: string }, locale: "zh" | "en") {
+  const vehicle = line.vehicleType === "BUS" ? (locale === "zh" ? "公交" : "bus") : line.vehicleType === "SUBWAY" || line.vehicleType === "METRO_RAIL" ? (locale === "zh" ? "地铁" : "subway") : line.vehicleType === "TRAIN" || line.vehicleType === "RAIL" || line.vehicleType === "HEAVY_RAIL" || line.vehicleType === "COMMUTER_TRAIN" ? (locale === "zh" ? "铁路" : "rail") : "";
+  const name = line.shortName || line.name;
+  return vehicle ? `${vehicle} ${name}` : name;
+}
+
 function localPolish(input: NormalizedListing) {
   const typeEn = input.rentalType === "privateRoom" ? "Private room" : input.rentalType === "sublet" ? "Sublet" : "Entire home";
   const typeZh = input.rentalType === "privateRoom" ? "独立房间" : input.rentalType === "sublet" ? "转租房源" : "整套住房";
@@ -129,16 +136,17 @@ function localPolish(input: NormalizedListing) {
   const featureEn = input.features.length ? `Features listed by the poster: ${input.features.join(", ")}.` : "";
   const featureZh = input.features.length ? `发布者填写的特点：${input.features.join("、")}。` : "";
   const nearbyLine = input.locationContext?.nearby.map((place) => `${place.name} (${place.category})`).join(", ") || "";
-  const transitLine = input.locationContext?.transit.map((item) => `${item.name} (${item.mode}${item.walkMinutes ? `, about a ${item.walkMinutes}-minute walk` : ""})`).join(", ") || "";
-  const destinationLine = input.locationContext?.destinations.map((item) => `${item.name} (${item.category}, ${item.minutes ? `about ${item.minutes} minutes` : "travel time unavailable"} by ${item.mode === "drive" ? "car" : "walking"})`).join(", ") || "";
-  const destinationLineZh = input.locationContext?.destinations.map((item) => `${item.name}（${item.category}，约 ${item.minutes || "暂缺"} 分钟${item.mode === "drive" ? "车程" : "步行"}）`).join("、") || "";
+  const transitLine = input.locationContext?.transit.map((item) => `${item.name} (${item.mode}${item.walkMinutes ? `, about a ${item.walkMinutes}-minute walk` : ""}${item.lines?.length ? `, lines serving the stop: ${item.lines.map((line) => transitLineLabel(line, "en")).join(", ")}` : ""})`).join(", ") || "";
+  const transitLineZh = input.locationContext?.transit.map((item) => `${item.name}（${item.mode}${item.walkMinutes ? `，约 ${item.walkMinutes} 分钟步行` : ""}${item.lines?.length ? `，经停线路：${item.lines.map((line) => transitLineLabel(line, "zh")).join("、")}` : ""}）`).join("、") || "";
+  const destinationLine = input.locationContext?.destinations.map((item) => `${item.name} (${item.category}, ${item.minutes ? `about ${item.minutes} minutes` : "travel time unavailable"} by ${item.mode === "drive" ? "car" : item.mode === "transit" ? "public transit" : "walking"}${item.transitLines?.length ? ` via ${item.transitLines.map((line) => transitLineLabel(line, "en")).join(", ")}` : ""})`).join(", ") || "";
+  const destinationLineZh = input.locationContext?.destinations.map((item) => `${item.name}（${item.category}，约 ${item.minutes || "暂缺"} 分钟${item.mode === "drive" ? "车程" : item.mode === "transit" ? "公共交通" : "步行"}${item.transitLines?.length ? `，线路：${item.transitLines.map((line) => transitLineLabel(line, "zh")).join("、")}` : ""}）`).join("、") || "";
   const contextLabelEn = input.locationContext?.routeOrigin === "privateAddress" ? "Approximate travel references from the listing location, to verify before publishing" : "Selected-area references, to verify before publishing";
   const contextLabelZh = input.locationContext?.routeOrigin === "privateAddress" ? "房源附近参考（发布前请核实）" : "所选区域参考（发布前请核实）";
   const contextEn = input.locationContext?.source === "google" && (nearbyLine || transitLine || destinationLine)
     ? `${contextLabelEn}: ${[nearbyLine ? `Nearby: ${nearbyLine}.` : "", destinationLine ? `Destinations: ${destinationLine}.` : "", transitLine ? `Transportation: ${transitLine}.` : ""].filter(Boolean).join(" ")}`
     : "";
   const contextZh = input.locationContext?.source === "google" && (nearbyLine || transitLine || destinationLineZh)
-    ? `${contextLabelZh}：${[nearbyLine ? `附近：${nearbyLine}。` : "", destinationLineZh ? `生活圈和超市：${destinationLineZh}。` : "", transitLine ? `交通：${transitLine}。` : ""].filter(Boolean).join("")}`
+    ? `${contextLabelZh}：${[nearbyLine ? `附近：${nearbyLine}。` : "", destinationLineZh ? `生活圈和超市：${destinationLineZh}。` : "", transitLineZh ? `交通：${transitLineZh}。` : ""].filter(Boolean).join("")}`
     : "";
   const descriptionEn = [
     input.descriptionEn,
@@ -231,7 +239,8 @@ export async function POST(request: Request) {
       lookupOptions: input.locationLookupOptions,
       onUsage: (usage) => { mapUsage = usage; },
     });
-  } catch {
+  } catch (error) {
+    await recordApplicationErrorSafely({ source: "google_maps", severity: "warning", route: "/api/polish-listing", method: "POST", message: "Location context lookup failed during listing polish.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "", userId: user.id });
     input.locationContext = {
       source: "none",
       approximateArea: input.areaZh || input.areaEn,
@@ -298,7 +307,10 @@ export async function POST(request: Request) {
       estimatedCostUsd: estimateOpenAICost(Number(usage.input_tokens || 0), Number(usage.output_tokens || 0)),
       metadata: { reasoningEffort, httpStatus: response.status },
     });
-    if (!response.ok) return NextResponse.json({ error: "The AI service could not polish this draft right now." }, { status: 502 });
+    if (!response.ok) {
+      await recordApplicationErrorSafely({ source: "openai", route: "/api/polish-listing", method: "POST", message: "OpenAI listing polish request returned an error.", requestId: response.headers.get("x-request-id") || "", userId: user.id, metadata: { httpStatus: response.status } });
+      return NextResponse.json({ error: "The AI service could not polish this draft right now." }, { status: 502 });
+    }
     const rawOutput = outputText(data);
     const polished = JSON.parse(rawOutput) as { titleEn?: unknown; titleZh?: unknown; descriptionEn?: unknown; descriptionZh?: unknown; notes?: unknown };
     const notes = Array.isArray(polished.notes) ? polished.notes.filter((note): note is string => typeof note === "string").map((note) => text(note, 240)).filter(Boolean).slice(0, 3) : [];
@@ -312,7 +324,8 @@ export async function POST(request: Request) {
       locationContext: input.locationContext,
       source: "openai",
     });
-  } catch {
+  } catch (error) {
+    await recordApplicationErrorSafely({ source: "openai", route: "/api/polish-listing", method: "POST", message: "OpenAI listing polish response could not be processed.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "", userId: user.id });
     return NextResponse.json({ error: "The AI service could not polish this draft right now." }, { status: 502 });
   }
 }

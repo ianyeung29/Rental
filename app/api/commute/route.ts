@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildCommuteEstimate } from "../../lib/location-context";
+import { recordApplicationErrorSafely } from "../../lib/monitoring";
 import { consumeRateLimit, hashRateLimitPart, requestAddress } from "../../lib/rate-limit";
 import { recordApiUsageSafely } from "../../lib/usage";
 
@@ -26,15 +27,21 @@ export async function POST(request: Request) {
   }
   if (!rateLimit.allowed) return NextResponse.json({ error: "Too many route estimates. Please try again later." }, { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } });
 
-  const estimate = await buildCommuteEstimate({
-    areaEn: typeof body.areaEn === "string" ? body.areaEn : "",
-    areaZh: typeof body.areaZh === "string" ? body.areaZh : "",
-    boroughEn: typeof body.boroughEn === "string" ? body.boroughEn : "",
-    boroughZh: typeof body.boroughZh === "string" ? body.boroughZh : "",
-    destination,
-    mode: body.mode,
-    locale: body.locale === "en" ? "en" : "zh",
-  });
+  let estimate;
+  try {
+    estimate = await buildCommuteEstimate({
+      areaEn: typeof body.areaEn === "string" ? body.areaEn : "",
+      areaZh: typeof body.areaZh === "string" ? body.areaZh : "",
+      boroughEn: typeof body.boroughEn === "string" ? body.boroughEn : "",
+      boroughZh: typeof body.boroughZh === "string" ? body.boroughZh : "",
+      destination,
+      mode: body.mode,
+      locale: body.locale === "en" ? "en" : "zh",
+    });
+  } catch (error) {
+    await recordApplicationErrorSafely({ source: "google_maps", route: "/api/commute", method: "POST", message: "Google Maps commute estimate failed.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "" });
+    return NextResponse.json({ error: "Map services are temporarily unavailable; try again later." }, { status: 502 });
+  }
   if (estimate.usage.placesCalls > 0 || estimate.usage.routeCalls > 0 || estimate.usage.cacheHit) {
     await recordApiUsageSafely({
       provider: "google_maps",

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ALLOWED_IMAGE_TYPES, createImageUpload, MAX_IMAGE_BYTES } from "../../../lib/r2";
 import { getCurrentUser } from "../../../lib/auth";
 import { demoModeEnabled } from "../../../lib/demo";
+import { recordApplicationErrorSafely } from "../../../lib/monitoring";
 
 const MAX_BODY_LENGTH = 2_000;
 
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
     return NextResponse.json(await createImageUpload({ filename, contentType, size, keyPrefix: purpose === "agentPortrait" && user ? `agents/${user.id}` : "listings" }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
+    await recordApplicationErrorSafely({ source: "r2", route: "/api/media/presign", method: "POST", message: message || "R2 image upload presign failed.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "" });
     if (message.includes("not fully configured")) return NextResponse.json({ error: "R2 storage is not configured on the server yet." }, { status: 503 });
     return NextResponse.json({ error: "The image upload service is unavailable right now." }, { status: 502 });
   }

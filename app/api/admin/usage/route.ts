@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
-import { estimateGoogleMapsGrossCost } from "../../../lib/usage";
+import { DEFAULT_USAGE_ALERT_SETTINGS, getUsageMonitoringSnapshot, updateUsageAlertSettings } from "../../../lib/monitoring";
+import { estimateGoogleMapsGrossCost, GOOGLE_PLACES_PRO_COST_PER_THOUSAND, GOOGLE_ROUTES_COST_PER_THOUSAND } from "../../../lib/usage";
 
 async function adminContext() {
   let user;
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
   const days = requestedDays === 7 || requestedDays === 90 ? requestedDays : 30;
   try {
     await ensureDatabaseSchema();
-    const [summaryRows, endpointRows, dailyRows, rateRows] = await Promise.all([
+    const [summaryRows, monitoring, endpointRows, dailyRows, rateRows] = await Promise.all([
       sql!.query(`
         SELECT provider,
                COUNT(*)::int AS requests,
@@ -65,6 +66,7 @@ export async function GET(request: Request) {
         GROUP BY provider
         ORDER BY provider
       `, [days]),
+      getUsageMonitoringSnapshot(),
       sql!.query(`
         SELECT provider, endpoint, model,
                COUNT(*)::int AS requests,
@@ -135,10 +137,42 @@ export async function GET(request: Request) {
       pricing: {
         googlePlacesFreeMonthly: 5000,
         googleRoutesFreeMonthly: 10000,
+        googlePlacesCostPerCall: GOOGLE_PLACES_PRO_COST_PER_THOUSAND / 1000,
+        googleRoutesCostPerCall: GOOGLE_ROUTES_COST_PER_THOUSAND / 1000,
         note: "Google gross estimates do not subtract the monthly free usage caps; OpenAI estimates use recorded token counts.",
       },
+      monitoring,
     });
   } catch {
     return NextResponse.json({ error: "API usage could not be loaded right now." }, { status: 502 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  const context = await adminContext();
+  if (context.error) return context.error;
+  try {
+    const rawBody = await request.text();
+    if (rawBody.length > 2_000) return NextResponse.json({ error: "Alert settings are too large." }, { status: 413 });
+    const body = JSON.parse(rawBody) as Record<string, unknown>;
+    const openaiMonthlyCostUsd = Number(body.openaiMonthlyCostUsd);
+    const googlePlacesMonthlyCalls = Number(body.googlePlacesMonthlyCalls);
+    const googleRoutesMonthlyCalls = Number(body.googleRoutesMonthlyCalls);
+    const blockedRequestsThreshold = Number(body.blockedRequestsThreshold);
+    const settings = {
+      enabled: body.enabled === undefined ? DEFAULT_USAGE_ALERT_SETTINGS.enabled : Boolean(body.enabled),
+      openaiMonthlyCostUsd,
+      googlePlacesMonthlyCalls,
+      googleRoutesMonthlyCalls,
+      blockedRequestsThreshold,
+    };
+    if (!Number.isFinite(openaiMonthlyCostUsd) || openaiMonthlyCostUsd < 0.01 || openaiMonthlyCostUsd > 1_000_000) return NextResponse.json({ error: "Set an OpenAI threshold between $0.01 and $1,000,000." }, { status: 400 });
+    if (!Number.isInteger(googlePlacesMonthlyCalls) || googlePlacesMonthlyCalls < 1 || googlePlacesMonthlyCalls > 100_000_000) return NextResponse.json({ error: "Set a valid Google Places call threshold." }, { status: 400 });
+    if (!Number.isInteger(googleRoutesMonthlyCalls) || googleRoutesMonthlyCalls < 1 || googleRoutesMonthlyCalls > 100_000_000) return NextResponse.json({ error: "Set a valid Google Routes call threshold." }, { status: 400 });
+    if (!Number.isInteger(blockedRequestsThreshold) || blockedRequestsThreshold < 1 || blockedRequestsThreshold > 100_000_000) return NextResponse.json({ error: "Set a valid blocked-request threshold." }, { status: 400 });
+    await updateUsageAlertSettings(settings, context.user.id);
+    return NextResponse.json({ settings });
+  } catch {
+    return NextResponse.json({ error: "Alert settings could not be saved right now." }, { status: 502 });
   }
 }
