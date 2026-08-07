@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isAcceptableNearbyWalkMinutes,
   isChineseOrAsianMarket,
   selectUrbanTransitPlaces,
   transitRegion,
@@ -17,7 +18,7 @@ const place = (overrides = {}) => ({
   ...overrides,
 });
 
-test("urban transit selection keeps subway and bus results, but rejects LIRR-only results", () => {
+test("urban transit selection puts the nearby bus result before subway and rejects LIRR-only results", () => {
   const lirrOnly = place({
     id: "lirr",
     name: "Queens Village",
@@ -38,10 +39,17 @@ test("urban transit selection keeps subway and bus results, but rejects LIRR-onl
   });
 
   const selected = selectUrbanTransitPlaces([lirrOnly, subway, bus]);
-  assert.deepEqual(selected.map((item) => item.name), ["Flushing-Main St", "Main Street / Roosevelt Avenue"]);
+  assert.deepEqual(selected.map((item) => item.name), ["Main Street / Roosevelt Avenue", "Flushing-Main St"]);
   assert.equal(urbanTransitKind(lirrOnly), null);
   assert.equal(urbanTransitKind(subway), "subway");
   assert.equal(urbanTransitKind(bus), "bus");
+});
+
+test("nearby walking guard rejects implausibly distant route results", () => {
+  assert.equal(isAcceptableNearbyWalkMinutes(25), true);
+  assert.equal(isAcceptableNearbyWalkMinutes(45), true);
+  assert.equal(isAcceptableNearbyWalkMinutes(46), false);
+  assert.equal(isAcceptableNearbyWalkMinutes(17374), false);
 });
 
 test("Chinese supermarket matching recognizes WalFood and removes duplicate place names", () => {

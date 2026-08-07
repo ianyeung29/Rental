@@ -13,6 +13,11 @@ export type LocationRulePlace = {
 export type TransitRegion = "urban" | "longIsland" | "general";
 export type UrbanTransitKind = "subway" | "bus" | "both" | null;
 
+// A result called "nearby" should remain useful to a renter. Anything beyond
+// this walking time is treated as an area-level result, not a nearby stop or
+// supermarket. This also protects the UI from malformed route durations.
+export const MAX_NEARBY_WALK_MINUTES = 45;
+
 const ASIAN_MARKET_NAME_MARKERS = [
   "h mart",
   "hmart",
@@ -124,15 +129,21 @@ export function urbanTransitKind(place: LocationRulePlace): UrbanTransitKind {
   return hasSubway && hasBus ? "both" : hasSubway ? "subway" : hasBus ? "bus" : null;
 }
 
+export function isAcceptableNearbyWalkMinutes(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_NEARBY_WALK_MINUTES;
+}
+
 function samePlace(left: LocationRulePlace, right: LocationRulePlace) {
   return Boolean((left.id && right.id && left.id === right.id) || placeNameKey(left.name) === placeNameKey(right.name));
 }
 
 export function selectUrbanTransitPlaces<T extends LocationRulePlace>(places: T[]) {
   const candidates = uniquePlaces(places).filter(hasUrbanTransitLine);
-  const subway = candidates.find((place) => urbanTransitKind(place) === "subway" || urbanTransitKind(place) === "both");
-  const bus = candidates.find((place) => (urbanTransitKind(place) === "bus" || urbanTransitKind(place) === "both") && (!subway || !samePlace(place, subway)));
-  return [subway, bus].filter((place, index, selected): place is T => Boolean(place) && selected.findIndex((candidate) => candidate && samePlace(candidate, place as T)) === index);
+  // Buses are usually the most local option in Queens and Brooklyn. Prefer a
+  // bus stop first, then add a subway station only when it is a distinct result.
+  const bus = candidates.find((place) => urbanTransitKind(place) === "bus" || urbanTransitKind(place) === "both");
+  const subway = candidates.find((place) => (urbanTransitKind(place) === "subway" || urbanTransitKind(place) === "both") && (!bus || !samePlace(place, bus)));
+  return [bus, subway].filter((place, index, selected): place is T => Boolean(place) && selected.findIndex((candidate) => candidate && samePlace(candidate, place as T)) === index);
 }
 
 export function isLongIslandHighway(place: LocationRulePlace) {
