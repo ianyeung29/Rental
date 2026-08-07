@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../lib/auth";
 import { consumeRateLimit } from "../../lib/rate-limit";
+import { recordApplicationErrorSafely } from "../../lib/monitoring";
 import { estimateOpenAICost, recordApiUsageSafely } from "../../lib/usage";
 import { isExactOccupantCount } from "../../lib/renter-options";
 
@@ -205,7 +206,10 @@ export async function POST(request: Request) {
       estimatedCostUsd: estimateOpenAICost(Number(usage.input_tokens || 0), Number(usage.output_tokens || 0)),
       metadata: { reasoningEffort, httpStatus: response.status },
     });
-    if (!response.ok) return NextResponse.json({ error: "The inquiry assistant could not prepare a message right now." }, { status: 502 });
+    if (!response.ok) {
+      await recordApplicationErrorSafely({ source: "openai", route: "/api/inquiry-assist", method: "POST", message: "OpenAI inquiry assistant request returned an error.", requestId: response.headers.get("x-request-id") || "", userId: user.id, metadata: { httpStatus: response.status } });
+      return NextResponse.json({ error: "The inquiry assistant could not prepare a message right now." }, { status: 502 });
+    }
     const rawOutput = outputText(data);
     const assistant = JSON.parse(rawOutput) as { messageZh?: unknown; messageEn?: unknown; notes?: unknown };
     const notes = Array.isArray(assistant.notes) ? assistant.notes.filter((note): note is string => typeof note === "string").map((note) => text(note, 240)).filter(Boolean).slice(0, 2) : local.notes;
@@ -215,7 +219,8 @@ export async function POST(request: Request) {
       notes,
       source: "openai",
     });
-  } catch {
+  } catch (error) {
+    await recordApplicationErrorSafely({ source: "openai", route: "/api/inquiry-assist", method: "POST", message: "OpenAI inquiry assistant response could not be processed.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "", userId: user.id });
     return NextResponse.json({ error: "The inquiry assistant could not prepare a message right now." }, { status: 502 });
   }
 }

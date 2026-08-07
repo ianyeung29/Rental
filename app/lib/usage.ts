@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "./db";
+import { evaluateUsageAlerts } from "./monitoring";
 
 export const OPENAI_INPUT_COST_PER_MILLION = 0.2;
 export const OPENAI_OUTPUT_COST_PER_MILLION = 1.2;
@@ -68,6 +69,7 @@ export async function recordApiUsage(record: ApiUsageRecord) {
     estimatedCostUsd,
     JSON.stringify(record.metadata || {}),
   ]);
+  await evaluateUsageAlerts();
 }
 
 export async function recordApiUsageSafely(record: ApiUsageRecord) {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildLocalCompareSummary, CompareListingFacts, CompareSummaryLocale } from "../../lib/compare-summary";
 import { getCurrentUser } from "../../lib/auth";
 import { consumeRateLimit } from "../../lib/rate-limit";
+import { recordApplicationErrorSafely } from "../../lib/monitoring";
 import { estimateOpenAICost, recordApiUsageSafely } from "../../lib/usage";
 
 type CompareListingInput = {
@@ -165,7 +166,10 @@ export async function POST(request: Request) {
       estimatedCostUsd: estimateOpenAICost(Number(usage.input_tokens || 0), Number(usage.output_tokens || 0)),
       metadata: { reasoningEffort, httpStatus: response.status },
     });
-    if (!response.ok) return NextResponse.json({ error: "The AI service could not summarize these listings right now." }, { status: 502 });
+    if (!response.ok) {
+      await recordApplicationErrorSafely({ source: "openai", route: "/api/compare-summary", method: "POST", message: "OpenAI comparison summary request returned an error.", requestId: response.headers.get("x-request-id") || "", userId: user.id, metadata: { httpStatus: response.status } });
+      return NextResponse.json({ error: "The AI service could not summarize these listings right now." }, { status: 502 });
+    }
     const rawOutput = outputText(data);
     const summary = JSON.parse(rawOutput) as { headline?: unknown; summary?: unknown; bestFor?: unknown; tradeoffs?: unknown };
     const tradeoffs = Array.isArray(summary.tradeoffs)
@@ -178,7 +182,8 @@ export async function POST(request: Request) {
       tradeoffs: tradeoffs.length > 0 ? tradeoffs : local.tradeoffs,
       source: "openai",
     });
-  } catch {
+  } catch (error) {
+    await recordApplicationErrorSafely({ source: "openai", route: "/api/compare-summary", method: "POST", message: "OpenAI comparison summary response could not be processed.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "", userId: user.id });
     return NextResponse.json({ error: "The AI service could not summarize these listings right now." }, { status: 502 });
   }
 }

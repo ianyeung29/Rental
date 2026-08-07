@@ -22,7 +22,7 @@ import { toChineseLocationLabel } from "./lib/location-labels";
 import { configureWeChatShare, isWeChatBrowser, toAbsoluteUrl } from "./lib/wechat-client";
 import { buildLocalCompareSummary, CompareListingFacts, CompareSummaryContent } from "./lib/compare-summary";
 import { DEFAULT_LOCATION_LOOKUP_OPTIONS, LOCATION_LOOKUP_OPTIONS, MAX_LOCATION_LOOKUP_OPTIONS } from "./lib/location-context";
-import type { LocationContext, LocationLookupOption } from "./lib/location-context";
+import type { LocationContext, LocationContextTransitLine, LocationLookupOption } from "./lib/location-context";
 import { OCCUPANT_OPTIONS } from "./lib/renter-options";
 import portraitStyles from "./components/AgentPortrait.module.css";
 
@@ -507,6 +507,12 @@ const LOCATION_LOOKUP_OPTION_COPY: Record<LocationLookupOption, { zh: string; en
   restaurant: { zh: "餐饮", en: "Restaurants" },
   transit: { zh: "地铁 / 火车 / 公交", en: "Subway / train / bus" },
 };
+
+function transitLineLabel(line: LocationContextTransitLine, locale: Locale) {
+  const vehicle = line.vehicleType === "BUS" ? (locale === "zh" ? "公交" : "Bus") : line.vehicleType === "SUBWAY" || line.vehicleType === "METRO_RAIL" ? (locale === "zh" ? "地铁" : "Subway") : line.vehicleType === "TRAIN" || line.vehicleType === "RAIL" || line.vehicleType === "HEAVY_RAIL" || line.vehicleType === "COMMUTER_TRAIN" ? (locale === "zh" ? "铁路" : "Rail") : "";
+  const name = line.shortName || line.name;
+  return vehicle ? `${vehicle} ${name}` : name;
+}
 
 function findPopularAreaSelection(areaEn: string, areaZh: string) {
   const matches = (value: string, candidate: string) => {
@@ -1167,7 +1173,7 @@ const copy = {
     polishTitle: "AI 润色房源文案",
     polishIntro: "根据你填写的事实和附近参考优化文案；精确地址只用于服务器端计算路线，不会发送给 AI 或显示在公开页面。",
     lookupTitle: "选择要查找的附近信息（可选）",
-    lookupHelp: "只会查询你勾选的类别；最多选择 3 项。路线会优先使用私密精确地址；如果无法定位，才退回大致区域，发布前请复核。",
+    lookupHelp: "只会查询你勾选的类别；最多选择 3 项。华人生活圈会优先估算公共交通路线；地铁或公交站会显示步行时间和 Google 返回的线路编号。路线会优先使用私密精确地址，发布前请复核。",
     lookupNone: "未选择附近查找；这次只润色房源文字，不产生 Google 地图查询。",
     lookupSelected: "已选择",
     lookupCached: "已使用缓存的附近参考，没有重复查询 Google。",
@@ -1319,7 +1325,7 @@ const copy = {
     polishTitle: "AI listing polish",
     polishIntro: "Polish the copy from your facts and nearby references. The exact address is used only on the server for route estimates; it is never sent to AI or shown publicly.",
     lookupTitle: "Choose nearby information to check (optional)",
-    lookupHelp: "Only checked categories are queried; choose up to 3. Routes use the private exact address when it can be located, otherwise the approximate area; review before publishing.",
+    lookupHelp: "Only checked categories are queried; choose up to 3. Chinese-community routes prioritize public transit, and nearby transit stops show walking time and line numbers when Google provides them. Routes use the private exact address when it can be located; review before publishing.",
     lookupNone: "No nearby lookup selected; this polish uses only your listing text and makes no Google Maps request.",
     lookupSelected: "selected",
     lookupCached: "Used cached nearby facts; Google was not queried again.",
@@ -4525,10 +4531,6 @@ export default function HomePage() {
                 <div className="post-form-grid">
                   <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 4 张，当前 ${draft.photos.length} 张。支持 JPG、PNG、WebP，照片会上传到云端。` : `Up to 4 photos, ${draft.photos.length} selected. JPG, PNG, and WebP upload to cloud storage.`}</span></label>
                   {draft.photos.length > 0 && <div className="photo-preview field-span-2">{draft.photos.map((photo, index) => <div className="photo-preview-item" key={`${photo.slice(0, 24)}-${index}`}><Image src={photo} alt={`${locale === "zh" ? "房源照片" : "Listing photo"} ${index + 1}`} width={112} height={82} unoptimized /><span className="photo-order">{index === 0 ? (locale === "zh" ? "首图" : "Cover") : index + 1}</span><div className="photo-preview-actions"><button className="photo-action" type="button" onClick={() => movePhoto(index, "up")} disabled={index === 0} aria-label={locale === "zh" ? "设为首图" : "Move photo up"}><ChevronIcon direction="up" /></button><button className="photo-action" type="button" onClick={() => movePhoto(index, "down")} disabled={index === draft.photos.length - 1} aria-label={locale === "zh" ? "照片后移" : "Move photo down"}><ChevronIcon direction="down" /></button><button className="photo-action photo-remove" type="button" onClick={() => updateDraft({ photos: draft.photos.filter((_, photoIndex) => photoIndex !== index), photoKeys: draft.photoKeys.filter((_, photoIndex) => photoIndex !== index) })} aria-label={locale === "zh" ? `删除照片 ${index + 1}` : `Remove photo ${index + 1}`}><CloseIcon size={14} /></button></div></div>)}</div>}
-                  <div className="ai-polish-panel field-span-2" role="note">
-                    <div className="ai-polish-copy"><span className="ai-polish-mark" aria-hidden="true"><ShieldIcon size={16} /></span><div><strong>{t.polishTitle}</strong><p>{t.polishIntro}</p></div></div>
-                    <button className="outline-button ai-polish-button" type="button" onClick={polishListingWithAi} disabled={aiPolishLoading || (!draft.titleZh.trim() && !draft.descriptionZh.trim())}>{aiPolishLoading ? t.polishLoading : t.polishAction}<ArrowIcon size={14} /></button>
-                  </div>
                   <fieldset className="location-lookup-panel field-span-2">
                     <legend>{t.lookupTitle}</legend>
                     <p className="field-help">{t.lookupHelp}</p>
@@ -4538,7 +4540,7 @@ export default function HomePage() {
                         const disabled = aiPolishLoading || (!checked && draft.locationLookupOptions.length >= MAX_LOCATION_LOOKUP_OPTIONS);
                         return <label className={`location-lookup-option ${checked ? "active" : ""} ${disabled ? "disabled" : ""}`} key={option}>
                           <input type="checkbox" checked={checked} disabled={disabled} onChange={() => updateDraft({ locationLookupOptions: checked ? draft.locationLookupOptions.filter((item) => item !== option) : [...draft.locationLookupOptions, option] })} />
-                          <span><strong>{LOCATION_LOOKUP_OPTION_COPY[option][locale]}</strong><small>{option === "community" ? (locale === "zh" ? "皇后区查法拉盛市中心；布鲁克林查八大道，估算车程" : "Checks Downtown Flushing for Queens or 8th Avenue for Brooklyn, with approximate drive time") : option === "grocery" ? (locale === "zh" ? "查找中文 / 亚洲超市并估算步行时间" : "Finds a Chinese / Asian supermarket and estimates walking time") : option === "transit" ? (locale === "zh" ? "最多查找一个附近站点并计算步行时间" : "Checks up to one nearby station and walking time") : (locale === "zh" ? "查找一个代表性地点" : "Checks one representative place")}</small></span>
+                          <span><strong>{LOCATION_LOOKUP_OPTION_COPY[option][locale]}</strong><small>{option === "community" ? (locale === "zh" ? "皇后区查法拉盛市中心；布鲁克林查八大道，优先估算公共交通时间和线路" : "Checks Downtown Flushing or Brooklyn 8th Avenue with public-transit time and line details when available") : option === "grocery" ? (locale === "zh" ? "查找中文 / 亚洲超市并估算步行时间" : "Finds a Chinese / Asian supermarket and estimates walking time") : option === "transit" ? (locale === "zh" ? "查找附近地铁或公交站，显示步行时间和线路编号" : "Finds a nearby subway or bus stop with walking time and line numbers") : (locale === "zh" ? "查找一个代表性地点" : "Checks one representative place")}</small></span>
                         </label>;
                       })}
                     </div>
@@ -4549,13 +4551,28 @@ export default function HomePage() {
                   {!locationContextLoading && locationContext?.source === "google" && (locationContext.destinations.length > 0 || locationContext.nearby.length > 0 || locationContext.transit.length > 0) && <div className="location-context-results field-span-2" role="note">
                     <strong>{locale === "zh" ? "已找到的区域参考" : "Area references found"}</strong>
                     <ul>
-                      {locationContext.destinations.map((destination) => <li key={`${destination.mode}-${destination.name}`}><span>{destination.category}</span><strong>{destination.name}</strong><small>{destination.minutes ? (locale === "zh" ? `约 ${destination.minutes} 分钟${destination.mode === "drive" ? "车程" : "步行"}` : `About ${destination.minutes} minutes by ${destination.mode === "drive" ? "car" : "walking"}`) : (locale === "zh" ? "路线时间暂不可用" : "Travel time unavailable")}</small></li>)}
+                      {locationContext.destinations.map((destination) => <li key={`${destination.mode}-${destination.name}`}>
+                        <span>{destination.category}</span>
+                        <strong>{destination.name}</strong>
+                        <small>{destination.minutes ? (locale === "zh" ? `约 ${destination.minutes} 分钟${destination.mode === "drive" ? "车程" : destination.mode === "transit" ? "公共交通" : "步行"}` : `About ${destination.minutes} minutes by ${destination.mode === "drive" ? "car" : destination.mode === "transit" ? "public transit" : "walking"}`) : (locale === "zh" ? "路线时间暂不可用" : "Travel time unavailable")}</small>
+                        {destination.transitLines?.length ? <div className="location-transit-lines"><span className="location-transit-lines-label">{locale === "zh" ? "建议线路" : "Suggested lines"}</span>{destination.transitLines.map((line) => <span className="location-transit-line" key={`${destination.name}-${line.shortName || line.name}`}>{transitLineLabel(line, locale)}</span>)}</div> : null}
+                      </li>)}
                       {locationContext.nearby.map((place) => <li key={`nearby-${place.name}`}><span>{place.category}</span><strong>{place.name}</strong><small>{locale === "zh" ? "大致区域附近" : "Near the approximate area"}</small></li>)}
-                      {locationContext.transit.map((station) => <li key={`transit-${station.name}`}><span>{station.mode}</span><strong>{station.name}</strong><small>{station.walkMinutes ? (locale === "zh" ? `约 ${station.walkMinutes} 分钟步行` : `About ${station.walkMinutes} minutes walking`) : (locale === "zh" ? "步行时间暂不可用" : "Walking time unavailable")}</small></li>)}
+                      {locationContext.transit.map((station) => <li key={`transit-${station.name}`}>
+                        <span>{station.mode}</span>
+                        <strong>{station.name}</strong>
+                        <small>{station.walkMinutes ? (locale === "zh" ? `约 ${station.walkMinutes} 分钟步行` : `About ${station.walkMinutes} minutes walking`) : (locale === "zh" ? "步行时间暂不可用" : "Walking time unavailable")}</small>
+                        {station.lines?.length ? <div className="location-transit-lines"><span className="location-transit-lines-label">{locale === "zh" ? "经停线路" : "Lines serving stop"}</span>{station.lines.map((line) => <span className="location-transit-line" key={`${station.name}-${line.shortName || line.name}`}>{transitLineLabel(line, locale)}</span>)}</div> : null}
+                      </li>)}
                     </ul>
                     <p>{locationContext.routeOrigin === "privateAddress" ? (locale === "zh" ? "以上路线使用私密精确地址计算，精确地址不会显示在公开房源；请发布前复核时间和地点。" : "These routes used the private address on the server; the exact address will not appear on the public listing. Review the times and places before publishing.") : (locale === "zh" ? "以上时间根据所选大致区域估算，不代表精确房屋地址；发布前请复核。" : "Times use the selected approximate area, not the exact property address. Review before publishing.")}</p>
+                    <small className="google-attribution">Powered by Google, © 2026 Google</small>
                   </div>}
                   {!locationContextLoading && locationContext?.source === "google" && locationContext.cached && <p className="location-lookup-cache-note" role="status">{t.lookupCached}</p>}
+                  <div className="ai-polish-panel field-span-2" role="note">
+                    <div className="ai-polish-copy"><span className="ai-polish-mark" aria-hidden="true"><ShieldIcon size={16} /></span><div><strong>{t.polishTitle}</strong><p>{t.polishIntro}</p></div></div>
+                    <button className="outline-button ai-polish-button" type="button" onClick={polishListingWithAi} disabled={aiPolishLoading || (!draft.titleZh.trim() && !draft.descriptionZh.trim())}>{aiPolishLoading ? t.polishLoading : t.polishAction}<ArrowIcon size={14} /></button>
+                  </div>
                   {aiPolishSource && <p className="ai-polish-status field-span-2" role="status">{aiPolishSource === "openai" ? t.polishApplied : t.polishLocal}</p>}
                   {aiPolishNotes.length > 0 && <div className="ai-polish-notes field-span-2" role="note"><strong>{locale === "zh" ? "发布前请复核" : "Review before publishing"}</strong><ul>{aiPolishNotes.map((note) => <li key={note}>{note}</li>)}</ul></div>}
                   {aiPolishError && <p className="form-error field-span-2" role="alert">{aiPolishError}</p>}
