@@ -3,6 +3,7 @@ import { readLocationContextCache, writeLocationContextCache } from "./db";
 import {
   hasRailTransitLine as ruleHasRailTransitLine,
   hasUrbanTransitLine as ruleHasUrbanTransitLine,
+  isAcceptableNearbyWalkMinutes,
   isChineseOrAsianMarket as ruleIsChineseOrAsianMarket,
   isLongIslandHighway as ruleIsLongIslandHighway,
   placeNameKey as rulePlaceNameKey,
@@ -476,7 +477,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
       : "Server-side map context is not configured; AI will not invent nearby places or travel times.", lookupOptions);
   }
 
-  const cacheKey = JSON.stringify({ version: 7, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
+  const cacheKey = JSON.stringify({ version: 8, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
   const cached = contextCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     reportUsage({ placesCalls: 0, routeCalls: 0, cacheHit: true });
@@ -511,10 +512,37 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   const communityPlace = community
     ? (await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(community.query, routeOriginQuery), pageSize: 3 }, languageCode, budget))[0] || null
     : null;
-  const transitQuery = region === "longIsland" ? "LIRR station" : region === "urban" ? "subway station or bus stop" : "public transit station";
-  const transitPlaces = lookupOptions.includes("transit")
-    ? await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(transitQuery, routeOriginQuery), pageSize: 8, includedType: "transit_station", strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget, true)
-    : [];
+  let transitPlaces: PlaceResult[] = [];
+  if (lookupOptions.includes("transit")) {
+    if (region === "urban") {
+      // Search for the most local mode first. A broad "subway or bus" text
+      // search can return a recognizable but very distant subway station even
+      // when a nearby bus stop exists.
+      transitPlaces = await searchPlacesWithinBudget(apiKey, {
+        textQuery: nearbyQuery("bus stop", routeOriginQuery),
+        pageSize: 10,
+        includedType: "bus_station",
+        strictTypeFiltering: true,
+        rankPreference: "DISTANCE",
+      }, languageCode, budget, true);
+      const hasBusResult = transitPlaces.some((place) => {
+        const kind = urbanTransitKind(place);
+        return kind === "bus" || kind === "both";
+      });
+      if (!hasBusResult && budget.placesCalls < MAX_PLACES_CALLS_PER_LOOKUP) {
+        transitPlaces = await searchPlacesWithinBudget(apiKey, {
+          textQuery: nearbyQuery("subway station", routeOriginQuery),
+          pageSize: 8,
+          includedType: "subway_station",
+          strictTypeFiltering: true,
+          rankPreference: "DISTANCE",
+        }, languageCode, budget, true);
+      }
+    } else {
+      const transitQuery = region === "longIsland" ? "LIRR station" : "public transit station";
+      transitPlaces = await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(transitQuery, routeOriginQuery), pageSize: 8, includedType: "transit_station", strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget, true);
+    }
+  }
   const nearbyOptions = lookupOptions.filter((option): option is Exclude<LocationLookupOption, "transit" | "community"> => option !== "transit" && option !== "community");
   const nearbyResults = await Promise.all(nearbyOptions.map(async (option) => {
     const definition = nearbyDefinitions[option];
@@ -531,6 +559,24 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     }
     return { option, place: places[0] || null, attempted };
   }));
+  const transitCandidates = uniquePlaces(transitPlaces).filter((place) => region === "urban" ? hasUrbanTransitLine(place) : region === "longIsland" ? hasRailTransitLine(place) : true);
+  const transitPlacesForResults = region === "urban" ? selectUrbanTransitPlaces(transitCandidates) : transitCandidates.slice(0, 1);
+  const transitPlace = transitPlacesForResults[0] || null;
+  // Start the primary transit route before other optional destinations so the
+  // two-route budget is spent on the nearby bus/LIRR result first.
+  const transitResultPromise: Promise<LocationContextTransit | null> = transitPlace
+    ? (() => {
+      const isLongIsland = region === "longIsland";
+      const route = transitPlace.coordinates
+        ? routeMinutesWithinBudget(apiKey, routeOriginValue, transitPlace.coordinates, isLongIsland ? "DRIVE" : "WALK", languageCode, budget)
+        : Promise.resolve({ transitLines: [] } as RouteResult);
+      return route.then((routeResult) => {
+        if (!routeResult.minutes || (!isLongIsland && !isAcceptableNearbyWalkMinutes(routeResult.minutes))) return null;
+        const mode = transitModeLabel(transitPlace, locale, isLongIsland);
+        return { name: transitPlace.name, mode, ...(isLongIsland ? { driveMinutes: routeResult.minutes } : { walkMinutes: routeResult.minutes }), ...(transitPlace.transitLines.length ? { lines: transitPlace.transitLines } : {}) };
+      });
+    })()
+    : Promise.resolve(null);
   const nearbyCandidates = nearbyResults.flatMap(({ option, place }) => {
     if (!place) return [];
     const definition = nearbyDefinitions[option];
@@ -543,63 +589,61 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     : [];
   const highwayAttempted = budget.placesCalls > highwayPlacesBeforeLookup;
   const highwayPlace = uniquePlaces(highwayPlaces).find(isLongIslandHighway) || null;
-  const routeJobs: Array<{ place: PlaceResult; name: string; category: string; mode: "drive" | "walk" | "transit"; travelMode: "DRIVE" | "WALK" | "TRANSIT" }> = [];
-  if (region === "longIsland") {
-    if (highwayPlace?.coordinates) {
-      routeJobs.push({ place: highwayPlace, name: highwayPlace.name, category: locale === "zh" ? "主要高速公路（I-495）" : "Main highway (I-495)", mode: "drive", travelMode: "DRIVE" });
-    }
-  } else if (community && communityPlace?.coordinates) {
-    routeJobs.push({ place: communityPlace, name: communityPlace.name, category: locale === "zh" ? community.categoryZh : community.categoryEn, mode: "transit", travelMode: "TRANSIT" });
-  }
   const groceryPlace = nearbyResults.find((result) => result.option === "grocery")?.place;
-  if ((region !== "longIsland" && !community && groceryPlace?.coordinates) || (region === "longIsland" && !lookupOptions.includes("transit") && groceryPlace?.coordinates)) {
-    routeJobs.push({ place: groceryPlace, name: groceryPlace.name, category: locale === "zh" ? "中文超市 / 亚洲超市" : "Chinese / Asian supermarket", mode: "walk", travelMode: "WALK" });
+  const groceryRoutePlanned = Boolean(groceryPlace?.coordinates && (region !== "longIsland" || !lookupOptions.includes("transit") || !highwayPlace));
+  const routeJobs: Array<{ place: PlaceResult; name: string; category: string; mode: "drive" | "walk" | "transit"; travelMode: "DRIVE" | "WALK" | "TRANSIT" }> = [];
+  if (region === "longIsland" && highwayPlace?.coordinates) {
+    routeJobs.push({ place: highwayPlace, name: highwayPlace.name, category: locale === "zh" ? "主要高速公路（I-495）" : "Main highway (I-495)", mode: "drive", travelMode: "DRIVE" });
+  }
+  // Validate the supermarket before allowing it into the nearby list. The
+  // Places text endpoint can return a well-known market that matches the
+  // query but is not actually close to the private listing address.
+  if (groceryRoutePlanned && groceryPlace) {
+    routeJobs.push({ place: groceryPlace, name: groceryPlace.name, category: locale === "zh" ? nearbyDefinitions.grocery.categoryZh : nearbyDefinitions.grocery.categoryEn, mode: "walk", travelMode: "WALK" });
+  }
+  if (region !== "longIsland" && community && communityPlace?.coordinates) {
+    routeJobs.push({ place: communityPlace, name: communityPlace.name, category: locale === "zh" ? community.categoryZh : community.categoryEn, mode: "transit", travelMode: "TRANSIT" });
   }
   const destinationResults: Array<LocationContextDestination | null> = await Promise.all(routeJobs.map(async (job) => {
     const route = job.place.coordinates ? await routeMinutesWithinBudget(apiKey, routeOriginValue, job.place.coordinates, job.travelMode, languageCode, budget) : { transitLines: [] };
-    return route.minutes ? { name: job.name, category: job.category, mode: job.mode, minutes: route.minutes, ...(route.transitLines.length ? { transitLines: route.transitLines } : {}) } : null;
+    if (!route.minutes || (job.travelMode === "WALK" && !isAcceptableNearbyWalkMinutes(route.minutes))) return null;
+    return { name: job.name, category: job.category, mode: job.mode, minutes: route.minutes, ...(route.transitLines.length ? { transitLines: route.transitLines } : {}) };
   }));
   const destinations = destinationResults.filter((destination): destination is LocationContextDestination => destination !== null);
   const routedNames = new Set(destinations.map((destination) => placeNameKey(destination.name)));
-  const nearby = uniqueContextPlaces(nearbyCandidates).filter((place) => !routedNames.has(placeNameKey(place.name)));
+  const groceryDestination = groceryPlace ? destinations.find((destination) => placeNameKey(destination.name) === placeNameKey(groceryPlace.name)) : null;
+  const nearby = uniqueContextPlaces(nearbyCandidates).filter((place) => !routedNames.has(placeNameKey(place.name)) && !(groceryPlace && placeNameKey(place.name) === placeNameKey(groceryPlace.name)));
 
-  const transitCandidates = uniquePlaces(transitPlaces).filter((place) => region === "urban" ? hasUrbanTransitLine(place) : region === "longIsland" ? hasRailTransitLine(place) : true);
-  const transitPlacesForResults = region === "urban" ? selectUrbanTransitPlaces(transitCandidates) : transitCandidates.slice(0, 1);
-  const transitPlace = transitPlacesForResults[0] || null;
-  const transit = transitPlace
-    ? (() => {
-      const isLongIsland = region === "longIsland";
-      const route = transitPlace.coordinates ? routeMinutesWithinBudget(apiKey, routeOriginValue, transitPlace.coordinates, isLongIsland ? "DRIVE" : "WALK", languageCode, budget) : Promise.resolve({ transitLines: [] } as RouteResult);
-      return route.then((routeResult) => {
-        const mode = transitModeLabel(transitPlace, locale, isLongIsland);
-        return { name: transitPlace.name, mode, ...(isLongIsland && routeResult.minutes ? { driveMinutes: routeResult.minutes } : {}), ...(!isLongIsland && routeResult.minutes ? { walkMinutes: routeResult.minutes } : {}), ...(transitPlace.transitLines.length ? { lines: transitPlace.transitLines } : {}) };
-      });
-    })()
-    : Promise.resolve(null);
-  const transitResult = await transit;
+  const transitResult = await transitResultPromise;
   const secondaryTransitPlace = transitPlacesForResults[1] || null;
-  const secondaryTransitResult = secondaryTransitPlace
+  const secondaryTransitResult: Promise<LocationContextTransit | null> = secondaryTransitPlace
     ? (secondaryTransitPlace.coordinates
       ? routeMinutesWithinBudget(apiKey, routeOriginValue, secondaryTransitPlace.coordinates, region === "longIsland" ? "DRIVE" : "WALK", languageCode, budget)
       : Promise.resolve({ transitLines: [] } as RouteResult)
-    ).then((routeResult) => ({
-      name: secondaryTransitPlace.name,
-      mode: transitModeLabel(secondaryTransitPlace, locale, region === "longIsland"),
-      ...(region === "longIsland" && routeResult.minutes ? { driveMinutes: routeResult.minutes } : {}),
-      ...(region !== "longIsland" && routeResult.minutes ? { walkMinutes: routeResult.minutes } : {}),
-      ...(secondaryTransitPlace.transitLines.length ? { lines: secondaryTransitPlace.transitLines } : {}),
-    }))
+    ).then((routeResult) => {
+      if (!routeResult.minutes || (region !== "longIsland" && !isAcceptableNearbyWalkMinutes(routeResult.minutes))) return null;
+      return {
+        name: secondaryTransitPlace.name,
+        mode: transitModeLabel(secondaryTransitPlace, locale, region === "longIsland"),
+        ...(region === "longIsland" ? { driveMinutes: routeResult.minutes } : { walkMinutes: routeResult.minutes }),
+        ...(secondaryTransitPlace.transitLines.length ? { lines: secondaryTransitPlace.transitLines } : {}),
+      };
+    })
     : Promise.resolve(null);
   const transitResults = [transitResult, await secondaryTransitResult].filter((result): result is LocationContextTransit => Boolean(result));
   const hasFacts = nearby.length > 0 || transitResults.length > 0 || destinations.length > 0;
-  const groceryFound = Boolean(groceryPlace);
+  const groceryFound = Boolean(groceryDestination);
   const groceryAttempted = nearbyResults.find((result) => result.option === "grocery")?.attempted ?? false;
   const groceryNote = lookupOptions.includes("grocery") && !groceryFound
     ? !groceryAttempted
       ? (locale === "zh" ? "中文 / 亚洲超市查询达到本次地图调用上限；普通超市不会被标注为中文超市。" : "The Chinese / Asian supermarket lookup reached this map lookup's call limit; generic supermarkets are not labeled as Chinese supermarkets.")
+      : groceryPlace && !groceryRoutePlanned
+        ? (locale === "zh" ? "找到了候选中文 / 亚洲超市，但本次路线预算无法确认它距房源足够近；因此没有把它显示为附近超市。" : "A candidate Chinese / Asian supermarket was found, but the route budget could not confirm that it is near the listing, so it was not shown as a nearby supermarket.")
+        : groceryPlace
+          ? (locale === "zh" ? "没有找到距房源约 45 分钟步行以内的可验证中文 / 亚洲超市；普通超市不会被标注为中文超市。" : "No verifiable Chinese or Asian supermarket was found within about a 45-minute walk of the listing; generic supermarkets are not labeled as Chinese supermarkets.")
       : (locale === "zh" ? "未找到可验证的中文 / 亚洲超市；普通超市不会被标注为中文超市。" : "No verifiable Chinese or Asian supermarket was found; generic supermarkets are not labeled as Chinese supermarkets.")
     : "";
-  const transitNote = lookupOptions.includes("transit") && !transitPlacesForResults.length
+  const transitNote = lookupOptions.includes("transit") && !transitResults.length
     ? region === "urban"
       ? (locale === "zh" ? "未找到可验证的附近地铁或公交站；没有用长岛铁路或其他铁路站替代。" : "No verifiable nearby subway or bus stop was returned; a commuter-rail or other rail station was not substituted.")
       : region === "longIsland"
