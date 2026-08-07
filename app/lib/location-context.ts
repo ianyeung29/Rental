@@ -43,6 +43,8 @@ export type LocationContextUsage = {
   cacheHit: boolean;
 };
 
+export type LocationContextRouteOrigin = "privateAddress" | "approximateArea";
+
 export type CommuteMode = "drive" | "walk" | "transit";
 
 export type CommuteEstimate = {
@@ -59,6 +61,7 @@ export type CommuteEstimate = {
 export type LocationContext = {
   source: "google" | "none";
   approximateArea: string;
+  routeOrigin: LocationContextRouteOrigin;
   lookupOptions: LocationLookupOption[];
   nearby: LocationContextPlace[];
   transit: LocationContextTransit[];
@@ -72,6 +75,7 @@ type LocationContextRequest = {
   areaZh: string;
   boroughEn?: string;
   boroughZh?: string;
+  privateAddress?: string;
   locale?: "zh" | "en";
   lookupOptions?: unknown;
   onUsage?: (usage: LocationContextUsage) => void;
@@ -114,14 +118,18 @@ function clean(value: unknown, max = 180) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function privateAddressCacheHash(value: string) {
+  return createHash("sha256").update(value.toLocaleLowerCase()).digest("hex").slice(0, 24);
+}
+
 export function normalizeLocationLookupOptions(value: unknown, fallback = DEFAULT_LOCATION_LOOKUP_OPTIONS): LocationLookupOption[] {
   if (value === undefined) return [...fallback];
   if (!Array.isArray(value)) return [];
   return Array.from(new Set(value.filter((item): item is LocationLookupOption => typeof item === "string" && LOCATION_LOOKUP_OPTIONS.includes(item as LocationLookupOption)))).slice(0, MAX_LOCATION_LOOKUP_OPTIONS);
 }
 
-function emptyContext(area: string, note: string, lookupOptions: LocationLookupOption[]): LocationContext {
-  return { source: "none", approximateArea: area, lookupOptions, nearby: [], transit: [], destinations: [], notes: [note], cached: false };
+function emptyContext(area: string, note: string, lookupOptions: LocationLookupOption[], routeOrigin: LocationContextRouteOrigin = "approximateArea"): LocationContext {
+  return { source: "none", approximateArea: area, routeOrigin, lookupOptions, nearby: [], transit: [], destinations: [], notes: [note], cached: false };
 }
 
 function displayName(value: unknown) {
@@ -184,6 +192,7 @@ function locationContextFromCache(value: unknown, fallbackOptions: LocationLooku
   return {
     source: "google",
     approximateArea: clean(record.approximateArea),
+    routeOrigin: record.routeOrigin === "privateAddress" ? "privateAddress" : "approximateArea",
     lookupOptions: normalizeLocationLookupOptions(record.lookupOptions, fallbackOptions),
     nearby,
     transit,
@@ -301,6 +310,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   const areaZh = clean(request.areaZh);
   const boroughEn = clean(request.boroughEn);
   const boroughZh = clean(request.boroughZh);
+  const privateAddress = clean(request.privateAddress, 240);
   const area = areaZh || areaEn;
   const lookupOptions = normalizeLocationLookupOptions(request.lookupOptions);
   const locale = request.locale === "en" ? "en" : "zh";
@@ -326,7 +336,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
       : "Server-side map context is not configured; AI will not invent nearby places or travel times.", lookupOptions);
   }
 
-  const cacheKey = JSON.stringify({ version: 3, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions });
+  const cacheKey = JSON.stringify({ version: 4, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
   const cached = contextCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     reportUsage({ placesCalls: 0, routeCalls: 0, cacheHit: true });
@@ -345,23 +355,29 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
 
   const languageCode = locale === "zh" ? "zh-CN" : "en";
   const budget: LocationLookupBudget = { placesCalls: 0, routeCalls: 0 };
-  const centerResults = await searchPlacesWithinBudget(apiKey, { textQuery: queryArea, pageSize: 1 }, languageCode, budget);
+  const privateOriginResults = privateAddress
+    ? await searchPlacesWithinBudget(apiKey, { textQuery: privateAddress, pageSize: 1 }, languageCode, budget)
+    : [];
+  const centerResults = privateOriginResults[0]?.coordinates
+    ? privateOriginResults
+    : await searchPlacesWithinBudget(apiKey, { textQuery: queryArea, pageSize: 1 }, languageCode, budget);
   const center = centerResults[0]?.coordinates || null;
+  const routeOrigin = privateOriginResults[0]?.coordinates ? "privateAddress" : "approximateArea";
   const locationBias = center ? { circle: { center, radius: 5_000 } } : undefined;
   const nearbyDefinitions: Record<Exclude<LocationLookupOption, "transit" | "community">, NearbyDefinition> = {
-    grocery: { query: `Chinese supermarket near ${queryArea}`, categoryZh: "中文超市 / 亚洲超市", categoryEn: "Chinese / Asian supermarket", includedType: "supermarket" },
-    park: { query: `park near ${queryArea}`, categoryZh: "公园休闲", categoryEn: "Parks and recreation", includedType: "park" },
-    library: { query: `library near ${queryArea}`, categoryZh: "图书馆", categoryEn: "Libraries", includedType: "library" },
-    pharmacy: { query: `pharmacy near ${queryArea}`, categoryZh: "药房", categoryEn: "Pharmacies", includedType: "pharmacy" },
-    school: { query: `school near ${queryArea}`, categoryZh: "学校", categoryEn: "Schools", includedType: "school" },
-    restaurant: { query: `restaurant near ${queryArea}`, categoryZh: "餐饮", categoryEn: "Restaurants", includedType: "restaurant" },
+    grocery: { query: "Chinese supermarket", categoryZh: "中文超市 / 亚洲超市", categoryEn: "Chinese / Asian supermarket", includedType: "supermarket" },
+    park: { query: "park", categoryZh: "公园休闲", categoryEn: "Parks and recreation", includedType: "park" },
+    library: { query: "library", categoryZh: "图书馆", categoryEn: "Libraries", includedType: "library" },
+    pharmacy: { query: "pharmacy", categoryZh: "药房", categoryEn: "Pharmacies", includedType: "pharmacy" },
+    school: { query: "school", categoryZh: "学校", categoryEn: "Schools", includedType: "school" },
+    restaurant: { query: "restaurant", categoryZh: "餐饮", categoryEn: "Restaurants", includedType: "restaurant" },
   };
   const nearbyOptions = lookupOptions.filter((option): option is Exclude<LocationLookupOption, "transit" | "community"> => option !== "transit" && option !== "community");
   const nearbyResults = await Promise.all(nearbyOptions.map(async (option) => {
     const definition = nearbyDefinitions[option];
-    let places = await searchPlacesWithinBudget(apiKey, { textQuery: definition.query, pageSize: 1, includedType: definition.includedType, ...(locationBias ? { locationBias } : {}) }, languageCode, budget);
+    let places = await searchPlacesWithinBudget(apiKey, { textQuery: definition.query, pageSize: 1, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE", ...(locationBias ? { locationBias } : {}) }, languageCode, budget);
     if (!places.length && option === "grocery") {
-      places = await searchPlacesWithinBudget(apiKey, { textQuery: `Asian supermarket near ${queryArea}`, pageSize: 1, includedType: definition.includedType, ...(locationBias ? { locationBias } : {}) }, languageCode, budget);
+      places = await searchPlacesWithinBudget(apiKey, { textQuery: "Asian supermarket", pageSize: 1, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE", ...(locationBias ? { locationBias } : {}) }, languageCode, budget);
     }
     return { option, place: places[0] || null };
   }));
@@ -391,23 +407,27 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   const destinations = destinationResults.filter((destination): destination is LocationContextDestination => destination !== null);
 
   const transitPlaces = lookupOptions.includes("transit")
-    ? await searchPlacesWithinBudget(apiKey, { textQuery: `public transit station near ${queryArea}`, pageSize: 1, includedType: "transit_station", ...(locationBias ? { locationBias } : {}) }, languageCode, budget)
+    ? await searchPlacesWithinBudget(apiKey, { textQuery: "public transit station", pageSize: 1, includedType: "transit_station", strictTypeFiltering: true, rankPreference: "DISTANCE", ...(locationBias ? { locationBias } : {}) }, languageCode, budget)
     : [];
   const transit = await Promise.all(uniquePlaces(transitPlaces).slice(0, 1).map(async (place) => {
     const walk = center && place.coordinates ? await routeMinutesWithinBudget(apiKey, center, place.coordinates, "WALK", languageCode, budget) : undefined;
     return { name: place.name, mode: locale === "zh" ? "公共交通" : "Public transit", ...(walk ? { walkMinutes: walk } : {}) };
   }));
   const hasFacts = nearby.length > 0 || transit.length > 0 || destinations.length > 0;
+  const contextNote = routeOrigin === "privateAddress"
+    ? (locale === "zh" ? "周边和出行时间使用发布者填写的私密地址计算；精确地址不会发送给 AI 或显示在公开页面，发布前请复核。" : "Nearby facts and travel times use the poster's private address on the server; the exact address is not sent to AI or shown publicly. Review before publishing.")
+    : (locale === "zh" ? "周边和目的地时间按所选大致区域估算，不代表精确房址；车程和步行时间请发布前复核。" : "Nearby facts and destination times use the selected area, not the exact property address; drive and walking times are approximate. Review before publishing.");
   const result: LocationContext = {
     source: hasFacts ? "google" : "none",
     approximateArea: area,
+    routeOrigin,
     lookupOptions,
     nearby,
     transit,
     destinations,
     notes: [
       hasFacts
-        ? (locale === "zh" ? "周边和目的地时间按所选大致区域估算，不代表精确房址；车程和步行时间请发布前复核。" : "Nearby facts and destination times use the selected area, not the exact address; drive and walking times are approximate. Review before publishing.")
+        ? contextNote
         : (locale === "zh" ? "地图服务没有返回所选类别的可用结果；AI不会补写未经验证的说法。" : "The map service returned no usable results for the selected categories; AI will not add unverified claims."),
     ],
     cached: false,

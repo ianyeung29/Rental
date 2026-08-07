@@ -11,6 +11,7 @@ type ListingInput = {
   titleZh?: unknown;
   areaEn?: unknown;
   areaZh?: unknown;
+  privateAddress?: unknown;
   boroughEn?: unknown;
   boroughZh?: unknown;
   locale?: unknown;
@@ -74,7 +75,7 @@ const SYSTEM_PROMPT = `You are a careful bilingual rental-listing editor for a h
 
 Rewrite only the facts supplied by the poster. Do not invent rent, square footage, amenities, transit access, views, availability, verification, photos, exact addresses, contact details, or legal promises. Preserve numbers, dates, and approximate-location language. The marketplace uses USD by default, so do not add a currency code to user-facing listing copy. Keep the English and Simplified Chinese versions aligned. If one language is missing, translate conservatively from the supplied facts.
 
-The optional locationContext contains provider-returned facts for the selected approximate area, not the property address. Use nearby places only as area references. A destination with minutes is an approximate route from the selected area: describe drive destinations as approximate driving time and walk destinations as approximate walking time. Do not turn these facts into a claim about the exact building, a guaranteed commute, or a guarantee of service frequency. If locationContext is empty or has no facts, do not add nearby, destination, or transportation claims.
+The optional locationContext contains provider-returned facts for the selected area. When routeOrigin is privateAddress, the server used the private address only to improve route accuracy; the exact address is not included in this input and must never appear in the output. Use nearby places only as area references. A destination with minutes is still an approximate route: describe drive destinations as approximate driving time and walk destinations as approximate walking time. Do not turn these facts into a guaranteed commute, an exact-address disclosure, or a guarantee of service frequency. If locationContext is empty or has no facts, do not add nearby, destination, or transportation claims.
 
 Remove or rewrite discriminatory housing preferences or screening language. The marketplace supports Chinese-language outreach, but listings must not restrict housing based on protected traits or imply that only a particular ethnicity, nationality, family status, disability status, religion, sex, or similar group may rent. Mention a short review note when you had to soften or remove a risky claim.
 
@@ -131,11 +132,13 @@ function localPolish(input: NormalizedListing) {
   const transitLine = input.locationContext?.transit.map((item) => `${item.name} (${item.mode}${item.walkMinutes ? `, about a ${item.walkMinutes}-minute walk` : ""})`).join(", ") || "";
   const destinationLine = input.locationContext?.destinations.map((item) => `${item.name} (${item.category}, ${item.minutes ? `about ${item.minutes} minutes` : "travel time unavailable"} by ${item.mode === "drive" ? "car" : "walking"})`).join(", ") || "";
   const destinationLineZh = input.locationContext?.destinations.map((item) => `${item.name}（${item.category}，约 ${item.minutes || "暂缺"} 分钟${item.mode === "drive" ? "车程" : "步行"}）`).join("、") || "";
+  const contextLabelEn = input.locationContext?.routeOrigin === "privateAddress" ? "Approximate travel references from the listing location, to verify before publishing" : "Selected-area references, to verify before publishing";
+  const contextLabelZh = input.locationContext?.routeOrigin === "privateAddress" ? "房源附近参考（发布前请核实）" : "所选区域参考（发布前请核实）";
   const contextEn = input.locationContext?.source === "google" && (nearbyLine || transitLine || destinationLine)
-    ? `Selected-area references, to verify before publishing: ${[nearbyLine ? `Nearby: ${nearbyLine}.` : "", destinationLine ? `Destinations: ${destinationLine}.` : "", transitLine ? `Transportation: ${transitLine}.` : ""].filter(Boolean).join(" ")}`
+    ? `${contextLabelEn}: ${[nearbyLine ? `Nearby: ${nearbyLine}.` : "", destinationLine ? `Destinations: ${destinationLine}.` : "", transitLine ? `Transportation: ${transitLine}.` : ""].filter(Boolean).join(" ")}`
     : "";
   const contextZh = input.locationContext?.source === "google" && (nearbyLine || transitLine || destinationLineZh)
-    ? `所选区域参考（发布前请核实）：${[nearbyLine ? `附近：${nearbyLine}。` : "", destinationLineZh ? `生活圈和超市：${destinationLineZh}。` : "", transitLine ? `交通：${transitLine}。` : ""].filter(Boolean).join("")}`
+    ? `${contextLabelZh}：${[nearbyLine ? `附近：${nearbyLine}。` : "", destinationLineZh ? `生活圈和超市：${destinationLineZh}。` : "", transitLine ? `交通：${transitLine}。` : ""].filter(Boolean).join("")}`
     : "";
   const descriptionEn = [
     input.descriptionEn,
@@ -201,10 +204,13 @@ export async function POST(request: Request) {
   }
   if (!rateLimit.allowed) return NextResponse.json({ error: "You have reached the listing polish limit for this hour." }, { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } });
   let input: NormalizedListing;
+  let privateAddress = "";
   try {
     const rawBody = await request.text();
     if (rawBody.length > MAX_BODY_LENGTH) return NextResponse.json({ error: "Listing draft is too large." }, { status: 413 });
-    input = normalizeInput(JSON.parse(rawBody) as ListingInput);
+    const parsedBody = JSON.parse(rawBody) as ListingInput;
+    privateAddress = text(parsedBody.privateAddress, 240);
+    input = normalizeInput(parsedBody);
   } catch {
     return NextResponse.json({ error: "Please send a valid listing draft." }, { status: 400 });
   }
@@ -220,6 +226,7 @@ export async function POST(request: Request) {
       areaZh: input.areaZh,
       boroughEn: input.boroughEn,
       boroughZh: input.boroughZh,
+      privateAddress,
       locale: input.locale,
       lookupOptions: input.locationLookupOptions,
       onUsage: (usage) => { mapUsage = usage; },
@@ -228,6 +235,7 @@ export async function POST(request: Request) {
     input.locationContext = {
       source: "none",
       approximateArea: input.areaZh || input.areaEn,
+      routeOrigin: "approximateArea",
       nearby: [],
       transit: [],
       destinations: [],

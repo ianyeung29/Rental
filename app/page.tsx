@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useEffect, useId, useMemo, useRef, useState } f
 import Image from "next/image";
 import AccountDrawer from "./components/AccountDrawer";
 import ApplicationDrawer, { type ApplicationFormValues } from "./components/ApplicationDrawer";
+import AreaContextPanel from "./components/AreaContextPanel";
 import AuthDrawer from "./components/AuthDrawer";
 import CommuteEstimator from "./components/CommuteEstimator";
 import DetailActionDock from "./components/DetailActionDock";
@@ -1163,13 +1164,13 @@ const copy = {
     stageContact: "联系与看房",
     stagePublish: "核验、预览、发布",
     polishTitle: "AI 润色房源文案",
-    polishIntro: "根据你填写的事实和所选大致区域优化文案；可检查法拉盛市中心、布鲁克林八大道和附近中文超市的参考时间。精确地址不会发送给 AI。",
+    polishIntro: "根据你填写的事实和附近参考优化文案；精确地址只用于服务器端计算路线，不会发送给 AI 或显示在公开页面。",
     lookupTitle: "选择要查找的附近信息（可选）",
-    lookupHelp: "只会查询你勾选的类别；最多选择 3 项。生活圈和超市时间来自大致区域，发布前请复核。",
+    lookupHelp: "只会查询你勾选的类别；最多选择 3 项。路线会优先使用私密精确地址；如果无法定位，才退回大致区域，发布前请复核。",
     lookupNone: "未选择附近查找；这次只润色房源文字，不产生 Google 地图查询。",
     lookupSelected: "已选择",
     lookupCached: "已使用缓存的附近参考，没有重复查询 Google。",
-    lookupFresh: "已加入所选区域的附近参考；发布前请复核。",
+    lookupFresh: "已加入所选位置的附近参考；发布前请复核。",
     polishAction: "用 AI 润色",
     polishLoading: "正在润色…",
     polishApplied: "AI 文案已写入，请发布前复核",
@@ -1315,13 +1316,13 @@ const copy = {
     stageContact: "Contact and tours",
     stagePublish: "Verify, preview, publish",
     polishTitle: "AI listing polish",
-    polishIntro: "Polish the Chinese copy from your facts and selected approximate area. You can check approximate travel time to Downtown Flushing, Brooklyn 8th Avenue, and a nearby Chinese/Asian supermarket; the exact address never goes to AI.",
+    polishIntro: "Polish the copy from your facts and nearby references. The exact address is used only on the server for route estimates; it is never sent to AI or shown publicly.",
     lookupTitle: "Choose nearby information to check (optional)",
-    lookupHelp: "Only checked categories are queried; choose up to 3. Community and supermarket times use the approximate area and should be reviewed before publishing.",
+    lookupHelp: "Only checked categories are queried; choose up to 3. Routes use the private exact address when it can be located, otherwise the approximate area; review before publishing.",
     lookupNone: "No nearby lookup selected; this polish uses only your listing text and makes no Google Maps request.",
     lookupSelected: "selected",
     lookupCached: "Used cached nearby facts; Google was not queried again.",
-    lookupFresh: "Added approximate-area nearby facts; review them before publishing.",
+    lookupFresh: "Added nearby facts for the selected location; review them before publishing.",
     polishAction: "Polish with AI",
     polishLoading: "Polishing…",
     polishApplied: "AI copy applied — review before publishing",
@@ -3324,6 +3325,7 @@ export default function HomePage() {
           titleZh: draft.titleZh,
           areaEn: draft.areaEn || draft.areaZh,
           areaZh: draft.areaZh,
+          privateAddress: draft.privateAddress,
           boroughEn: selectedPostAreaGroup?.en || draft.areaEn,
           boroughZh: selectedPostAreaGroup?.zh || draft.areaZh,
           locale,
@@ -4429,12 +4431,12 @@ export default function HomePage() {
 
               {postStep === 1 && (
                 <div className="post-form-grid">
-                  <div className="post-quick-start field-span-2" role="note"><strong>{locale === "zh" ? "先选一个常用区域，再填写 3 项核心信息" : "Start with a popular area, then add the 3 core details"}</strong><p>{locale === "zh" ? "标题、公开区域和精确地址是第一步必填项；精确地址只用于后续看房沟通。" : "Title, public area, and exact address are required here; the exact address stays out of the public listing."}</p></div>
+                  <div className="post-quick-start field-span-2" role="note"><strong>{locale === "zh" ? "先选一个常用区域，再填写 3 项核心信息" : "Start with a popular area, then add the 3 core details"}</strong><p>{locale === "zh" ? "标题、公开区域和精确地址是第一步必填项；精确地址只用于看房沟通和服务器端附近路线估算。" : "Title, public area, and exact address are required here; the exact address stays private and is used for tour communication and server-side nearby route estimates."}</p></div>
                   <label className="field-label" htmlFor="post-title-zh">{locale === "zh" ? "中文房源标题" : "Listing title"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-title-zh" value={draft.titleZh} onChange={(event) => updateDraft({ titleZh: event.target.value })} placeholder={locale === "zh" ? "近地铁的明亮两居" : "Bright two-bedroom near transit"} /></label>
                   <div className="post-location-picker field-span-2" role="group" aria-labelledby="post-location-heading"><div className="post-helper-heading"><span id="post-location-heading">{locale === "zh" ? "公开区域" : "Public area"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span></span><small>{locale === "zh" ? "先选行政区 / 地区，再选区域 / 城市" : "Choose a borough or region, then an area or city"}</small></div><p className="field-help">{locale === "zh" ? "公开页面只显示大致区域；精确地址不会放在公开房源中。" : "Public pages show only an approximate area; the exact address stays private."}</p><div className="post-location-grid"><label className="field-label" htmlFor="post-area-group">{locale === "zh" ? "行政区 / 地区" : "Borough / region"}<select id="post-area-group" value={draft.areaGroupId} onChange={(event) => { const group = POPULAR_AREA_GROUPS.find((item) => item.id === event.target.value); updateDraft({ areaGroupId: event.target.value, areaLocationId: "", areaZh: group?.zh || "", areaEn: group?.en || "" }); }}><option value="">{locale === "zh" ? "请选择行政区或地区" : "Choose a borough or region"}</option>{POPULAR_AREA_GROUPS.map((group) => <option value={group.id} key={group.id}>{group.zh} / {group.en}</option>)}</select></label><label className="field-label" htmlFor="post-area-location">{locale === "zh" ? "区域 / 城市" : "Area / city"}<select id="post-area-location" value={draft.areaLocationId} disabled={!selectedPostAreaGroup} onChange={(event) => { const location = selectedPostAreaGroup?.locations.find((item) => item.id === event.target.value); updateDraft({ areaLocationId: event.target.value, areaZh: location?.zh || draft.areaZh, areaEn: location?.en || draft.areaEn }); }}><option value="">{selectedPostAreaGroup ? (locale === "zh" ? "请选择区域或城市" : "Choose an area or city") : (locale === "zh" ? "请先选择行政区 / 地区" : "Choose a borough or region first")}</option>{selectedPostAreaGroup?.locations.map((location) => <option value={location.id} key={location.id}>{location.zh} / {location.en}</option>)}{selectedPostAreaGroup && <option value="custom">{locale === "zh" ? "其他区域 / 手动输入" : "Other area / enter manually"}</option>}</select></label></div></div>
                   <label className="field-label field-span-2" htmlFor="post-area-zh">{locale === "zh" ? "公开区域名称" : "Public area label"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-area-zh" value={draft.areaZh} onChange={(event) => updateDraft({ areaZh: event.target.value, areaEn: "", areaLocationId: draft.areaGroupId ? "custom" : "" })} placeholder={locale === "zh" ? "例如：皇后区 · 森林小丘一带" : "Example: Queens · around Forest Hills"} /><span className="field-help">{locale === "zh" ? "选择区域后可继续修改公开名称；建议使用中文，方便本地租客搜索。" : "You can edit the public label after selecting an area; Chinese helps local renters search."}</span></label>
-                  <label className="field-label" htmlFor="post-private-address">{locale === "zh" ? "精确地址（私密）" : "Exact address (private)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-private-address" value={draft.privateAddress} onChange={(event) => updateDraft({ privateAddress: event.target.value })} placeholder={locale === "zh" ? "请输入完整街道地址" : "Enter the full street address"} /></label>
-                  <div className="post-privacy-note"><LockIcon /><div><strong>{t.addressPrivate}</strong><p>仅保存在本地草稿，不会出现在公开房源卡片。</p></div></div>
+                  <label className="field-label" htmlFor="post-private-address">{locale === "zh" ? "精确地址（私密）" : "Exact address (private)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-private-address" value={draft.privateAddress} onChange={(event) => updateDraft({ privateAddress: event.target.value })} placeholder={locale === "zh" ? "请输入完整街道地址" : "Enter the full street address"} /><span className="field-help">{locale === "zh" ? "只在服务器端用于路线估算和看房沟通；不会发送给 AI 或放在公开房源。" : "Used on the server for route estimates and tour communication; never sent to AI or shown on the public listing."}</span></label>
+                  <div className="post-privacy-note"><LockIcon /><div><strong>{t.addressPrivate}</strong><p>不会出现在公开房源卡片；使用 AI 附近参考时，只在服务器端用于 Google 路线估算。</p></div></div>
                   <label className="field-label" htmlFor="post-role">发布者角色<select id="post-role" value={draft.posterRole} onChange={(event) => updateDraft({ posterRole: event.target.value as ListingDraft["posterRole"] })} disabled={Boolean(currentUser) && !canPostAsAgent}><option value="owner">房主</option>{canPostAsAgent && <option value="agent">房产经纪</option>}</select>{currentUser?.accountType === "agent" && !currentUser.agentVerified && <small className="field-help">完成经纪执照核验后，才可使用经纪身份并获得更高发布额度。</small>}{currentUser && currentUser.accountType === "user" && <small className="field-help">普通用户账户按个人房源额度发布。</small>}</label>
                 </div>
               )}
@@ -4478,7 +4480,7 @@ export default function HomePage() {
                     <p className="location-lookup-note">{draft.locationLookupOptions.length === 0 ? t.lookupNone : `${draft.locationLookupOptions.length} ${t.lookupSelected}`}</p>
                   </fieldset>
                   {locationContextLoading && <p className="ai-location-status field-span-2" role="status">{locale === "zh" ? "正在整理所选区域的附近设施和交通参考…" : "Collecting nearby and transit context for the selected area…"}</p>}
-                  {!locationContextLoading && locationContext && <p className={`ai-location-status field-span-2 ${locationContext.source === "google" ? "ready" : ""}`} role="status">{locationContext.source === "google" ? (locale === "zh" ? "已加入大致区域的周边、华人生活圈和出行时间；发布前请复核。" : "Approximate-area nearby places, community destinations, and travel times were added; review before publishing.") : locationContext.notes[0] || (locale === "zh" ? "没有加入未经验证的周边或交通说法。" : "No unverified nearby or transit claims were added.")}</p>}
+                  {!locationContextLoading && locationContext && <p className={`ai-location-status field-span-2 ${locationContext.source === "google" ? "ready" : ""}`} role="status">{locationContext.source === "google" ? (locationContext.routeOrigin === "privateAddress" ? (locale === "zh" ? "已使用私密精确地址加入附近设施和出行时间；地址不会发送给 AI 或公开，发布前请复核。" : "Nearby places and travel times used the private address on the server; the address is not sent to AI or shown publicly. Review before publishing.") : (locale === "zh" ? "已加入大致区域的周边、华人生活圈和出行时间；发布前请复核。" : "Approximate-area nearby places, community destinations, and travel times were added; review before publishing.")) : locationContext.notes[0] || (locale === "zh" ? "没有加入未经验证的周边或交通说法。" : "No unverified nearby or transit claims were added.")}</p>}
                   {!locationContextLoading && locationContext?.source === "google" && (locationContext.destinations.length > 0 || locationContext.nearby.length > 0 || locationContext.transit.length > 0) && <div className="location-context-results field-span-2" role="note">
                     <strong>{locale === "zh" ? "已找到的区域参考" : "Area references found"}</strong>
                     <ul>
@@ -4486,7 +4488,7 @@ export default function HomePage() {
                       {locationContext.nearby.map((place) => <li key={`nearby-${place.name}`}><span>{place.category}</span><strong>{place.name}</strong><small>{locale === "zh" ? "大致区域附近" : "Near the approximate area"}</small></li>)}
                       {locationContext.transit.map((station) => <li key={`transit-${station.name}`}><span>{station.mode}</span><strong>{station.name}</strong><small>{station.walkMinutes ? (locale === "zh" ? `约 ${station.walkMinutes} 分钟步行` : `About ${station.walkMinutes} minutes walking`) : (locale === "zh" ? "步行时间暂不可用" : "Walking time unavailable")}</small></li>)}
                     </ul>
-                    <p>{locale === "zh" ? "以上时间根据所选大致区域估算，不代表精确房屋地址；发布前请复核。" : "Times use the selected approximate area, not the exact property address. Review before publishing."}</p>
+                    <p>{locationContext.routeOrigin === "privateAddress" ? (locale === "zh" ? "以上路线使用私密精确地址计算，精确地址不会显示在公开房源；请发布前复核时间和地点。" : "These routes used the private address on the server; the exact address will not appear on the public listing. Review the times and places before publishing.") : (locale === "zh" ? "以上时间根据所选大致区域估算，不代表精确房屋地址；发布前请复核。" : "Times use the selected approximate area, not the exact property address. Review before publishing.")}</p>
                   </div>}
                   {!locationContextLoading && locationContext?.source === "google" && locationContext.cached && <p className="location-lookup-cache-note" role="status">{t.lookupCached}</p>}
                   {aiPolishSource && <p className="ai-polish-status field-span-2" role="status">{aiPolishSource === "openai" ? t.polishApplied : t.polishLocal}</p>}
@@ -4686,6 +4688,7 @@ export default function HomePage() {
               <h3 className="drawer-section-heading">{t.detailAmenities}</h3>
               <div className="tag-row drawer-tags">{listingTags(selectedListing).map((tag) => <span className="listing-tag" key={tag}>{tag}</span>)}</div>
               <div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>{listingPrivacy(selectedListing)}</p></div></div>
+              <AreaContextPanel locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
               <CommuteEstimator locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
               <SafetyNotice
                 locale={locale}
