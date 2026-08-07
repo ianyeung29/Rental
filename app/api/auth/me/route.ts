@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AuthError, getCurrentUser, updateCurrentUserProfile } from "../../../lib/auth";
+import { recordAuditEventSafely } from "../../../lib/audit";
 
 export async function GET() {
   try {
@@ -18,8 +19,10 @@ export async function PATCH(request: Request) {
     const displayName = typeof body.displayName === "string" ? body.displayName : currentUser.displayName;
     const phone = typeof body.phone === "string" ? body.phone : currentUser.phone;
     const user = await updateCurrentUserProfile(currentUser.id, { displayName, phone });
+    await recordAuditEventSafely({ request, eventType: "account.profile_update", user, metadata: { fields: ["displayName", "phone"] } });
     return NextResponse.json({ user });
   } catch (error) {
+    await recordAuditEventSafely({ request, eventType: "account.profile_update", outcome: "failure" });
     const status = error instanceof AuthError ? error.status : 502;
     return NextResponse.json({ error: error instanceof Error ? error.message : "Profile could not be updated right now." }, { status });
   }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../lib/auth";
+import { recordAuditEventSafely } from "../../lib/audit";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { isAgentPortraitKeyForUser, publicUrlForKey } from "../../lib/r2";
 
@@ -118,6 +119,7 @@ export async function POST(request: Request) {
       tx.query("UPDATE rental_users SET agent_verification_status = 'pending', updated_at = NOW() WHERE id = $1", [context.user.id]),
     ]);
     const row = result[0]?.[0] as Record<string, unknown> | undefined;
+    await recordAuditEventSafely({ request, eventType: "agent.verification_submit", user: context.user, metadata: { licenseState, brokerage, hasPortrait: Boolean(portraitKey) } });
     return NextResponse.json(applicationFromRow(row, "pending"), { status: 201 });
   } catch {
     return NextResponse.json({ error: "The agent verification request could not be submitted." }, { status: 502 });

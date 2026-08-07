@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../../lib/auth";
+import { recordAuditEventSafely } from "../../../../lib/audit";
 import { ensureDatabaseSchema, sql } from "../../../../lib/db";
 
 const REVIEW_STATUSES = new Set(["verified", "rejected", "expired", "pending"]);
@@ -53,7 +54,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
             verification_reviewed_at = NOW(), verification_note = $2, updated_at = NOW()
         WHERE user_id = $3
       `, [verified, note, id]),
-    ]);
+      ]);
+    await recordAuditEventSafely({
+      request,
+      eventType: "admin.agent_verification_review",
+      user: auth.user,
+      metadata: { agentUserId: id, status, agentVerified: verified },
+    });
     return NextResponse.json({ userId: id, status, agentVerified: verified });
   } catch {
     return NextResponse.json({ error: "The agent verification decision could not be saved." }, { status: 502 });

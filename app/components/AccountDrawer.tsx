@@ -536,6 +536,10 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <span><strong>{zh ? "API 使用与成本" : "API usage and cost"}</strong><small>{zh ? "查看 AI、地图调用、缓存命中和限流情况。" : "Monitor AI, map calls, cache hits, and persistent limits."}</small></span>
             <b aria-hidden="true">→</b>
           </Link>}
+          {user.role === "admin" && <Link className="admin-access-panel" href="/admin/activity" onClick={onClose}>
+            <span><strong>{zh ? "安全活动日志" : "Security activity log"}</strong><small>{zh ? "查看登录、浏览、发布和管理操作的设备与网络信号。" : "Review login, browsing, publishing, and admin activity signals."}</small></span>
+            <b aria-hidden="true">→</b>
+          </Link>}
           <section className="account-profile-panel" aria-labelledby="private-profile-title">
             <div className="account-profile-heading">
               <div><span className="section-label">{zh ? "私密资料" : "PRIVATE PROFILE"}</span><h3 id="private-profile-title">{zh ? "我的资料" : "My profile"}</h3><p>{zh ? "仅你可见，不会出现在公开房源页。" : "Private to your account; it is not shown on public listings."}</p></div>

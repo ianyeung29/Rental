@@ -7,6 +7,10 @@
     {
       "path": "/api/alerts/tours",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/alerts/audit-retention",
+      "schedule": "30 4 * * *"
     }
   ]
 }

@@ -1443,6 +1443,21 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .admin-filter-button { display: inline-flex; align-items: center; gap: 8px; min-height: 35px; padding: 0 10px; border: 1px solid var(--line-strong); color: var(--muted); background: var(--panel); font-size: 10px; font-weight: 700; }
 .admin-filter-button:hover, .admin-filter-button.active { border-color: var(--blue); color: var(--blue-dark); background: var(--blue-wash); }
 .admin-filter-button span { min-width: 18px; color: var(--ink); font-size: 9px; text-align: center; }
+.admin-audit-filters { display: grid; grid-template-columns: minmax(150px, .75fr) minmax(150px, .75fr) minmax(240px, 1.5fr) auto; align-items: end; gap: 12px; margin-top: 24px; padding: 15px; border: 1px solid var(--line-strong); background: var(--panel); }
+.admin-audit-filters label { display: grid; gap: 7px; min-width: 0; }
+.admin-audit-filters label > span { color: var(--muted); font-size: 10px; font-weight: 700; }
+.admin-audit-filters select, .admin-audit-filters input { width: 100%; min-height: 39px; padding: 0 10px; border: 1px solid var(--line-strong); color: var(--ink); background: var(--paper); font: inherit; font-size: 11px; }
+.admin-audit-filters select:focus, .admin-audit-filters input:focus { border-color: var(--blue); outline: 0; box-shadow: 0 0 0 3px rgba(39, 104, 240, .11); }
+.admin-audit-filters .primary-button { min-height: 39px; white-space: nowrap; }
+.admin-audit-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.admin-audit-table { min-width: 1200px; }
+.admin-audit-table th, .admin-audit-table td { vertical-align: top; white-space: normal; }
+.admin-audit-table td:first-child { min-width: 150px; }
+.admin-audit-table td > strong, .admin-audit-table td > small, .admin-audit-table td > span { display: block; }
+.admin-audit-table td > .status-chip { display: inline-flex; width: fit-content; margin-top: 6px; }
+.admin-audit-table td small { margin-top: 5px; color: var(--soft-muted); font-size: 9px; font-weight: 400; line-height: 1.45; }
+.admin-audit-table code { display: block; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
+.admin-audit-metadata { min-width: 180px; max-width: 280px; color: var(--muted); font-size: 9px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; }
 .admin-moderation-list { display: grid; gap: 14px; padding-top: 14px; }
 .admin-moderation-item { border: 1px solid var(--line-strong); background: var(--panel); }
 .admin-moderation-item-header { display: grid; gap: 10px; padding: 18px 20px 16px; border-bottom: 1px solid var(--line); }
@@ -1515,6 +1530,9 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
   .admin-review-controls { padding-top: 20px; padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
   .admin-heading .admin-period-switcher { width: 100%; }
   .admin-period-switcher button { flex: 1; }
+  .admin-audit-filters { grid-template-columns: 1fr 1fr; }
+  .admin-audit-filters .admin-audit-search { grid-column: 1 / -1; }
+  .admin-audit-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-usage-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .admin-usage-summary > div:nth-child(3) { border-right: 0; }
   .admin-usage-summary > div:nth-child(n + 4) { border-top: 1px solid var(--line); }
@@ -1529,6 +1547,9 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
   .admin-breadcrumb { margin-bottom: 24px; }
   .admin-heading h1 { font-size: 36px; }
   .admin-heading p { font-size: 14px; }
+  .admin-audit-filters { grid-template-columns: 1fr; }
+  .admin-audit-filters .admin-audit-search { grid-column: auto; }
+  .admin-audit-filters .primary-button { width: 100%; }
   .admin-summary-row { grid-template-columns: 1fr 1fr; }
   .admin-summary-row > div { min-width: 0; padding-right: 12px; }
   .admin-summary-row > div + div { padding-left: 12px; }

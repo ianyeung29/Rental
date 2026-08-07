@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../lib/auth";
+import { recordAuditEventSafely } from "../../lib/audit";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { emailIsConfigured, sendInquiryConfirmation, sendInquiryNotification } from "../../lib/email";
 import { emailAlertsAllowed } from "../../lib/notification-preferences";
@@ -125,6 +126,7 @@ export async function POST(request: Request) {
       INSERT INTO rental_inquiries (id, listing_id, requester_id, move_in, lease_length, occupants, pets, tour_preference, message)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `, [id, listingId, user.id, moveIn, leaseLength, occupants, pets, tourPreference, message]);
+    await recordAuditEventSafely({ request, eventType: "inquiry.create", user, metadata: { inquiryId: id, listingId, tourPreference } });
     if (listing.owner_id && String(listing.owner_id) !== user.id) {
       await sql.query(`
         INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
