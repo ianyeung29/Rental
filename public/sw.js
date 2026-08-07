@@ -1,4 +1,4 @@
-const CACHE_VERSION = "anjurentals-pwa-v3";
+const CACHE_VERSION = "anjurentals-pwa-v5";
 const APP_SHELL = [
   "/",
   "/about",
@@ -92,8 +92,22 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (url.pathname.startsWith("/_next/static/")) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request)),
+    );
+    return;
+  }
+
   const isCacheableAsset =
-    url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/brand/") ||
     url.pathname.startsWith("/listings/") ||
     url.pathname.startsWith("/icons/") ||

@@ -509,7 +509,8 @@ const LOCATION_LOOKUP_OPTION_COPY: Record<LocationLookupOption, { zh: string; en
 };
 
 function transitLineLabel(line: LocationContextTransitLine, locale: Locale) {
-  const vehicle = line.vehicleType === "BUS" ? (locale === "zh" ? "公交" : "Bus") : line.vehicleType === "SUBWAY" || line.vehicleType === "METRO_RAIL" ? (locale === "zh" ? "地铁" : "Subway") : line.vehicleType === "TRAIN" || line.vehicleType === "RAIL" || line.vehicleType === "HEAVY_RAIL" || line.vehicleType === "COMMUTER_TRAIN" ? (locale === "zh" ? "铁路" : "Rail") : "";
+  const vehicleType = line.vehicleType?.toLocaleUpperCase();
+  const vehicle = vehicleType === "BUS" || vehicleType === "INTERCITY_BUS" || vehicleType === "TROLLEYBUS" ? (locale === "zh" ? "公交" : "Bus") : vehicleType === "SUBWAY" || vehicleType === "METRO_RAIL" ? (locale === "zh" ? "地铁" : "Subway") : vehicleType === "TRAIN" || vehicleType === "RAIL" || vehicleType === "HEAVY_RAIL" || vehicleType === "COMMUTER_TRAIN" ? (locale === "zh" ? "铁路" : "Rail") : "";
   const name = line.shortName || line.name;
   return vehicle ? `${vehicle} ${name}` : name;
 }
@@ -1173,7 +1174,7 @@ const copy = {
     polishTitle: "AI 润色房源文案",
     polishIntro: "根据你填写的事实和附近参考优化文案；精确地址只用于服务器端计算路线，不会发送给 AI 或显示在公开页面。",
     lookupTitle: "选择要查找的附近信息（可选）",
-    lookupHelp: "只会查询你勾选的类别；最多选择 3 项。华人生活圈会优先估算公共交通路线；地铁或公交站会显示步行时间和 Google 返回的线路编号。路线会优先使用私密精确地址，发布前请复核。",
+    lookupHelp: "只会查询你勾选的类别；最多选择 3 项。皇后区和布鲁克林优先显示附近地铁 / 公交，不会用长岛铁路冒充；长岛会尽量补充 LIRR 和主要高速公路车程。路线会优先使用私密精确地址，发布前请复核。",
     lookupNone: "未选择附近查找；这次只润色房源文字，不产生 Google 地图查询。",
     lookupSelected: "已选择",
     lookupCached: "已使用缓存的附近参考，没有重复查询 Google。",
@@ -1325,7 +1326,7 @@ const copy = {
     polishTitle: "AI listing polish",
     polishIntro: "Polish the copy from your facts and nearby references. The exact address is used only on the server for route estimates; it is never sent to AI or shown publicly.",
     lookupTitle: "Choose nearby information to check (optional)",
-    lookupHelp: "Only checked categories are queried; choose up to 3. Chinese-community routes prioritize public transit, and nearby transit stops show walking time and line numbers when Google provides them. Routes use the private exact address when it can be located; review before publishing.",
+    lookupHelp: "Only checked categories are queried; choose up to 3. Queens and Brooklyn prefer nearby subway or bus stops and will not substitute commuter rail; Long Island adds LIRR and main-highway driving references when available. Routes use the private exact address on the server; review before publishing.",
     lookupNone: "No nearby lookup selected; this polish uses only your listing text and makes no Google Maps request.",
     lookupSelected: "selected",
     lookupCached: "Used cached nearby facts; Google was not queried again.",
@@ -4540,7 +4541,7 @@ export default function HomePage() {
                         const disabled = aiPolishLoading || (!checked && draft.locationLookupOptions.length >= MAX_LOCATION_LOOKUP_OPTIONS);
                         return <label className={`location-lookup-option ${checked ? "active" : ""} ${disabled ? "disabled" : ""}`} key={option}>
                           <input type="checkbox" checked={checked} disabled={disabled} onChange={() => updateDraft({ locationLookupOptions: checked ? draft.locationLookupOptions.filter((item) => item !== option) : [...draft.locationLookupOptions, option] })} />
-                          <span><strong>{LOCATION_LOOKUP_OPTION_COPY[option][locale]}</strong><small>{option === "community" ? (locale === "zh" ? "皇后区查法拉盛市中心；布鲁克林查八大道，优先估算公共交通时间和线路" : "Checks Downtown Flushing or Brooklyn 8th Avenue with public-transit time and line details when available") : option === "grocery" ? (locale === "zh" ? "查找中文 / 亚洲超市并估算步行时间" : "Finds a Chinese / Asian supermarket and estimates walking time") : option === "transit" ? (locale === "zh" ? "查找附近地铁或公交站，显示步行时间和线路编号" : "Finds a nearby subway or bus stop with walking time and line numbers") : (locale === "zh" ? "查找一个代表性地点" : "Checks one representative place")}</small></span>
+                          <span><strong>{LOCATION_LOOKUP_OPTION_COPY[option][locale]}</strong><small>{option === "community" ? (locale === "zh" ? "皇后区查法拉盛市中心；布鲁克林查八大道，并估算公共交通时间和线路" : "Checks Downtown Flushing or Brooklyn 8th Avenue with public-transit time and line details when available") : option === "grocery" ? (locale === "zh" ? "只标记可验证的中文 / 亚洲超市；普通超市不会冒充中文超市" : "Only labels verifiable Chinese / Asian supermarkets; generic stores are not substituted") : option === "transit" ? (locale === "zh" ? "皇后区 / 布鲁克林分别查地铁和公交；长岛查 LIRR 及主要高速公路车程" : "Queens / Brooklyn checks separate subway and bus results when available; Long Island checks LIRR and main-highway driving time") : (locale === "zh" ? "查找一个代表性地点" : "Checks one representative place")}</small></span>
                         </label>;
                       })}
                     </div>
@@ -4549,7 +4550,7 @@ export default function HomePage() {
                   {locationContextLoading && <p className="ai-location-status field-span-2" role="status">{locale === "zh" ? "正在整理所选区域的附近设施和交通参考…" : "Collecting nearby and transit context for the selected area…"}</p>}
                   {!locationContextLoading && locationContext && <p className={`ai-location-status field-span-2 ${locationContext.source === "google" ? "ready" : ""}`} role="status">{locationContext.source === "google" ? (locationContext.routeOrigin === "privateAddress" ? (locale === "zh" ? "已使用私密精确地址加入附近设施和出行时间；地址不会发送给 AI 或公开，发布前请复核。" : "Nearby places and travel times used the private address on the server; the address is not sent to AI or shown publicly. Review before publishing.") : (locale === "zh" ? "已加入大致区域的周边、华人生活圈和出行时间；发布前请复核。" : "Approximate-area nearby places, community destinations, and travel times were added; review before publishing.")) : locationContext.notes[0] || (locale === "zh" ? "没有加入未经验证的周边或交通说法。" : "No unverified nearby or transit claims were added.")}</p>}
                   {!locationContextLoading && locationContext?.source === "google" && (locationContext.destinations.length > 0 || locationContext.nearby.length > 0 || locationContext.transit.length > 0) && <div className="location-context-results field-span-2" role="note">
-                    <strong>{locale === "zh" ? "已找到的区域参考" : "Area references found"}</strong>
+                    <div className="location-context-heading"><strong>{locale === "zh" ? "Google 返回的附近参考" : "Google-returned nearby references"}</strong><span>{locale === "zh" ? "这些是地图服务返回的地点与路线，发布前请复核。" : "These are map-returned places and routes; review them before publishing."}</span></div>
                     <ul>
                       {locationContext.destinations.map((destination) => <li key={`${destination.mode}-${destination.name}`}>
                         <span>{destination.category}</span>
@@ -4561,10 +4562,11 @@ export default function HomePage() {
                       {locationContext.transit.map((station) => <li key={`transit-${station.name}`}>
                         <span>{station.mode}</span>
                         <strong>{station.name}</strong>
-                        <small>{station.walkMinutes ? (locale === "zh" ? `约 ${station.walkMinutes} 分钟步行` : `About ${station.walkMinutes} minutes walking`) : (locale === "zh" ? "步行时间暂不可用" : "Walking time unavailable")}</small>
+                        <small>{station.driveMinutes ? (locale === "zh" ? `约 ${station.driveMinutes} 分钟车程` : `About ${station.driveMinutes} minutes by car`) : station.walkMinutes ? (locale === "zh" ? `约 ${station.walkMinutes} 分钟步行` : `About ${station.walkMinutes} minutes walking`) : (locale === "zh" ? "路线时间暂不可用" : "Travel time unavailable")}</small>
                         {station.lines?.length ? <div className="location-transit-lines"><span className="location-transit-lines-label">{locale === "zh" ? "经停线路" : "Lines serving stop"}</span>{station.lines.map((line) => <span className="location-transit-line" key={`${station.name}-${line.shortName || line.name}`}>{transitLineLabel(line, locale)}</span>)}</div> : null}
                       </li>)}
                     </ul>
+                    {locationContext.notes.length > 1 && <ul className="location-context-notes">{locationContext.notes.slice(1).map((note, index) => <li key={`${index}-${note}`}>{note}</li>)}</ul>}
                     <p>{locationContext.routeOrigin === "privateAddress" ? (locale === "zh" ? "以上路线使用私密精确地址计算，精确地址不会显示在公开房源；请发布前复核时间和地点。" : "These routes used the private address on the server; the exact address will not appear on the public listing. Review the times and places before publishing.") : (locale === "zh" ? "以上时间根据所选大致区域估算，不代表精确房屋地址；发布前请复核。" : "Times use the selected approximate area, not the exact property address. Review before publishing.")}</p>
                     <small className="google-attribution">Powered by Google, © 2026 Google</small>
                   </div>}
