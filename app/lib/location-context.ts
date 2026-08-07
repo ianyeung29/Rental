@@ -1,5 +1,19 @@
 import { createHash } from "node:crypto";
 import { readLocationContextCache, writeLocationContextCache } from "./db";
+import {
+  hasRailTransitLine as ruleHasRailTransitLine,
+  hasUrbanTransitLine as ruleHasUrbanTransitLine,
+  isChineseOrAsianMarket as ruleIsChineseOrAsianMarket,
+  isLongIslandHighway as ruleIsLongIslandHighway,
+  placeNameKey as rulePlaceNameKey,
+  selectUrbanTransitPlaces,
+  transitLineTypes as ruleTransitLineTypes,
+  transitRegion as ruleTransitRegion,
+  uniqueNamedPlaces,
+  uniquePlaces as ruleUniquePlaces,
+  urbanTransitKind,
+  type TransitRegion as RuleTransitRegion,
+} from "./location-context-rules";
 
 export const LOCATION_LOOKUP_OPTIONS = [
   "community",
@@ -34,6 +48,7 @@ export type LocationContextTransit = {
   name: string;
   mode: string;
   walkMinutes?: number;
+  driveMinutes?: number;
   lines?: LocationContextTransitLine[];
 };
 
@@ -117,6 +132,8 @@ type CommunityDefinition = {
   categoryEn: string;
 };
 
+type TransitRegion = RuleTransitRegion;
+
 type LocationLookupBudget = {
   placesCalls: number;
   routeCalls: number;
@@ -131,53 +148,15 @@ function clean(value: unknown, max = 180) {
 }
 
 function placeNameKey(value: string) {
-  return value.toLocaleLowerCase().normalize("NFKC").replace(/[\s\-_.,/()'’&·]+/g, "");
+  return rulePlaceNameKey(value);
 }
 
-const ASIAN_MARKET_NAME_MARKERS = [
-  "h mart",
-  "hmart",
-  "99 ranch",
-  "hong kong supermarket",
-  "new kam man",
-  "kam man",
-  "great wall supermarket",
-  "gw supermarket",
-  "hualian",
-  "hua lian",
-  "asian food market",
-  "asian grocery",
-  "asian market",
-  "asian supermarket",
-  "chinese supermarket",
-  "chinese grocery",
-  "chinese market",
-  "super 88",
-  "t&t supermarket",
-  "t & t",
-  "m2m",
-  "lotte market",
-  "lotte plaza",
-  "tan a",
-  "g mart",
-  "gmarket",
-  "seafood city",
-];
-
 function isChineseOrAsianMarket(place: PlaceResult) {
-  const name = place.name.toLocaleLowerCase();
-  const normalizedName = placeNameKey(place.name);
-  return ASIAN_MARKET_NAME_MARKERS.some((marker) => name.includes(marker) || normalizedName.includes(placeNameKey(marker))) || /华联|华人|亚洲|香港|大华|永和|美东|金门|中国超市|亚洲超市/.test(place.name);
+  return ruleIsChineseOrAsianMarket(place);
 }
 
 function uniqueContextPlaces(places: LocationContextPlace[]) {
-  const seen = new Set<string>();
-  return places.filter((place) => {
-    const key = placeNameKey(place.name);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return uniqueNamedPlaces(places);
 }
 
 function privateAddressCacheHash(value: string) {
@@ -276,8 +255,9 @@ function locationContextFromCache(value: unknown, fallbackOptions: LocationLooku
       const station = item as Record<string, unknown>;
       if (typeof station.name !== "string" || typeof station.mode !== "string") return [];
       const walkMinutes = Number(station.walkMinutes);
+      const driveMinutes = Number(station.driveMinutes);
       const lines = Array.isArray(station.lines) ? station.lines.map(contextTransitLine).filter((line): line is LocationContextTransitLine => Boolean(line)) : [];
-      return [{ name: station.name, mode: station.mode, ...(Number.isFinite(walkMinutes) && walkMinutes > 0 ? { walkMinutes: Math.round(walkMinutes) } : {}), ...(lines.length ? { lines: uniqueTransitLines(lines) } : {}) }];
+      return [{ name: station.name, mode: station.mode, ...(Number.isFinite(walkMinutes) && walkMinutes > 0 ? { walkMinutes: Math.round(walkMinutes) } : {}), ...(Number.isFinite(driveMinutes) && driveMinutes > 0 ? { driveMinutes: Math.round(driveMinutes) } : {}), ...(lines.length ? { lines: uniqueTransitLines(lines) } : {}) }];
     }).slice(0, 3)
     : [];
   const destinations = Array.isArray(record.destinations)
@@ -334,7 +314,13 @@ type RouteResult = {
   transitLines: LocationContextTransitLine[];
 };
 
-async function routeMinutes(apiKey: string, origin: Coordinates, destination: Coordinates, travelMode: "DRIVE" | "WALK" | "TRANSIT", languageCode: string): Promise<RouteResult> {
+type RouteWaypoint = Coordinates | string;
+
+function routeWaypoint(value: RouteWaypoint) {
+  return typeof value === "string" ? { address: value } : { location: { latLng: value } };
+}
+
+async function routeMinutes(apiKey: string, origin: RouteWaypoint, destination: Coordinates, travelMode: "DRIVE" | "WALK" | "TRANSIT", languageCode: string): Promise<RouteResult> {
   const emptyRoute: RouteResult = { transitLines: [] };
   try {
     const transitFieldMask = "routes.legs.steps.transitDetails";
@@ -346,8 +332,8 @@ async function routeMinutes(apiKey: string, origin: Coordinates, destination: Co
         "X-Goog-FieldMask": travelMode === "TRANSIT" ? `routes.duration,${transitFieldMask}` : "routes.duration",
       },
       body: JSON.stringify({
-        origin: { location: { latLng: origin } },
-        destination: { location: { latLng: destination } },
+        origin: routeWaypoint(origin),
+        destination: routeWaypoint(destination),
         travelMode,
         languageCode,
         units: "IMPERIAL",
@@ -394,7 +380,7 @@ async function searchPlacesWithinBudget(
 
 async function routeMinutesWithinBudget(
   apiKey: string,
-  origin: Coordinates,
+  origin: RouteWaypoint,
   destination: Coordinates,
   travelMode: "DRIVE" | "WALK" | "TRANSIT",
   languageCode: string,
@@ -424,16 +410,39 @@ function communityDefinition(areaEn: string, areaZh: string, boroughEn: string, 
   return null;
 }
 
+function transitRegion(areaEn: string, areaZh: string, boroughEn: string, boroughZh: string): TransitRegion {
+  return ruleTransitRegion(areaEn, areaZh, boroughEn, boroughZh);
+}
+
+function transitLineTypes(place: PlaceResult) {
+  return ruleTransitLineTypes(place);
+}
+
+function hasUrbanTransitLine(place: PlaceResult) {
+  return ruleHasUrbanTransitLine(place);
+}
+
+function hasRailTransitLine(place: PlaceResult) {
+  return ruleHasRailTransitLine(place);
+}
+
+function isLongIslandHighway(place: PlaceResult) {
+  return ruleIsLongIslandHighway(place);
+}
+
+function nearbyQuery(query: string, routeOriginQuery: string) {
+  return `${query} near ${routeOriginQuery}`;
+}
+
 function uniquePlaces(places: PlaceResult[]) {
-  const seenIds = new Set<string>();
-  const seenNames = new Set<string>();
-  return places.filter((place) => {
-    const nameKey = placeNameKey(place.name);
-    if ((place.id && seenIds.has(place.id)) || (nameKey && seenNames.has(nameKey))) return false;
-    if (place.id) seenIds.add(place.id);
-    if (nameKey) seenNames.add(nameKey);
-    return true;
-  });
+  return ruleUniquePlaces(places);
+}
+
+function transitModeLabel(place: PlaceResult, locale: "zh" | "en", isLongIsland: boolean) {
+  if (isLongIsland) return locale === "zh" ? "LIRR \u8f66\u7ad9" : "LIRR station";
+  const kind = urbanTransitKind(place);
+  if (locale === "zh") return kind === "both" ? "\u5730\u94c1 / \u516c\u4ea4\u7ad9" : kind === "subway" ? "\u5730\u94c1\u7ad9" : kind === "bus" ? "\u516c\u4ea4\u7ad9" : "\u516c\u5171\u4ea4\u901a\u7ad9\u70b9";
+  return kind === "both" ? "Subway / bus stop" : kind === "subway" ? "Subway station" : kind === "bus" ? "Bus stop" : "Public transit stop";
 }
 
 export async function buildLocationContext(request: LocationContextRequest): Promise<LocationContext> {
@@ -467,7 +476,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
       : "Server-side map context is not configured; AI will not invent nearby places or travel times.", lookupOptions);
   }
 
-  const cacheKey = JSON.stringify({ version: 6, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
+  const cacheKey = JSON.stringify({ version: 7, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
   const cached = contextCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     reportUsage({ placesCalls: 0, routeCalls: 0, cacheHit: true });
@@ -486,17 +495,12 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
 
   const languageCode = locale === "zh" ? "zh-CN" : "en";
   const budget: LocationLookupBudget = { placesCalls: 0, routeCalls: 0 };
-  const privateOriginResults = privateAddress
-    ? await searchPlacesWithinBudget(apiKey, { textQuery: privateAddress, pageSize: 1 }, languageCode, budget)
-    : [];
-  const centerResults = privateOriginResults[0]?.coordinates
-    ? privateOriginResults
-    : await searchPlacesWithinBudget(apiKey, { textQuery: queryArea, pageSize: 1 }, languageCode, budget);
-  const center = centerResults[0]?.coordinates || null;
-  const routeOrigin = privateOriginResults[0]?.coordinates ? "privateAddress" : "approximateArea";
-  const locationBias = center ? { circle: { center, radius: 5_000 } } : undefined;
+  const routeOrigin = privateAddress ? "privateAddress" : "approximateArea";
+  const routeOriginQuery = privateAddress || queryArea;
+  const routeOriginValue: RouteWaypoint = privateAddress || queryArea;
+  const region = transitRegion(areaEn, areaZh, boroughEn, boroughZh);
   const nearbyDefinitions: Record<Exclude<LocationLookupOption, "transit" | "community">, NearbyDefinition> = {
-    grocery: { query: "Chinese supermarket", categoryZh: "中文超市 / 亚洲超市", categoryEn: "Chinese / Asian supermarket", includedType: "supermarket" },
+    grocery: { query: "Chinese supermarket Chinese grocery Asian supermarket", categoryZh: "中文超市 / 亚洲超市", categoryEn: "Chinese / Asian supermarket", includedType: "supermarket" },
     park: { query: "park", categoryZh: "公园休闲", categoryEn: "Parks and recreation", includedType: "park" },
     library: { query: "library", categoryZh: "图书馆", categoryEn: "Libraries", includedType: "library" },
     pharmacy: { query: "pharmacy", categoryZh: "药房", categoryEn: "Pharmacies", includedType: "pharmacy" },
@@ -505,25 +509,27 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   };
   const community = lookupOptions.includes("community") ? communityDefinition(areaEn, areaZh, boroughEn, boroughZh) : null;
   const communityPlace = community
-    ? (await searchPlacesWithinBudget(apiKey, { textQuery: community.query, pageSize: 1 }, languageCode, budget))[0] || null
+    ? (await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(community.query, routeOriginQuery), pageSize: 3 }, languageCode, budget))[0] || null
     : null;
-  // Transit is a priority lookup. Reserve its Places call before optional grocery fallback searches use the budget.
+  const transitQuery = region === "longIsland" ? "LIRR station" : region === "urban" ? "subway station or bus stop" : "public transit station";
   const transitPlaces = lookupOptions.includes("transit")
-    ? await searchPlacesWithinBudget(apiKey, { textQuery: "subway station or bus stop", pageSize: 1, includedType: "transit_station", strictTypeFiltering: true, rankPreference: "DISTANCE", ...(locationBias ? { locationBias } : {}) }, languageCode, budget, true)
+    ? await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(transitQuery, routeOriginQuery), pageSize: 8, includedType: "transit_station", strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget, true)
     : [];
   const nearbyOptions = lookupOptions.filter((option): option is Exclude<LocationLookupOption, "transit" | "community"> => option !== "transit" && option !== "community");
   const nearbyResults = await Promise.all(nearbyOptions.map(async (option) => {
     const definition = nearbyDefinitions[option];
-    let places = await searchPlacesWithinBudget(apiKey, { textQuery: definition.query, pageSize: option === "grocery" ? 5 : 1, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE", ...(locationBias ? { locationBias } : {}) }, languageCode, budget);
+    const placesBeforeLookup = budget.placesCalls;
+    let places = await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(definition.query, routeOriginQuery), pageSize: option === "grocery" ? 10 : 1, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget);
+    const attempted = budget.placesCalls > placesBeforeLookup;
     if (option === "grocery") {
       let place = places.find(isChineseOrAsianMarket) || null;
       if (!place) {
-        places = await searchPlacesWithinBudget(apiKey, { textQuery: "Asian grocery store", pageSize: 5, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE", ...(locationBias ? { locationBias } : {}) }, languageCode, budget);
+        places = await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery("Asian grocery store", routeOriginQuery), pageSize: 10, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget);
         place = places.find(isChineseOrAsianMarket) || null;
       }
-      return { option, place };
+      return { option, place, attempted };
     }
-    return { option, place: places[0] || null };
+    return { option, place: places[0] || null, attempted };
   }));
   const nearbyCandidates = nearbyResults.flatMap(({ option, place }) => {
     if (!place) return [];
@@ -531,38 +537,79 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     return [{ name: place.name, category: locale === "zh" ? definition.categoryZh : definition.categoryEn }];
   });
 
+  const highwayPlacesBeforeLookup = budget.placesCalls;
+  const highwayPlaces = region === "longIsland" && lookupOptions.includes("transit")
+    ? await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery("Long Island Expressway I-495 entrance", routeOriginQuery), pageSize: 5 }, languageCode, budget)
+    : [];
+  const highwayAttempted = budget.placesCalls > highwayPlacesBeforeLookup;
+  const highwayPlace = uniquePlaces(highwayPlaces).find(isLongIslandHighway) || null;
   const routeJobs: Array<{ place: PlaceResult; name: string; category: string; mode: "drive" | "walk" | "transit"; travelMode: "DRIVE" | "WALK" | "TRANSIT" }> = [];
-  if (community && communityPlace?.coordinates && center) {
+  if (region === "longIsland") {
+    if (highwayPlace?.coordinates) {
+      routeJobs.push({ place: highwayPlace, name: highwayPlace.name, category: locale === "zh" ? "主要高速公路（I-495）" : "Main highway (I-495)", mode: "drive", travelMode: "DRIVE" });
+    }
+  } else if (community && communityPlace?.coordinates) {
     routeJobs.push({ place: communityPlace, name: communityPlace.name, category: locale === "zh" ? community.categoryZh : community.categoryEn, mode: "transit", travelMode: "TRANSIT" });
   }
   const groceryPlace = nearbyResults.find((result) => result.option === "grocery")?.place;
-  if (!community && groceryPlace?.coordinates && center) {
+  if ((region !== "longIsland" && !community && groceryPlace?.coordinates) || (region === "longIsland" && !lookupOptions.includes("transit") && groceryPlace?.coordinates)) {
     routeJobs.push({ place: groceryPlace, name: groceryPlace.name, category: locale === "zh" ? "中文超市 / 亚洲超市" : "Chinese / Asian supermarket", mode: "walk", travelMode: "WALK" });
   }
   const destinationResults: Array<LocationContextDestination | null> = await Promise.all(routeJobs.map(async (job) => {
-    const route = center && job.place.coordinates ? await routeMinutesWithinBudget(apiKey, center, job.place.coordinates, job.travelMode, languageCode, budget) : { transitLines: [] };
+    const route = job.place.coordinates ? await routeMinutesWithinBudget(apiKey, routeOriginValue, job.place.coordinates, job.travelMode, languageCode, budget) : { transitLines: [] };
     return route.minutes ? { name: job.name, category: job.category, mode: job.mode, minutes: route.minutes, ...(route.transitLines.length ? { transitLines: route.transitLines } : {}) } : null;
   }));
   const destinations = destinationResults.filter((destination): destination is LocationContextDestination => destination !== null);
   const routedNames = new Set(destinations.map((destination) => placeNameKey(destination.name)));
   const nearby = uniqueContextPlaces(nearbyCandidates).filter((place) => !routedNames.has(placeNameKey(place.name)));
 
-  const transit = await Promise.all(uniquePlaces(transitPlaces).slice(0, 1).map(async (place) => {
-    const route = center && place.coordinates ? await routeMinutesWithinBudget(apiKey, center, place.coordinates, "WALK", languageCode, budget) : { transitLines: [] };
-    const lineTypes = new Set(place.transitLines.map((line) => line.vehicleType));
-    const hasSubway = lineTypes.has("SUBWAY") || lineTypes.has("METRO_RAIL");
-    const hasBus = lineTypes.has("BUS");
-    const mode = locale === "zh"
-      ? hasSubway && hasBus ? "地铁 / 公交站" : hasSubway ? "地铁站" : hasBus ? "公交站" : "公共交通站点"
-      : hasSubway && hasBus ? "Subway / bus stop" : hasSubway ? "Subway station" : hasBus ? "Bus stop" : "Public transit stop";
-    return { name: place.name, mode, ...(route.minutes ? { walkMinutes: route.minutes } : {}), ...(place.transitLines.length ? { lines: place.transitLines } : {}) };
-  }));
-  const hasFacts = nearby.length > 0 || transit.length > 0 || destinations.length > 0;
+  const transitCandidates = uniquePlaces(transitPlaces).filter((place) => region === "urban" ? hasUrbanTransitLine(place) : region === "longIsland" ? hasRailTransitLine(place) : true);
+  const transitPlacesForResults = region === "urban" ? selectUrbanTransitPlaces(transitCandidates) : transitCandidates.slice(0, 1);
+  const transitPlace = transitPlacesForResults[0] || null;
+  const transit = transitPlace
+    ? (() => {
+      const isLongIsland = region === "longIsland";
+      const route = transitPlace.coordinates ? routeMinutesWithinBudget(apiKey, routeOriginValue, transitPlace.coordinates, isLongIsland ? "DRIVE" : "WALK", languageCode, budget) : Promise.resolve({ transitLines: [] } as RouteResult);
+      return route.then((routeResult) => {
+        const mode = transitModeLabel(transitPlace, locale, isLongIsland);
+        return { name: transitPlace.name, mode, ...(isLongIsland && routeResult.minutes ? { driveMinutes: routeResult.minutes } : {}), ...(!isLongIsland && routeResult.minutes ? { walkMinutes: routeResult.minutes } : {}), ...(transitPlace.transitLines.length ? { lines: transitPlace.transitLines } : {}) };
+      });
+    })()
+    : Promise.resolve(null);
+  const transitResult = await transit;
+  const secondaryTransitPlace = transitPlacesForResults[1] || null;
+  const secondaryTransitResult = secondaryTransitPlace
+    ? (secondaryTransitPlace.coordinates
+      ? routeMinutesWithinBudget(apiKey, routeOriginValue, secondaryTransitPlace.coordinates, region === "longIsland" ? "DRIVE" : "WALK", languageCode, budget)
+      : Promise.resolve({ transitLines: [] } as RouteResult)
+    ).then((routeResult) => ({
+      name: secondaryTransitPlace.name,
+      mode: transitModeLabel(secondaryTransitPlace, locale, region === "longIsland"),
+      ...(region === "longIsland" && routeResult.minutes ? { driveMinutes: routeResult.minutes } : {}),
+      ...(region !== "longIsland" && routeResult.minutes ? { walkMinutes: routeResult.minutes } : {}),
+      ...(secondaryTransitPlace.transitLines.length ? { lines: secondaryTransitPlace.transitLines } : {}),
+    }))
+    : Promise.resolve(null);
+  const transitResults = [transitResult, await secondaryTransitResult].filter((result): result is LocationContextTransit => Boolean(result));
+  const hasFacts = nearby.length > 0 || transitResults.length > 0 || destinations.length > 0;
   const groceryFound = Boolean(groceryPlace);
+  const groceryAttempted = nearbyResults.find((result) => result.option === "grocery")?.attempted ?? false;
   const groceryNote = lookupOptions.includes("grocery") && !groceryFound
-    ? budget.placesCalls >= MAX_PLACES_CALLS_PER_LOOKUP
-      ? (locale === "zh" ? "本次地图查询优先保留给华人生活圈和公共交通；中文 / 亚洲超市查询达到调用上限。" : "This map lookup prioritized the Chinese community and public transit; the Chinese / Asian supermarket lookup reached the call limit.")
+    ? !groceryAttempted
+      ? (locale === "zh" ? "中文 / 亚洲超市查询达到本次地图调用上限；普通超市不会被标注为中文超市。" : "The Chinese / Asian supermarket lookup reached this map lookup's call limit; generic supermarkets are not labeled as Chinese supermarkets.")
       : (locale === "zh" ? "未找到可验证的中文 / 亚洲超市；普通超市不会被标注为中文超市。" : "No verifiable Chinese or Asian supermarket was found; generic supermarkets are not labeled as Chinese supermarkets.")
+    : "";
+  const transitNote = lookupOptions.includes("transit") && !transitPlacesForResults.length
+    ? region === "urban"
+      ? (locale === "zh" ? "未找到可验证的附近地铁或公交站；没有用长岛铁路或其他铁路站替代。" : "No verifiable nearby subway or bus stop was returned; a commuter-rail or other rail station was not substituted.")
+      : region === "longIsland"
+        ? (locale === "zh" ? "未找到可验证的附近 LIRR 车站；没有把普通公共交通站点当作 LIRR。" : "No verifiable nearby LIRR station was returned; a generic transit stop was not labeled as LIRR.")
+        : (locale === "zh" ? "未找到可验证的附近公共交通站点。" : "No verifiable nearby public-transit station was returned.")
+    : "";
+  const highwayNote = region === "longIsland" && lookupOptions.includes("transit") && !highwayPlace
+    ? !highwayAttempted
+      ? (locale === "zh" ? "主要高速公路查询达到本次地图调用上限；发布前请自行核实最近的高速入口。" : "The main-highway lookup reached this map lookup's call limit; verify the nearest highway entrance before publishing.")
+      : (locale === "zh" ? "未找到可验证的长岛主要高速公路（优先查询 I-495）；发布前请自行核实最近的高速入口。" : "No verifiable Long Island main highway was returned (I-495 was prioritized); verify the nearest highway entrance before publishing.")
     : "";
   const contextNote = routeOrigin === "privateAddress"
     ? (locale === "zh" ? "周边和出行时间使用发布者填写的私密地址计算；精确地址不会发送给 AI 或显示在公开页面，发布前请复核。" : "Nearby facts and travel times use the poster's private address on the server; the exact address is not sent to AI or shown publicly. Review before publishing.")
@@ -573,13 +620,15 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     routeOrigin,
     lookupOptions,
     nearby,
-    transit,
+    transit: transitResults,
     destinations,
     notes: [
       hasFacts
         ? contextNote
         : (locale === "zh" ? "地图服务没有返回所选类别的可用结果；AI不会补写未经验证的说法。" : "The map service returned no usable results for the selected categories; AI will not add unverified claims."),
       ...(groceryNote ? [groceryNote] : []),
+      ...(transitNote ? [transitNote] : []),
+      ...(highwayNote ? [highwayNote] : []),
     ],
     cached: false,
   };

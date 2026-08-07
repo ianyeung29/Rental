@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --test --experimental-strip-types scripts/location-context-rules.test.mjs",
     "db:seed": "node scripts/seed-sample-data.mjs",
     "db:seed:agents": "node scripts/seed-agent-directory.mjs"
   },

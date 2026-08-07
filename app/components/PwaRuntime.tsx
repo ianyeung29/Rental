@@ -15,13 +15,13 @@ export default function PwaRuntime() {
   const [online, setOnline] = useState(true);
   const [standalone, setStandalone] = useState(false);
   const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(null);
-  const [installDismissed, setInstallDismissed] = useState(() => getLocalStorageValue(DISMISSED_KEY) === "true");
-  const [iosDismissed, setIosDismissed] = useState(() => getLocalStorageValue(IOS_DISMISSED_KEY) === "true");
+  const [installDismissed, setInstallDismissed] = useState(false);
+  const [iosDismissed, setIosDismissed] = useState(false);
   const [iosHelpOpen, setIosHelpOpen] = useState(false);
   const [iosDevice, setIosDevice] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [locale, setLocale] = useState<"zh" | "en">(() => (getLocalStorageValue(LOCALE_KEY) === "en" ? "en" : "zh"));
+  const [locale, setLocale] = useState<"zh" | "en">("zh");
   const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const updatingRef = useRef(false);
 
@@ -50,6 +50,9 @@ export default function PwaRuntime() {
       setOnline(navigator.onLine);
       setStandalone(isStandaloneDisplayMode());
       setIosDevice(isIosDevice());
+      setInstallDismissed(window.localStorage.getItem(DISMISSED_KEY) === "true");
+      setIosDismissed(window.localStorage.getItem(IOS_DISMISSED_KEY) === "true");
+      setLocale(window.localStorage.getItem(LOCALE_KEY) === "en" ? "en" : "zh");
     }, 0);
 
     let handleUpdateFound: (() => void) | null = null;
@@ -115,15 +118,26 @@ export default function PwaRuntime() {
     setIosHelpOpen(false);
   }
 
-  function applyUpdate() {
-    const waiting = registrationRef.current?.waiting;
-    if (!waiting) {
-      void registrationRef.current?.update();
-      return;
-    }
+  async function applyUpdate() {
+    const registration = registrationRef.current;
+    if (!registration) return;
     updatingRef.current = true;
     setUpdating(true);
-    waiting.postMessage({ type: "SKIP_WAITING" });
+    try {
+      if (!registration.waiting) await registration.update();
+      const waiting = registration.waiting;
+      if (!waiting) {
+        updatingRef.current = false;
+        setUpdating(false);
+        setUpdateAvailable(false);
+        return;
+      }
+      waiting.postMessage({ type: "SKIP_WAITING" });
+    } catch {
+      updatingRef.current = false;
+      setUpdating(false);
+      setUpdateAvailable(false);
+    }
   }
 
   const showInstallPrompt = !standalone && !installDismissed && Boolean(installEvent);
@@ -178,11 +192,6 @@ export default function PwaRuntime() {
       ) : null}
     </>
   );
-}
-
-function getLocalStorageValue(key: string) {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(key);
 }
 
 function isStandaloneDisplayMode() {
