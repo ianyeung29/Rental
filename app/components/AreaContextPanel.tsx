@@ -13,7 +13,7 @@ export default function AreaContextPanel({ locale, areaZh, areaEn }: { locale: L
     <div className="area-context-heading">
       <div>
         <span className="section-label">{zh ? "区域参考" : "NEIGHBORHOOD NOTES"}</span>
-        <h3 id="area-context-title">{guide ? (zh ? "区域概览" : "Neighborhood snapshot") : (zh ? "区域信息正在整理" : "Area information is being built")}</h3>
+        <h3 id="area-context-title">{guide ? (zh ? guide.titleZh : guide.titleEn) : (zh ? "区域信息正在整理" : "Area information is being built")}</h3>
         <p>{zh ? `公开大致区域：${areaLabel}` : `Public approximate area: ${areaLabel}`}</p>
       </div>
       {guide && <span className="area-context-region">{zh ? guide.regionZh : guide.regionEn}</span>}
