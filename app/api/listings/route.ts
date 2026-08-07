@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { publicUrlForKey } from "../../lib/r2";
 import { getCurrentUser } from "../../lib/auth";
+import { recordAuditEventSafely } from "../../lib/audit";
 import { listingSafetyError } from "../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../lib/email";
 import { demoModeEnabled } from "../../lib/demo";
@@ -508,6 +509,7 @@ export async function POST(request: Request) {
         }
       }
     }
+    await recordAuditEventSafely({ request, eventType: "listing.publish", user, metadata: { listingId: id, posterRole: input.posterRole, agentService: input.agentService, mediaCount: input.media.length, demoMode } });
     return NextResponse.json({ ...toClientListing(row), agentRequestStatus: agentRequestId ? "pending" : null, agentNotificationSent, demoMode }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "The listing could not be saved to the database." }, { status: 502 });

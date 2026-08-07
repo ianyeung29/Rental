@@ -52,7 +52,7 @@ npm run db:seed
 
 The seed creates four clearly labeled sample listings, their private demo details, and local demo-image metadata. It is safe to run again; it does not create user accounts or real rental inventory.
 
-The database bootstrap applies the listing lifecycle, Phase 1 security/usage tables, PWA notification tables, and address-reveal tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql`, `db/migrations/017_phase_one_security_usage.sql`, `db/migrations/018_pwa_retention.sql`, and `db/migrations/019_address_reveal.sql` after the earlier migration files.
+The database bootstrap applies the listing lifecycle, Phase 1 security/usage tables, PWA notification tables, address-reveal tables, and audit-log tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql`, `db/migrations/017_phase_one_security_usage.sql`, `db/migrations/018_pwa_retention.sql`, `db/migrations/019_address_reveal.sql`, and `db/migrations/020_audit_logs.sql` after the earlier migration files.
 
 To load synthetic agent profiles for testing the owner’s agent-selection flow:
 
@@ -119,6 +119,16 @@ Registration creates a 24-hour verification token and sends it through Resend. U
 
 The public `/contact` and `/feedback` forms also send through Resend. Keep the recipient addresses server-side; the browser can only choose a validated topic and message. `SITE_CONTACT_EMAIL` is the shared fallback, while `CONTACT_RECIPIENT_EMAIL` and `FEEDBACK_RECIPIENT_EMAIL` can route the two forms separately. The sender must be a verified Resend domain, and the user’s valid email is added as `replyTo` so you can answer directly.
 
+### Audit-log encryption and retention
+
+Add a long random server-only value to `.env.local` and the Vercel production environment:
+
+```bash
+AUDIT_LOG_ENCRYPTION_KEY=your_long_random_value
+```
+
+The key encrypts retained audit-log IP addresses. If it is not configured, the application keeps a one-way IP hash for matching and shows `Encrypted / hash-only` to administrators instead of retaining a decryptable IP. Audit records are retained for 30 days and the scheduled `/api/alerts/audit-retention` job purges older rows.
+
 Password reset is available at `/reset-password`. Reset requests use generic responses to avoid exposing whether an email is registered; the link expires after one hour, and changing a password revokes existing sessions. Login, password-reset, listing-polish, and comparison limits are stored in Neon rather than an in-memory server process.
 
 ## Enable Google login
@@ -180,8 +190,10 @@ After signing in with that verified admin account, open the account avatar and c
 
 - Verified accounts can request a password reset from the sign-in drawer; Resend must be configured for the email to arrive.
 - Admins can open `/admin/usage` from the account menu to review aggregate OpenAI/Google Maps calls, token counts, cache hits, gross cost estimates, daily activity, and active rate-limit windows.
+- Admins can open `/admin/activity` from the account menu to review authenticated and anonymous security signals, including event, timestamp, country, browser, device, route, and a private email snapshot for signed-in accounts. The desk is admin-only and retains records for 30 days.
 - Google Maps estimates are intentionally gross list-price estimates and do not subtract monthly free caps. The usage desk never displays API keys, full emails, private addresses, or prompt contents.
-- Keep `db/migrations/017_phase_one_security_usage.sql` in the deployment migration set if migrations are applied manually; the current bootstrap also creates these tables automatically.
+- Audit events never store passwords, session tokens, API keys, exact addresses, phone numbers, freeform messages, or AI prompts/content. IP addresses are encrypted with `AUDIT_LOG_ENCRYPTION_KEY`; only verified administrators can read the activity desk.
+- Keep `db/migrations/017_phase_one_security_usage.sql` and `db/migrations/020_audit_logs.sql` in the deployment migration set if migrations are applied manually; the current bootstrap also creates these tables automatically.
 
 ## Phase 2 core
 
@@ -202,7 +214,7 @@ After signing in with that verified admin account, open the account avatar and c
 - Configure R2 CORS for the exact production origin and verify the public bucket policy; do not expose the S3 credentials to the browser.
 - Set `SITE_CONTACT_EMAIL` (or both recipient overrides) in Vercel so `/contact` and `/feedback` can deliver through Resend.
 - Confirm password reset, persistent login throttling, and session revocation against the production Neon project before opening registration publicly.
-- Extend the basic moderation queue with admin UI, rate limits, audit logging, and documented response procedures before accepting public supply.
+- Keep the admin activity desk, 30-day audit retention job, rate limits, and documented response procedures monitored before accepting public supply.
 - Replace sample inventory with reviewed seed listings for the selected pilot metro.
 - Add geocoding, verification, transactional email, and notifications after vendor decisions.
 - Add automated authorization, cross-account ownership, exact-address non-disclosure, and upload-orphan cleanup tests.

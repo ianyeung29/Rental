@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../../../lib/auth";
+import { recordAuditEventSafely } from "../../../../lib/audit";
 import { ensureDatabaseSchema, sql } from "../../../../lib/db";
 import { emailIsConfigured, sendModerationDecision } from "../../../../lib/email";
 
@@ -108,6 +109,18 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         // Moderation decisions remain saved when email delivery is unavailable.
       }
     }
+    await recordAuditEventSafely({
+      request,
+      eventType: "admin.report_review",
+      user: auth.user,
+      metadata: {
+        reportId: id,
+        listingId: String(report.listing_id),
+        reportStatus: nextReportStatus,
+        moderationStatus: nextModerationStatus,
+        emailSent,
+      },
+    });
     return NextResponse.json({ id, status: nextReportStatus, moderationStatus: nextModerationStatus, emailSent });
   } catch {
     return NextResponse.json({ error: "The moderation decision could not be saved." }, { status: 502 });

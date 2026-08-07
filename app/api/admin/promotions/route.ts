@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth";
+import { recordAuditEventSafely } from "../../../lib/audit";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 
 const STATUSES = new Set(["requested", "active", "completed", "declined"]);
@@ -54,6 +55,12 @@ export async function PATCH(request: Request) {
       INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
       VALUES ($1, $2, 'promotion', $3, $4, $5, $6, '/#top')
     `, [`notification-${crypto.randomUUID()}`, String(promotion.requester_id), status === "active" ? "推广申请已通过" : status === "declined" ? "推广申请未通过" : "推广状态已更新", status === "active" ? "Promotion request approved" : status === "declined" ? "Promotion request declined" : "Promotion status updated", `你的房源推广申请状态已更新为：${status}。`, `Your listing promotion request is now ${status}.`]);
+    await recordAuditEventSafely({
+      request,
+      eventType: "admin.promotion_update",
+      user: context.user,
+      metadata: { promotionId: id, listingId: String(promotion.listing_id), status },
+    });
     return NextResponse.json({ id, status });
   } catch {
     return NextResponse.json({ error: "Promotion status could not be updated right now." }, { status: 502 });

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../lib/auth";
+import { recordAuditEventSafely } from "../../lib/audit";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 
 const EVENT_TYPES = new Set(["view", "save", "contact", "share", "compare"]);
@@ -20,19 +21,19 @@ export async function POST(request: Request) {
       const duplicateRows = await sql.query("SELECT 1 FROM rental_listing_events WHERE listing_id = $1 AND event_type = 'view' AND session_key = $2 AND created_at > NOW() - INTERVAL '1 day' LIMIT 1", [listingId, sessionKey]);
       if (duplicateRows.length > 0) return NextResponse.json({ ok: true, deduped: true });
     }
-    let userId: string | null = null;
+    let user: Awaited<ReturnType<typeof getCurrentUser>> = null;
     try {
-      const user = await getCurrentUser();
-      userId = user?.id || null;
+      user = await getCurrentUser();
     } catch {
-      userId = null;
+      user = null;
     }
     const metadata = body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : {};
     const metadataJson = JSON.stringify(metadata).slice(0, 2_000);
     await sql.query(`
       INSERT INTO rental_listing_events (id, listing_id, user_id, event_type, session_key, metadata)
       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-    `, [`event-${randomUUID()}`, listingId, userId, eventType, sessionKey, metadataJson]);
+    `, [`event-${randomUUID()}`, listingId, user?.id || null, eventType, sessionKey, metadataJson]);
+    await recordAuditEventSafely({ request, eventType: `listing.${eventType}`, user, metadata: { listingId, sessionKeyPresent: Boolean(sessionKey) } });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "Listing activity could not be recorded." }, { status: 502 });
