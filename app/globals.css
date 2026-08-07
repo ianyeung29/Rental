@@ -450,6 +450,23 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .demo-mode-notice strong { color: var(--blue-dark); font-size: 11px; }
 .demo-mode-notice span { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .post-progress { display: flex; justify-content: space-between; gap: 12px; margin: 18px 0 0; color: var(--soft-muted); font-size: 10px; font-weight: 700; }
+.post-progress > span:last-child { display: none; }
+.post-flow-summary { display: grid; gap: 10px; margin: 12px 0 0; padding: 13px 14px; border: 1px solid #d9e6ff; background: var(--blue-wash); }
+.post-flow-summary-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.post-flow-summary-top > div { display: grid; gap: 5px; min-width: 0; }
+.post-flow-summary-top strong { color: var(--ink); font-size: 13px; line-height: 1.3; }
+.draft-save-status { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 6px 8px; color: var(--blue-dark); background: #fff; font-size: 9px; font-weight: 700; line-height: 1.25; }
+.draft-save-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--lime-dark); }
+.draft-save-status.saving { color: var(--blue-dark); }
+.draft-save-status.saving .draft-save-dot { background: var(--blue); animation: draft-save-pulse 1.1s ease-in-out infinite; }
+.draft-save-status.offline { color: #7a5415; background: #fffceb; }
+.draft-save-status.offline .draft-save-dot { background: #c28720; }
+@keyframes draft-save-pulse { 0%, 100% { opacity: .42; } 50% { opacity: 1; } }
+.post-progress-track { height: 4px; overflow: hidden; background: #d7e2fa; }
+.post-progress-track span { display: block; height: 100%; background: var(--blue); transition: width 180ms ease-out; }
+.post-stage-health { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 9px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.post-stage-health-action { min-height: 27px; padding: 4px 7px; border: 1px solid #e9df9e; color: #7a5415; background: #fffceb; font-size: 9px; font-weight: 700; }
+.post-stage-health-action:hover { border-color: #c28720; background: #fff7d6; }
 .stage-list { display: flex; flex-direction: column; margin: 24px 0; border-top: 1px solid var(--line); }
 .stage-row { display: grid; grid-template-columns: 27px 1fr auto; align-items: center; gap: 10px; min-height: 54px; border-bottom: 1px solid var(--line); font-size: 12px; }
 .stage-row.is-current { color: var(--ink); font-weight: 700; background: rgba(237,242,248,.58); }
@@ -993,6 +1010,8 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
   .post-footer-actions { margin: 24px -20px -30px; padding: 13px 20px max(16px, env(safe-area-inset-bottom)); }
   .post-footer-actions .text-button { order: initial; width: auto; flex: 1 1 110px; margin: 0; text-align: center; }
   .post-footer-actions .outline-button, .post-footer-actions .primary-button { flex: 1; }
+  .post-flow-summary-top { align-items: stretch; flex-direction: column; gap: 9px; }
+  .draft-save-status { justify-self: start; align-self: flex-start; }
   .post-drawer .stage-list { display: flex; flex-direction: row; gap: 7px; overflow-x: auto; margin: 19px -20px 22px; padding: 0 20px 5px; border-top: 0; }
   .post-drawer .stage-row { grid-template-columns: 24px auto; min-width: 126px; min-height: 43px; padding: 8px 9px; border: 1px solid var(--line); background: rgba(255,255,255,.58); font-size: 10px; }
   .post-drawer .stage-state { display: none; }

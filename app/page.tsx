@@ -260,6 +260,7 @@ type ListingDraft = {
 };
 
 type PostStep = 1 | 2 | 3 | 4 | 5;
+type DraftSaveState = "idle" | "saving" | "savedLocal" | "savedAccount" | "offline";
 
 const EMPTY_DRAFT: ListingDraft = {
   titleEn: "",
@@ -1773,6 +1774,7 @@ export default function HomePage() {
   const [reportError, setReportError] = useState("");
   const [draft, setDraft] = useState<ListingDraft>(EMPTY_DRAFT);
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [draftSaveState, setDraftSaveState] = useState<DraftSaveState>("idle");
   const [draftRecoveryNotice, setDraftRecoveryNotice] = useState<"local" | "account" | "offline" | null>(null);
   const [editingListingId, setEditingListingId] = useState<string | null>(null);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
@@ -1961,6 +1963,7 @@ export default function HomePage() {
             photoKeys: Array.isArray(storedDraftRecord.photoKeys) ? storedDraftRecord.photoKeys.filter((key): key is string => typeof key === "string") : [],
           });
           setDraftSavedAt(storedDraftMeta && typeof storedDraftMeta.updatedAt === "number" ? storedDraftMeta.updatedAt : Date.now());
+          setDraftSaveState("savedLocal");
           setDraftRecoveryNotice("local");
         }
         if (initialSearch) {
@@ -2092,6 +2095,7 @@ export default function HomePage() {
             setDraft({ ...EMPTY_DRAFT, ...(draftPayload as Partial<ListingDraft>), currency: "USD" });
             setEditingListingId(typeof draftResult?.editingListingId === "string" ? draftResult.editingListingId : null);
             setDraftSavedAt(Number.isFinite(serverDraftUpdatedAt) ? serverDraftUpdatedAt : Date.now());
+            setDraftSaveState("savedAccount");
             setDraftRecoveryNotice("account");
           } else if (localDraft && draftHasContent(localDraft)) {
             const migrationResponse = await fetch("/api/my/draft", {
@@ -2104,14 +2108,17 @@ export default function HomePage() {
               if (migrated.draft && typeof migrated.draft === "object") setDraft({ ...EMPTY_DRAFT, ...(migrated.draft as Partial<ListingDraft>), currency: "USD" });
               setEditingListingId(typeof migrated.editingListingId === "string" ? migrated.editingListingId : localEditingListingId);
               setDraftSavedAt(migrated.updatedAt ? Date.parse(String(migrated.updatedAt)) : Date.now());
+              setDraftSaveState("savedAccount");
               setDraftRecoveryNotice("account");
             } else {
               syncComplete = false;
+              setDraftSaveState("offline");
               setDraftRecoveryNotice("offline");
             }
           }
         } else if (localDraft && draftHasContent(localDraft)) {
           syncComplete = false;
+          setDraftSaveState("offline");
           setDraftRecoveryNotice("offline");
         }
 
@@ -2202,6 +2209,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!hydrated) return;
     try {
+      const hasDraft = draftHasContent(draft) || Boolean(editingListingId);
       window.localStorage.setItem(STORAGE_KEYS.locale, locale);
       window.localStorage.removeItem(STORAGE_KEYS.customListings);
       if (!currentUser?.emailVerified || !accountSyncReady) {
@@ -2210,12 +2218,13 @@ export default function HomePage() {
         if (savedSearchSnapshot) window.localStorage.setItem(STORAGE_KEYS.savedSearchSnapshot, JSON.stringify(savedSearchSnapshot));
         else window.localStorage.removeItem(STORAGE_KEYS.savedSearchSnapshot);
         window.localStorage.setItem(STORAGE_KEYS.inquiries, JSON.stringify(inquiries));
-        if (draftHasContent(draft) || editingListingId) window.localStorage.setItem(STORAGE_KEYS.draft, JSON.stringify(draft));
+        if (hasDraft) window.localStorage.setItem(STORAGE_KEYS.draft, JSON.stringify(draft));
         else window.localStorage.removeItem(STORAGE_KEYS.draft);
-        if (draftHasContent(draft) || editingListingId) window.localStorage.setItem(STORAGE_KEYS.draftMeta, JSON.stringify({ updatedAt: draftSavedAt || Date.now(), editingListingId }));
+        if (hasDraft) window.localStorage.setItem(STORAGE_KEYS.draftMeta, JSON.stringify({ updatedAt: draftSavedAt || Date.now(), editingListingId }));
         else window.localStorage.removeItem(STORAGE_KEYS.draftMeta);
         if (editingListingId) window.localStorage.setItem(STORAGE_KEYS.editingListingId, editingListingId);
         else window.localStorage.removeItem(STORAGE_KEYS.editingListingId);
+        window.setTimeout(() => setDraftSaveState(hasDraft ? "savedLocal" : "idle"), 0);
       } else {
         window.localStorage.removeItem(STORAGE_KEYS.savedIds);
         window.localStorage.removeItem(STORAGE_KEYS.savedSearch);
@@ -2227,19 +2236,34 @@ export default function HomePage() {
       }
     } catch {
       // A full local storage quota should not block browsing or searching.
+      if (draftHasContent(draft) || editingListingId) window.setTimeout(() => setDraftSaveState("offline"), 0);
     }
   }, [accountSyncReady, currentUser, draft, draftSavedAt, editingListingId, hydrated, inquiries, locale, savedIds, savedSearch, savedSearchSnapshot]);
 
   useEffect(() => {
     if (!accountSyncReady || !currentUser?.emailVerified || (!draftHasContent(draft) && !editingListingId)) return;
+    const savingStateTimer = window.setTimeout(() => setDraftSaveState("saving"), 0);
     const saveTimer = window.setTimeout(() => {
       void fetch("/api/my/draft", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draft, editingListingId }),
-      }).catch(() => undefined);
+      }).then((response) => {
+        if (response.ok) {
+          setDraftSaveState("savedAccount");
+          return;
+        }
+        setDraftSaveState("offline");
+        setDraftRecoveryNotice("offline");
+      }).catch(() => {
+        setDraftSaveState("offline");
+        setDraftRecoveryNotice("offline");
+      });
     }, 700);
-    return () => window.clearTimeout(saveTimer);
+    return () => {
+      window.clearTimeout(savingStateTimer);
+      window.clearTimeout(saveTimer);
+    };
   }, [accountSyncReady, currentUser, draft, editingListingId]);
 
   useEffect(() => {
@@ -2505,6 +2529,7 @@ export default function HomePage() {
   const updateDraft = (updates: Partial<ListingDraft>) => {
     setDraft((current) => ({ ...current, ...updates }));
     setDraftSavedAt(draftTimestamp());
+    setDraftSaveState("saving");
     setPostError("");
     setAiPolishError("");
     if (Object.prototype.hasOwnProperty.call(updates, "areaEn") || Object.prototype.hasOwnProperty.call(updates, "areaZh") || Object.prototype.hasOwnProperty.call(updates, "areaGroupId") || Object.prototype.hasOwnProperty.call(updates, "areaLocationId") || Object.prototype.hasOwnProperty.call(updates, "locationLookupOptions")) {
@@ -3455,6 +3480,7 @@ export default function HomePage() {
       if (currentUser?.emailVerified) await fetch("/api/my/draft", { method: "DELETE" }).catch(() => undefined);
       setDraft(EMPTY_DRAFT);
       setDraftSavedAt(null);
+      setDraftSaveState("idle");
       setEditingListingId(null);
       setPostError("");
       setAiPolishSource(null);
@@ -3535,6 +3561,7 @@ export default function HomePage() {
     setCustomListings((current) => [customListing, ...current]);
     setDraft(EMPTY_DRAFT);
     setDraftSavedAt(null);
+    setDraftSaveState("idle");
     setPostError("");
     setAiPolishSource(null);
     setAiPolishNotes([]);
@@ -3545,13 +3572,20 @@ export default function HomePage() {
   };
 
   const persistDraftNow = async () => {
-    if (!currentUser?.emailVerified) return true;
+    if (!currentUser?.emailVerified) {
+      setDraftSaveState("savedLocal");
+      return true;
+    }
+    setDraftSaveState("saving");
     const response = await fetch("/api/my/draft", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ draft, editingListingId }),
     }).catch(() => null);
-    return Boolean(response?.ok);
+    const synced = Boolean(response?.ok);
+    setDraftSaveState(synced ? "savedAccount" : "offline");
+    if (!synced) setDraftRecoveryNotice("offline");
+    return synced;
   };
 
   const clearDraft = async () => {
@@ -3564,6 +3598,7 @@ export default function HomePage() {
     setAiPolishNotes([]);
     setLocationContext(null);
     setDraftSavedAt(null);
+    setDraftSaveState("idle");
     setDraftRecoveryNotice(null);
     try {
       window.localStorage.removeItem(STORAGE_KEYS.draft);
@@ -3954,6 +3989,25 @@ export default function HomePage() {
       return value;
     }
   };
+
+  const postStageLabels = [
+    { step: 1 as PostStep, label: t.stageProperty },
+    { step: 2 as PostStep, label: t.stageTerms },
+    { step: 3 as PostStep, label: t.stageStory },
+    { step: 4 as PostStep, label: t.stageContact },
+    { step: 5 as PostStep, label: t.stagePublish },
+  ];
+  const completedPostStageCount = ([1, 2, 3, 4] as PostStep[]).filter((step) => postStep > step && !validatePostStep(step)).length;
+  const postProgressPercent = Math.round((postStep / postStageLabels.length) * 100);
+  const draftSaveLabel = draftSaveState === "saving"
+    ? (locale === "zh" ? "正在保存…" : "Saving…")
+    : draftSaveState === "savedAccount"
+      ? (locale === "zh" ? "已同步到账号" : "Synced to account")
+      : draftSaveState === "savedLocal"
+        ? (locale === "zh" ? "已保存在此设备" : "Saved on this device")
+        : draftSaveState === "offline"
+          ? (locale === "zh" ? "已保存本地 · 等待同步" : "Saved locally · sync pending")
+          : (locale === "zh" ? "尚未保存" : "Not saved yet");
 
   return (
     <div className="app-shell">
@@ -4425,6 +4479,17 @@ export default function HomePage() {
               {draftRecoveryNotice && <div className="draft-recovery-notice" role="status"><div><strong>{draftRecoveryNotice === "local" ? (locale === "zh" ? "已恢复本机草稿" : "Draft restored from this device") : draftRecoveryNotice === "account" ? (locale === "zh" ? "已恢复账号草稿" : "Draft restored from your account") : (locale === "zh" ? "网络暂时不可用，草稿已保留" : "You’re offline; your draft is safe")}</strong><span>{draftRecoveryNotice === "local" ? (locale === "zh" ? "你可以继续编辑，网络恢复后会自动尝试同步。" : "Continue editing; we’ll retry account sync when the connection returns.") : draftRecoveryNotice === "account" ? (locale === "zh" ? "上次保存的内容已加载，可以继续发布。" : "Your last saved version is loaded and ready to continue.") : (locale === "zh" ? "草稿保存在此设备上，不会因为离线而丢失。" : "This draft is stored on this device and won’t be lost while offline.")}</span></div><button className="text-button" type="button" onClick={() => setDraftRecoveryNotice(null)}>{locale === "zh" ? "知道了" : "Got it"}</button></div>}
                 {demoMode && !currentUser && <div className="demo-mode-notice" role="note"><strong>{locale === "zh" ? "演示模式" : "Demo mode"}</strong><span>{locale === "zh" ? "无需登录即可发布；请填写联系人信息。" : "No sign-in is needed for this demonstration; enter contact details below."}</span></div>}
                 <div className="post-progress"><span>{locale === "zh" ? `第 ${postStep} 步，共 5 步` : `Step ${postStep} of 5`}</span><span>{editingListingId ? (locale === "zh" ? "编辑模式" : "Editing") : draftSavedAt ? (locale === "zh" ? (currentUser?.emailVerified ? "草稿已同步" : "草稿已自动保存") : (currentUser?.emailVerified ? "Draft synced" : "Draft autosaved")) : (currentUser?.emailVerified ? (locale === "zh" ? "账号草稿" : "Account draft") : (locale === "zh" ? "本地草稿" : "Local draft"))}</span></div>
+              <div className="post-flow-summary">
+                <div className="post-flow-summary-top">
+                  <div><span className="section-label">{locale === "zh" ? "发布进度" : "POSTING PROGRESS"}</span><strong>{locale === "zh" ? `已完成 ${completedPostStageCount} / 5 步` : `${completedPostStageCount} of 5 steps complete`}</strong></div>
+                  <span className={`draft-save-status ${draftSaveState}`}><span className="draft-save-dot" aria-hidden="true" />{draftSaveLabel}</span>
+                </div>
+                <div className="post-progress-track" aria-hidden="true"><span style={{ width: `${postProgressPercent}%` }} /></div>
+                <div className="post-stage-health" role="status">
+                  <span>{locale === "zh" ? "可以使用“上一步”返回修改；带“需补充”的步骤还需要信息。" : "Use Back to revise earlier steps; flagged steps still need details."}</span>
+                  {postStageLabels.filter(({ step }) => step < postStep && Boolean(validatePostStep(step))).map(({ step, label }) => <button className="post-stage-health-action" type="button" key={step} onClick={() => { setPostStep(step); setPostError(""); }}>{label} · {locale === "zh" ? "需补充" : "Needs details"}</button>)}
+                </div>
+              </div>
               <div className="stage-list">
                 {[t.stageProperty, t.stageTerms, t.stageStory, t.stageContact, t.stagePublish].map((stage, index) => <div className={`stage-row ${index + 1 === postStep ? "is-current" : ""} ${index + 1 < postStep ? "is-complete" : ""}`} key={stage} aria-current={index + 1 === postStep ? "step" : undefined}><span className={`stage-index ${index + 1 <= postStep ? "current" : ""}`}>{index + 1}</span><span>{stage}</span><span className="stage-state">{index + 1 < postStep ? (locale === "zh" ? "完成" : "Done") : index + 1 === postStep ? (locale === "zh" ? "当前" : "Current") : (locale === "zh" ? "待开始" : "Next")}</span></div>)}
               </div>

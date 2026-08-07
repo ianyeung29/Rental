@@ -8,7 +8,7 @@ const APP_SHELL = [
   "/legal",
   "/sitemap",
   "/brand/anjurentals-mark.svg",
-  "/icon.svg",
+  "/brand/anjurentals-mark.svg",
   "/icons/anjurentals-192.png",
   "/icons/anjurentals-512.png",
 ];
@@ -97,7 +97,7 @@ self.addEventListener("fetch", (event) => {
     url.pathname.startsWith("/brand/") ||
     url.pathname.startsWith("/listings/") ||
     url.pathname.startsWith("/icons/") ||
-    url.pathname === "/icon.svg";
+    url.pathname === "/brand/anjurentals-mark.svg";
 
   if (!isCacheableAsset) return;
 
