@@ -17,6 +17,23 @@ colors:
   soft-muted: "#83909A"
   saved-coral: "#E28C61"
 typography:
+  scale:
+    notation: "8px"
+    meta: "9px"
+    label: "10px"
+    control: "11px"
+    support: "12px"
+    body-small: "13px"
+    body: "16px"
+    title-small: "18px"
+    wordmark: "19px"
+    title: "21px"
+    headline-small: "23px"
+    headline: "25px"
+    drawer: "30px"
+    display-small: "36px"
+    display-medium: "42px"
+    display-large: "48px"
   display:
     fontFamily: "DM Sans, Noto Sans SC, PingFang SC, Microsoft YaHei, system-ui, sans-serif"
     fontSize: "clamp(3rem, 6vw, 5.9rem)"
@@ -73,7 +90,7 @@ components:
     textColor: "{colors.ink}"
     rounded: "{rounded.square}"
     padding: "0 11px"
-    height: "43px"
+    height: "44px"
   listing-card:
     backgroundColor: "{colors.panel}"
     textColor: "{colors.ink}"
@@ -141,6 +158,10 @@ The palette makes blue the action and navigation signal, lime the current or con
 
 **The Signal Separation Rule.** Blue means action or navigation; lime means a confirmed or current state; coral means saved by the renter. A badge must never imply a verification scope that was not actually performed.
 
+### Semantic implementation tokens
+
+The CSS root keeps repeated interface decisions in semantic variables rather than scattering one-off values through feature styles. Use `--surface-info-hover`, `--surface-warning`, `--surface-danger`, and `--surface-success` for state surfaces; pair them with the matching `--line-*` and `--text-*` tokens. Form controls and touch targets use `--control-height` (44px), while `--motion-fast` and `--motion-standard` keep interaction timing consistent. The tokens are intentionally light-only because the product currently has one paper-and-blue operating environment; they are still semantic so a future theme can change the whole surface coherently.
+
 ## Typography
 
 **Display Font:** DM Sans with Noto Sans SC, PingFang SC, Microsoft YaHei, and system fallbacks.
@@ -156,6 +177,8 @@ The palette makes blue the action and navigation signal, lime the current or con
 - **Title** (700, `21px`, `1.12` line-height): Filter, drawer, compare, and section headings.
 - **Body** (400, `16px`, `1.72` line-height): Explanatory copy and public information surfaces; keep long text close to 65-75ch.
 - **Label** (700, `10-12px`, `0.06-0.14em` tracking): Metadata, status, filter labels, navigation notation, and compact controls.
+
+The operational micro-scale is deliberate: 9px is reserved for quiet notation, 10px for metadata and helper copy, 11px for compact controls, and 12px for readable supporting controls. It should not be used for long-form body copy. This keeps the dense workbench legible without turning every small label into a new bespoke size.
 
 **The Two-Language Measure Rule.** Never size a control around a Chinese string alone. English expansion and Chinese density must fit the same field, button, navigation rhythm, and mobile action row.
 
@@ -215,6 +238,7 @@ Buttons, cards, fields, chips, panels, drawers, and form controls use square cor
 
 - **Desktop:** Sticky warm-panel header, brand mark at left, compact utility links, language switch, lime publish action, and circular account avatar. The active page uses a 3px blue underline.
 - **Mobile:** Brand and utility actions remain in the top row; primary navigation moves to a horizontally scrollable second row so Chinese and English labels stay readable.
+- **Posting flow on mobile:** The five-step drawer keeps its stage rail horizontally scrollable, uses two-column footer actions so Back / Save / Clear / Next never collapse into narrow text strips, and gives location presets, feature choices, fee options, and validation links the same 44px touch target as the main controls.
 
 ### Listing Gallery
 
@@ -234,6 +258,7 @@ The approximate-area note, lock icon, synthetic-inventory notice, and separate l
 - **Do** preserve filters, drafts, and the current page when the language switch changes copy.
 - **Do** show exact bedroom, bathroom, and optional square-foot values as structured facts when supplied.
 - **Do** maintain visible focus, keyboard access, reduced-motion behavior, and non-color status cues.
+- **Do** use the semantic surface, line, text, control-height, and motion tokens before adding a new color, height, or transition value.
 
 ### Don't:
 

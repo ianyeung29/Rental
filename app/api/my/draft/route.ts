@@ -7,7 +7,7 @@ const MAX_BODY_LENGTH = 28_000;
 const DRAFT_FIELDS = [
   "titleEn", "titleZh", "areaEn", "areaZh", "areaGroupId", "areaLocationId", "privateAddress", "posterRole", "rentalType", "price", "currency",
   "bedrooms", "bathrooms", "moveInMode", "moveInDate", "lease", "features", "descriptionEn", "descriptionZh",
-  "photos", "photoKeys", "locationLookupOptions", "contactName", "contactEmail", "tourPreference", "agentService", "agentFeePlan", "agentFeeAmount", "agentProfileId", "expiresOn",
+  "photos", "photoKeys", "photoThumbnails", "media", "locationLookupOptions", "contactName", "contactEmail", "tourPreference", "agentService", "agentFeePlan", "agentFeeAmount", "agentProfileId", "expiresOn",
 ] as const;
 
 async function verifiedUser() {
@@ -28,7 +28,26 @@ function draftFromValue(value: unknown) {
   const draft: Record<string, unknown> = {};
   for (const field of DRAFT_FIELDS) {
     const fieldValue = source[field];
-    if (field === "features" || field === "photos" || field === "photoKeys" || field === "locationLookupOptions") {
+    if (field === "media") {
+      draft[field] = Array.isArray(fieldValue)
+        ? fieldValue.flatMap((item) => {
+            if (!item || typeof item !== "object") return [];
+            const record = item as Record<string, unknown>;
+            const key = text(record.key, 240);
+            const url = text(record.url, 1_000);
+            const thumbnailKey = text(record.thumbnailKey, 240);
+            const thumbnailUrl = text(record.thumbnailUrl, 1_000);
+            if (!key || !url) return [];
+            return [{
+              key,
+              url,
+              contentType: text(record.contentType, 80) || "image/jpeg",
+              ...(thumbnailKey && thumbnailUrl ? { thumbnailKey, thumbnailUrl, thumbnailContentType: text(record.thumbnailContentType, 80) || "image/jpeg" } : {}),
+              ...(Number.isInteger(Number(record.width)) && Number.isInteger(Number(record.height)) ? { width: Number(record.width), height: Number(record.height) } : {}),
+            }];
+          }).slice(0, 4)
+        : [];
+    } else if (field === "features" || field === "photos" || field === "photoKeys" || field === "photoThumbnails" || field === "locationLookupOptions") {
       draft[field] = Array.isArray(fieldValue)
         ? fieldValue.filter((item): item is string => typeof item === "string" && (field !== "locationLookupOptions" || LOCATION_LOOKUP_OPTIONS.includes(item as typeof LOCATION_LOOKUP_OPTIONS[number]))).map((item) => item.trim().slice(0, 2_000)).filter(Boolean).slice(0, field === "locationLookupOptions" ? MAX_LOCATION_LOOKUP_OPTIONS : 20)
         : field === "locationLookupOptions" ? ["grocery", "transit"] : [];

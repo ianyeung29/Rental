@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { exactOccupantOrDefault, OCCUPANT_OPTIONS } from "../lib/renter-options";
+import { useDialogA11y } from "../lib/use-dialog-a11y";
 
 type Locale = "zh" | "en";
 
@@ -57,6 +58,7 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileSaveMessage, setProfileSaveMessage] = useState("");
+  const dialogRef = useDialogA11y(true, onClose);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,7 +127,7 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
 
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside className="drawer form-drawer application-drawer" role="dialog" aria-modal="true" aria-labelledby="application-title">
+      <aside ref={dialogRef} className="drawer form-drawer application-drawer" role="dialog" aria-modal="true" aria-labelledby="application-title" tabIndex={-1}>
         <div className="drawer-content">
           <div className="drawer-heading"><span className="section-label">{zh ? "租客申请" : "RENTER APPLICATION"}</span><button className="drawer-close" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}><CloseIcon /></button></div>
           <h2 id="application-title">{zh ? "提交租赁申请" : "Submit a rental application"}</h2>

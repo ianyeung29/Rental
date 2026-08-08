@@ -20,6 +20,7 @@ export default function PwaRuntime() {
   const [iosHelpOpen, setIosHelpOpen] = useState(false);
   const [iosDevice, setIosDevice] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [locale, setLocale] = useState<"zh" | "en">("zh");
   const registrationRef = useRef<ServiceWorkerRegistration | null>(null);
@@ -64,7 +65,10 @@ export default function PwaRuntime() {
       navigator.serviceWorker.register("/sw.js", { scope: "/" }).then((registration) => {
         registrationRef.current = registration;
         const showWaitingWorker = () => {
-          if (registration.waiting && navigator.serviceWorker.controller) setUpdateAvailable(true);
+          if (registration.waiting && navigator.serviceWorker.controller) {
+            setUpdateAvailable(true);
+            setUpdateDismissed(false);
+          }
         };
         handleUpdateFound = () => {
           const worker = registration.installing;
@@ -118,6 +122,10 @@ export default function PwaRuntime() {
     setIosHelpOpen(false);
   }
 
+  function dismissUpdate() {
+    setUpdateDismissed(true);
+  }
+
   async function applyUpdate() {
     const registration = registrationRef.current;
     if (!registration) return;
@@ -150,7 +158,7 @@ export default function PwaRuntime() {
           {locale === "zh" ? "目前离线，已保存的页面仍可浏览。" : "You’re offline. Cached pages remain available."}
         </div>
       ) : null}
-      {updateAvailable ? (
+      {updateAvailable && !updateDismissed ? (
         <aside className="pwa-update-prompt" role="status" aria-live="polite">
           <div className="pwa-install-copy">
             <strong>{locale === "zh" ? "安居有新版本" : "Anjurentals has an update"}</strong>
@@ -158,6 +166,9 @@ export default function PwaRuntime() {
           </div>
           <button className="pwa-install-button" type="button" onClick={applyUpdate} disabled={updating}>
             {updating ? (locale === "zh" ? "更新中…" : "Updating…") : (locale === "zh" ? "更新" : "Update")}
+          </button>
+          <button className="pwa-dismiss-button" type="button" onClick={dismissUpdate} aria-label={locale === "zh" ? "\u7A0D\u540E\u66F4\u65B0" : "Update later"}>
+            {locale === "zh" ? "\u7A0D\u540E" : "Later"}
           </button>
         </aside>
       ) : null}

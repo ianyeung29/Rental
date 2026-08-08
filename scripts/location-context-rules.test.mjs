@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_LOCATION_LOOKUP_SETTINGS,
+  LOCATION_LOOKUP_LIMITS,
+} from "../app/lib/location-lookup-settings.ts";
+import {
   isAcceptableNearbyWalkMinutes,
   isChineseOrAsianMarket,
   selectUrbanTransitPlaces,
@@ -9,6 +13,13 @@ import {
   uniqueNamedPlaces,
   urbanTransitKind,
 } from "../app/lib/location-context-rules.ts";
+
+test("map lookup defaults keep the configured 5 Places / 5 Routes budget", () => {
+  assert.equal(DEFAULT_LOCATION_LOOKUP_SETTINGS.placesCallsPerLookup, 5);
+  assert.equal(DEFAULT_LOCATION_LOOKUP_SETTINGS.routeCallsPerLookup, 5);
+  assert.equal(LOCATION_LOOKUP_LIMITS.maxPlacesCallsPerLookup, 10);
+  assert.equal(LOCATION_LOOKUP_LIMITS.maxRouteCallsPerLookup, 10);
+});
 
 const place = (overrides = {}) => ({
   id: "place-id",

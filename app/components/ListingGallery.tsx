@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import type { ReactNode, TouchEvent } from "react";
+import { useDialogA11y } from "../lib/use-dialog-a11y";
 
 type ListingGalleryProps = {
   title: string;
@@ -14,7 +15,6 @@ type ListingGalleryProps = {
   nextLabel: string;
   closeLabel: string;
   expandLabel: string;
-  sourceIsSample: boolean;
   lockIcon: (options?: { size?: number }) => ReactNode;
   closeIcon: (options?: { size?: number }) => ReactNode;
   onSelect: (index: number) => void;
@@ -48,13 +48,13 @@ export default function ListingGallery({
   nextLabel,
   closeLabel,
   expandLabel,
-  sourceIsSample,
   lockIcon,
   closeIcon,
   onSelect,
   onClose,
 }: ListingGalleryProps) {
   const [fullscreen, setFullscreen] = useState(false);
+  const fullscreenRef = useDialogA11y<HTMLDivElement>(fullscreen, () => setFullscreen(false));
   const selectedPhoto = photos[selectedIndex] || photos[0] || "";
 
   const move = (direction: -1 | 1) => {
@@ -65,7 +65,6 @@ export default function ListingGallery({
   useEffect(() => {
     if (!fullscreen) return undefined;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setFullscreen(false);
       if (event.key === "ArrowLeft") move(-1);
       if (event.key === "ArrowRight") move(1);
     };
@@ -80,7 +79,7 @@ export default function ListingGallery({
 
   const gallery = (large: boolean) => (
     <div className={`gallery-stage ${large ? "gallery-stage-fullscreen" : ""}`}>
-      {selectedPhoto ? <Image key={selectedPhoto} className="gallery-photo" src={selectedPhoto} alt={title} fill sizes={large ? "100vw" : "620px"} unoptimized={!sourceIsSample} priority /> : <div className="image-fallback" aria-hidden="true" />}
+      {selectedPhoto ? <Image key={selectedPhoto} className="gallery-photo" src={selectedPhoto} alt={title} fill sizes={large ? "100vw" : "620px"} priority={!large} /> : <div className="image-fallback" aria-hidden="true" />}
       {photos.length > 1 && <>
         <button className="gallery-control gallery-prev" type="button" onClick={() => move(-1)} aria-label={previousLabel}><GalleryArrowIcon direction="left" /></button>
         <button className="gallery-control gallery-next" type="button" onClick={() => move(1)} aria-label={nextLabel}><GalleryArrowIcon direction="right" /></button>
@@ -98,8 +97,8 @@ export default function ListingGallery({
         {gallery(false)}
         <button className="drawer-close image-close" type="button" onClick={onClose} aria-label={closeLabel}>{closeIcon({ size: 18 })}</button>
       </div>
-      {photos.length > 1 && <div className="gallery-thumbnails" aria-label={photoLabel}>{photos.map((photo, index) => <button className={`gallery-thumbnail ${index === selectedIndex ? "active" : ""}`} type="button" key={`${photo}-${index}`} onClick={() => onSelect(index)} aria-label={`${photoLabel} ${index + 1}`} aria-pressed={index === selectedIndex}><Image src={photo} alt="" fill sizes="86px" unoptimized={!sourceIsSample} loading="lazy" /></button>)}</div>}
-      {fullscreen && <div className="gallery-fullscreen" role="dialog" aria-modal="true" aria-label={photoLabel} onMouseDown={(event) => { if (event.target === event.currentTarget) setFullscreen(false); }}>
+      {photos.length > 1 && <div className="gallery-thumbnails" aria-label={photoLabel}>{photos.map((photo, index) => <button className={`gallery-thumbnail ${index === selectedIndex ? "active" : ""}`} type="button" key={`${photo}-${index}`} onClick={() => onSelect(index)} aria-label={`${photoLabel} ${index + 1}`} aria-pressed={index === selectedIndex}><Image src={photo} alt="" fill sizes="86px" loading="lazy" /></button>)}</div>}
+      {fullscreen && <div ref={fullscreenRef} className="gallery-fullscreen" role="dialog" aria-modal="true" aria-label={photoLabel} tabIndex={-1} onMouseDown={(event) => { if (event.target === event.currentTarget) setFullscreen(false); }}>
         {gallery(true)}
       </div>}
     </>

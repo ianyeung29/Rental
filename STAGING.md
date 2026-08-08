@@ -38,7 +38,7 @@ OPENAI_REASONING_EFFORT=low
 ## Before the first deploy
 
 1. Create the Neon staging branch and run the SQL files in `db/migrations/` after the base schema has been created.
-2. Configure R2 CORS for the exact staging origin and allow browser `PUT` uploads only to the staging bucket/prefix.
+2. Configure R2 CORS for the exact staging origin and allow browser `PUT` uploads only to the staging bucket/prefix. Allow the `Content-Type` and `Cache-Control` request headers.
 3. Add the exact staging Google callback URL to the OAuth client.
 4. Set `APP_URL` to the public HTTPS staging URL so verification and inquiry emails point to the right place.
 5. Set `SITE_CONTACT_EMAIL` (or the two explicit recipient overrides) so the public contact and feedback forms can deliver through Resend.

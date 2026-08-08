@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { AccountType } from "../lib/account-types";
+import { useDialogA11y } from "../lib/use-dialog-a11y";
 
 type Locale = "zh" | "en";
 type AuthMode = "login" | "register";
@@ -41,9 +42,10 @@ export default function AuthDrawer({ locale, mode, loading, error, onGoogleLogin
   const isRegister = mode === "register";
   const zh = locale === "zh";
   const [accountType, setAccountType] = useState<AccountType>("user");
+  const dialogRef = useDialogA11y(true, onClose);
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside className="drawer auth-drawer" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <aside ref={dialogRef} className="drawer auth-drawer" role="dialog" aria-modal="true" aria-labelledby="auth-title" tabIndex={-1}>
         <div className="drawer-content">
           <div className="drawer-heading">
             <span className="section-label">{isRegister ? (zh ? "创建账户" : "CREATE ACCOUNT") : (zh ? "账户登录" : "ACCOUNT SIGN IN")}</span>

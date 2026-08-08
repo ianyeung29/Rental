@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import AccountDrawer from "./components/AccountDrawer";
 import ApplicationDrawer, { type ApplicationFormValues } from "./components/ApplicationDrawer";
@@ -24,6 +24,8 @@ import { buildLocalCompareSummary, CompareListingFacts, CompareSummaryContent } 
 import { DEFAULT_LOCATION_LOOKUP_OPTIONS, LOCATION_LOOKUP_OPTIONS, MAX_LOCATION_LOOKUP_OPTIONS } from "./lib/location-context";
 import type { LocationContext, LocationContextTransit, LocationContextTransitLine, LocationLookupOption } from "./lib/location-context";
 import { OCCUPANT_OPTIONS } from "./lib/renter-options";
+import { useDialogA11y } from "./lib/use-dialog-a11y";
+import { optimizeImageFile } from "./lib/image-optimizer";
 import portraitStyles from "./components/AgentPortrait.module.css";
 
 type Locale = "zh" | "en";
@@ -32,6 +34,33 @@ type SortMode = "fit" | "price" | "fresh" | "moveIn" | "verified" | "popular";
 type WeChatShareStatus = "idle" | "outside" | "loading" | "ready" | "error";
 type WeChatShareResolution = { key: string; status: Exclude<WeChatShareStatus, "idle" | "outside">; error: "" | "not-configured" | "unavailable" };
 type CompareSummary = CompareSummaryContent & { key: string; locale: Locale; source: "openai" | "local" };
+
+type ListingMedia = {
+  key: string;
+  url: string;
+  contentType: string;
+  thumbnailKey?: string;
+  thumbnailUrl?: string;
+  thumbnailContentType?: string;
+  width?: number;
+  height?: number;
+};
+
+const MOBILE_VIEWPORT_QUERY = "(max-width: 600px)";
+
+function subscribeToMobileViewport(callback: () => void) {
+  const mediaQuery = window.matchMedia(MOBILE_VIEWPORT_QUERY);
+  mediaQuery.addEventListener("change", callback);
+  return () => mediaQuery.removeEventListener("change", callback);
+}
+
+function getMobileViewportSnapshot() {
+  return window.matchMedia(MOBILE_VIEWPORT_QUERY).matches;
+}
+
+function getMobileViewportServerSnapshot() {
+  return false;
+}
 
 type Listing = {
   id: string;
@@ -67,7 +96,9 @@ type Listing = {
   descriptionEn?: string;
   privateAddress?: string;
   photos?: string[];
+  photoThumbnails?: string[];
   photoKeys?: string[];
+  media?: ListingMedia[];
   moderationStatus?: "approved" | "under_review" | "hidden" | "rejected";
   moderationNote?: string;
   expiresOn?: string | null;
@@ -248,7 +279,9 @@ type ListingDraft = {
   descriptionZh: string;
   locationLookupOptions: LocationLookupOption[];
   photos: string[];
+  photoThumbnails: string[];
   photoKeys: string[];
+  media: ListingMedia[];
   contactName: string;
   contactEmail: string;
   tourPreference: string;
@@ -285,7 +318,9 @@ const EMPTY_DRAFT: ListingDraft = {
   descriptionZh: "",
   locationLookupOptions: [...DEFAULT_LOCATION_LOOKUP_OPTIONS],
   photos: [],
+  photoThumbnails: [],
   photoKeys: [],
+  media: [],
   contactName: "",
   contactEmail: "",
   tourPreference: "flexible",
@@ -298,14 +333,57 @@ const EMPTY_DRAFT: ListingDraft = {
 
 function draftHasContent(value: ListingDraft) {
   const photos = Array.isArray(value?.photos) ? value.photos : [];
+  const media = Array.isArray(value?.media) ? value.media : [];
   const photoKeys = Array.isArray(value?.photoKeys) ? value.photoKeys : [];
   const features = Array.isArray(value?.features) ? value.features : [];
   return Boolean(
     value.titleEn || value.titleZh || value.areaEn || value.areaZh || value.privateAddress || value.price ||
       value.moveInDate || value.lease !== EMPTY_DRAFT.lease || value.squareFeet || value.descriptionEn || value.descriptionZh ||
-      photos.length || photoKeys.length || value.contactName || value.contactEmail || value.agentProfileId || value.expiresOn ||
+      photos.length || media.length || photoKeys.length || value.contactName || value.contactEmail || value.agentProfileId || value.expiresOn ||
       features.length || value.agentService !== EMPTY_DRAFT.agentService || value.agentFeePlan !== EMPTY_DRAFT.agentFeePlan || value.agentFeeAmount,
   );
+}
+
+function normalizeClientMedia(value: unknown): ListingMedia[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    const key = typeof record.key === "string" ? record.key : "";
+    const url = typeof record.url === "string" ? record.url : "";
+    if (!key || !url) return [];
+    const contentType = typeof record.contentType === "string" ? record.contentType : "image/jpeg";
+    const thumbnailKey = typeof record.thumbnailKey === "string" ? record.thumbnailKey : "";
+    const thumbnailUrl = typeof record.thumbnailUrl === "string" ? record.thumbnailUrl : "";
+    const thumbnailContentType = typeof record.thumbnailContentType === "string" ? record.thumbnailContentType : "";
+    const width = Number(record.width);
+    const height = Number(record.height);
+    return [{
+      key,
+      url,
+      contentType,
+      ...(thumbnailKey && thumbnailUrl ? { thumbnailKey, thumbnailUrl, ...(thumbnailContentType ? { thumbnailContentType } : {}) } : {}),
+      ...(Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 ? { width, height } : {}),
+    }];
+  }).slice(0, 4);
+}
+
+function mediaFromDraft(draft: ListingDraft): ListingMedia[] {
+  if (draft.media.length > 0) return draft.media;
+  return draft.photos.flatMap((url, index) => {
+    const key = draft.photoKeys[index] || "";
+    if (!url || !key) return [];
+    return [{ key, url, contentType: "image/jpeg", ...(draft.photoThumbnails[index] ? { thumbnailUrl: draft.photoThumbnails[index] } : {}) }];
+  });
+}
+
+function draftArraysFromMedia(media: ListingMedia[]) {
+  return {
+    media,
+    photos: media.map((item) => item.url),
+    photoThumbnails: media.map((item) => item.thumbnailUrl || item.url),
+    photoKeys: media.map((item) => item.key),
+  };
 }
 
 const STORAGE_KEYS = {
@@ -522,6 +600,15 @@ function renderTransitContextItem(station: LocationContextTransit, locale: Local
     <small>{station.driveMinutes ? (locale === "zh" ? `约 ${station.driveMinutes} 分钟车程` : `About ${station.driveMinutes} minutes by car`) : station.walkMinutes ? (locale === "zh" ? `约 ${station.walkMinutes} 分钟步行` : `About ${station.walkMinutes} minutes walking`) : (locale === "zh" ? "路线时间暂不可用" : "Travel time unavailable")}</small>
     {station.lines?.length ? <div className="location-transit-lines"><span className="location-transit-lines-label">{locale === "zh" ? "经停线路" : "Lines serving stop"}</span>{station.lines.map((line) => <span className="location-transit-line" key={`${station.name}-${line.shortName || line.name}`}>{transitLineLabel(line, locale)}</span>)}</div> : null}
   </li>;
+}
+
+function locationCheckedAtLabel(value: string | undefined, locale: Locale) {
+  if (!value) return locale === "zh" ? "时间暂不可用" : "Time unavailable";
+  try {
+    return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }
 
 function findPopularAreaSelection(areaEn: string, areaZh: string) {
@@ -835,54 +922,22 @@ class PhotoUploadError extends Error {
   }
 }
 
-const SUPPORTED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-
 function isSupportedPhoto(file: File) {
-  return SUPPORTED_PHOTO_TYPES.has(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name);
+  return ["image/jpeg", "image/png", "image/webp"].includes(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name);
 }
 
-function compressPhoto(file: File) {
-  if (!isSupportedPhoto(file)) return Promise.reject(new PhotoUploadError("unsupported"));
-  return new Promise<string>((resolve, reject) => {
-    const image = new window.Image();
-    const objectUrl = URL.createObjectURL(file);
-    const cleanup = () => URL.revokeObjectURL(objectUrl);
-    image.onload = () => {
-      try {
-        if (!image.width || !image.height) throw new PhotoUploadError("decode");
-        const maxDimension = 1400;
-        const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
-        const context = canvas.getContext("2d");
-        if (!context) throw new PhotoUploadError("prepare");
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
-        cleanup();
-        resolve(dataUrl);
-      } catch (error) {
-        cleanup();
-        reject(error instanceof PhotoUploadError ? error : new PhotoUploadError("prepare"));
-      }
-    };
-    image.onerror = () => {
-      cleanup();
-      reject(new PhotoUploadError("decode"));
-    };
-    image.src = objectUrl;
-  });
-}
-
-async function uploadPhotoToR2(photoDataUrl: string, filename: string) {
-  let blob: Blob;
+async function uploadPhotoToR2(file: File) {
+  if (!isSupportedPhoto(file)) throw new PhotoUploadError("unsupported");
+  let display: Awaited<ReturnType<typeof optimizeImageFile>>;
+  let thumbnail: Awaited<ReturnType<typeof optimizeImageFile>>;
   try {
-    const response = await fetch(photoDataUrl);
-    if (!response.ok) throw new PhotoUploadError("prepare");
-    blob = await response.blob();
+    [display, thumbnail] = await Promise.all([
+      optimizeImageFile(file, "listingDisplay"),
+      optimizeImageFile(file, "listingThumbnail"),
+    ]);
   } catch (error) {
-    if (error instanceof PhotoUploadError) throw error;
-    throw new PhotoUploadError("prepare");
+    const message = error instanceof Error ? error.message : "";
+    throw new PhotoUploadError(message.toLowerCase().includes("decode") ? "decode" : "prepare", message);
   }
 
   let presignResponse: Response;
@@ -890,13 +945,24 @@ async function uploadPhotoToR2(photoDataUrl: string, filename: string) {
     presignResponse = await fetch("/api/media/presign", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename, contentType: blob.type || "image/jpeg", size: blob.size }),
+      body: JSON.stringify({
+        filename: file.name,
+        variants: [
+          { variant: "display", contentType: display.contentType, size: display.blob.size },
+          { variant: "thumbnail", contentType: thumbnail.contentType, size: thumbnail.blob.size },
+        ],
+      }),
     });
   } catch {
     throw new PhotoUploadError("network");
   }
-  const presignResult = await presignResponse.json() as { key?: string; uploadUrl?: string; publicUrl?: string; error?: string };
-  if (!presignResponse.ok || !presignResult.key || !presignResult.uploadUrl || !presignResult.publicUrl) {
+  const presignResult = await presignResponse.json() as {
+    uploads?: Array<{ variant?: string; key?: string; uploadUrl?: string; publicUrl?: string; contentType?: string; cacheControl?: string }>;
+    error?: string;
+  };
+  const displayUpload = presignResult.uploads?.find((item) => item.variant === "display");
+  const thumbnailUpload = presignResult.uploads?.find((item) => item.variant === "thumbnail");
+  if (!presignResponse.ok || !displayUpload?.key || !displayUpload.uploadUrl || !displayUpload.publicUrl || !thumbnailUpload?.key || !thumbnailUpload.uploadUrl || !thumbnailUpload.publicUrl) {
     const errorCode = presignResponse.status === 401 || presignResponse.status === 403
       ? "auth"
       : presignResponse.status === 413 || presignResponse.status === 400 && presignResult.error?.includes("8 MB")
@@ -905,18 +971,33 @@ async function uploadPhotoToR2(photoDataUrl: string, filename: string) {
     throw new PhotoUploadError(errorCode, presignResult.error || "The image upload service is unavailable right now.");
   }
 
-  let uploadResponse: Response;
   try {
-    uploadResponse = await fetch(presignResult.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": blob.type || "image/jpeg" },
-      body: blob,
-    });
+    const responses = await Promise.all([
+      fetch(displayUpload.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": display.contentType, "Cache-Control": displayUpload.cacheControl || "public, max-age=31536000, immutable" },
+        body: display.blob,
+      }),
+      fetch(thumbnailUpload.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": thumbnail.contentType, "Cache-Control": thumbnailUpload.cacheControl || "public, max-age=31536000, immutable" },
+        body: thumbnail.blob,
+      }),
+    ]);
+    if (responses.some((response) => !response.ok)) throw new Error("R2 upload failed.");
   } catch {
     throw new PhotoUploadError("storage");
   }
-  if (!uploadResponse.ok) throw new PhotoUploadError("storage");
-  return { key: presignResult.key, url: presignResult.publicUrl };
+  return {
+    key: displayUpload.key,
+    url: displayUpload.publicUrl,
+    contentType: display.contentType,
+    thumbnailKey: thumbnailUpload.key,
+    thumbnailUrl: thumbnailUpload.publicUrl,
+    thumbnailContentType: thumbnail.contentType,
+    width: display.width,
+    height: display.height,
+  };
 }
 
 function photoUploadMessage(error: unknown, locale: Locale) {
@@ -1502,6 +1583,12 @@ function listingPhotos(listing: Listing) {
   return photos.length > 0 ? photos : listing.image ? [listing.image] : [];
 }
 
+function listingPhotoThumbnails(listing: Listing) {
+  const thumbnails = Array.isArray(listing.photoThumbnails) ? listing.photoThumbnails.filter((photo): photo is string => typeof photo === "string" && photo.length > 0) : [];
+  const photos = listingPhotos(listing);
+  return thumbnails.length === photos.length ? thumbnails : photos;
+}
+
 function moveInMonth(value: string) {
   const isoMonth = value.match(/^\d{4}-(\d{2})-\d{2}$/)?.[1];
   if (isoMonth) return ({ "08": "august", "09": "september", "10": "october" } as Record<string, string>)[isoMonth] || "";
@@ -1753,6 +1840,9 @@ export default function HomePage() {
   const [customListings, setCustomListings] = useState<Listing[]>([]);
   const [remoteListings, setRemoteListings] = useState<Listing[]>([]);
   const [remoteHasMore, setRemoteHasMore] = useState(false);
+  const [remoteListingsLoading, setRemoteListingsLoading] = useState(false);
+  const [remoteListingsError, setRemoteListingsError] = useState("");
+  const [remoteListingsRetry, setRemoteListingsRetry] = useState(0);
   const [remoteLoadingMore, setRemoteLoadingMore] = useState(false);
   const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
   const [agentProfilesLoading, setAgentProfilesLoading] = useState(false);
@@ -1834,6 +1924,16 @@ export default function HomePage() {
   const inquiryFormRef = useRef<HTMLFormElement>(null);
   const sharedListingIdRef = useRef<string | null>(null);
   const sessionKeyRef = useRef("");
+  const isMobileViewport = useSyncExternalStore(subscribeToMobileViewport, getMobileViewportSnapshot, getMobileViewportServerSnapshot);
+  const filterDialogRef = useDialogA11y(isMobileViewport && mobileFiltersOpen, () => setMobileFiltersOpen(false));
+  const analyticsDialogRef = useDialogA11y(analyticsOpen && Boolean(currentUser), () => setAnalyticsOpen(false));
+  const savedDialogRef = useDialogA11y(savedOpen, () => setSavedOpen(false));
+  const messagesDialogRef = useDialogA11y(messagesOpen, () => setMessagesOpen(false));
+  const compareDialogRef = useDialogA11y(compareOpen, () => setCompareOpen(false));
+  const postDialogRef = useDialogA11y(postOpen, () => setPostOpen(false));
+  const shareDialogRef = useDialogA11y(Boolean(shareListing), () => setShareListing(null));
+  const detailDialogRef = useDialogA11y(Boolean(selectedListing), () => setSelectedListing(null));
+  const contactDialogRef = useDialogA11y(Boolean(contactListing), () => { setContactListing(null); setInquiryError(""); });
   const t = copy[locale];
   const selectedPopularArea = POPULAR_AREA_GROUPS.find((group) => group.id === selectedPopularAreaId) || null;
   const selectedPostAreaGroup = POPULAR_AREA_GROUPS.find((group) => group.id === draft.areaGroupId) || null;
@@ -1883,7 +1983,7 @@ export default function HomePage() {
     const medianPrice = comparablePrices.length > 0 ? comparablePrices[Math.floor(comparablePrices.length / 2)] : 0;
     const draftPrice = Number(draft.price);
     const priceLooksReasonable = draftPrice > 0 && (comparablePrices.length < 2 || (medianPrice > 0 && draftPrice >= medianPrice * 0.55 && draftPrice <= medianPrice * 1.75));
-    const photoReferences = draft.photoKeys.length > 0 ? draft.photoKeys : draft.photos;
+    const photoReferences = mediaFromDraft(draft).map((media) => media.key || media.url);
     const description = `${draft.descriptionZh} ${draft.descriptionEn}`.trim();
     const checks = [
       { key: "title", done: Boolean(draft.titleZh.trim() || draft.titleEn.trim()), zh: "标题清楚", en: "Clear title" },
@@ -1900,7 +2000,7 @@ export default function HomePage() {
       { key: "priceReview", done: priceLooksReasonable, zh: comparablePrices.length >= 2 ? "租金与附近房源相符" : "租金已填写", en: comparablePrices.length >= 2 ? "Rent is in the local range" : "Rent is provided" },
     );
     return { checks, score: Math.round((checks.filter((check) => check.done).length / checks.length) * 100) };
-  }, [customListings, draft.areaEn, draft.areaZh, draft.bedrooms, draft.descriptionEn, draft.descriptionZh, draft.features.length, draft.moveInDate, draft.moveInMode, draft.photoKeys, draft.photos, draft.price, draft.squareFeet, draft.titleEn, draft.titleZh, remoteListings]);
+  }, [customListings, draft, remoteListings]);
 
   useEffect(() => {
     if (!sharePosterUrl) return;
@@ -1960,8 +2060,12 @@ export default function HomePage() {
         if (Array.isArray(storedInquiries)) setInquiries(storedInquiries);
         if (storedEditingListingId) setEditingListingId(storedEditingListingId);
         if (storedDraft && typeof storedDraft === "object") {
-          const storedDraftRecord = storedDraft as Partial<ListingDraft> & { moveIn?: unknown; photos?: unknown; photoKeys?: unknown };
+          const storedDraftRecord = storedDraft as Partial<ListingDraft> & { moveIn?: unknown; photos?: unknown; photoKeys?: unknown; photoThumbnails?: unknown; media?: unknown };
           const legacyMoveIn = typeof storedDraftRecord.moveIn === "string" ? storedDraftRecord.moveIn : "";
+          const storedPhotos = Array.isArray(storedDraftRecord.photos) ? storedDraftRecord.photos.filter((photo): photo is string => typeof photo === "string") : [];
+          const storedPhotoKeys = Array.isArray(storedDraftRecord.photoKeys) ? storedDraftRecord.photoKeys.filter((key): key is string => typeof key === "string") : [];
+          const storedPhotoThumbnails = Array.isArray(storedDraftRecord.photoThumbnails) ? storedDraftRecord.photoThumbnails.filter((url): url is string => typeof url === "string") : [];
+          const storedMedia = normalizeClientMedia(storedDraftRecord.media);
           setDraft({
             ...EMPTY_DRAFT,
             ...storedDraftRecord,
@@ -1975,8 +2079,10 @@ export default function HomePage() {
             locationLookupOptions: Array.isArray(storedDraftRecord.locationLookupOptions)
               ? storedDraftRecord.locationLookupOptions.filter((option): option is LocationLookupOption => typeof option === "string" && LOCATION_LOOKUP_OPTIONS.includes(option as LocationLookupOption)).slice(0, MAX_LOCATION_LOOKUP_OPTIONS)
               : [...DEFAULT_LOCATION_LOOKUP_OPTIONS],
-            photos: Array.isArray(storedDraftRecord.photos) ? storedDraftRecord.photos : [],
-            photoKeys: Array.isArray(storedDraftRecord.photoKeys) ? storedDraftRecord.photoKeys.filter((key): key is string => typeof key === "string") : [],
+            ...draftArraysFromMedia(storedMedia.length > 0 ? storedMedia : storedPhotos.map((url, index) => ({ key: storedPhotoKeys[index] || "", url, contentType: "image/jpeg", ...(storedPhotoThumbnails[index] ? { thumbnailUrl: storedPhotoThumbnails[index] } : {}) })).filter((item) => item.key)),
+            photos: storedMedia.length > 0 || storedPhotos.length === 0 ? (storedMedia.length > 0 ? storedMedia.map((item) => item.url) : []) : storedPhotos,
+            photoThumbnails: storedMedia.length > 0 ? storedMedia.map((item) => item.thumbnailUrl || item.url) : storedPhotoThumbnails,
+            photoKeys: storedMedia.length > 0 ? storedMedia.map((item) => item.key) : storedPhotoKeys,
           });
           setDraftSavedAt(storedDraftMeta && typeof storedDraftMeta.updatedAt === "number" ? storedDraftMeta.updatedAt : Date.now());
           setDraftSaveState("savedLocal");
@@ -2223,6 +2329,7 @@ export default function HomePage() {
   }, [currentUser, demoMode, draft.agentService, postOpen]);
 
   useEffect(() => {
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
     if (!hydrated) return;
     try {
       const hasDraft = draftHasContent(draft) || Boolean(editingListingId);
@@ -2354,22 +2461,35 @@ export default function HomePage() {
   useEffect(() => {
     if (!hydrated) return;
     let cancelled = false;
+    let requestSettled = false;
+    const loadingTimer = window.setTimeout(() => {
+      if (!cancelled && !requestSettled) {
+        setRemoteListingsLoading(true);
+        setRemoteListingsError("");
+      }
+    }, 0);
     fetch("/api/listings?limit=24&offset=0", { cache: "no-store" })
       .then(async (response) => {
-        if (!response.ok) return;
-        const result = await response.json() as unknown;
-        if (!cancelled && Array.isArray(result)) {
+        const result = await response.json().catch(() => null) as unknown;
+        if (!response.ok || !Array.isArray(result)) throw new Error("Live listings are unavailable right now.");
+        if (!cancelled) {
           setRemoteListings(result as Listing[]);
           setRemoteHasMore(response.headers.get("X-Has-More") === "true");
+          setRemoteListingsError("");
         }
       })
       .catch(() => {
-        // The local sample inventory remains available when the database is offline.
+        if (!cancelled) setRemoteListingsError(locale === "zh" ? "实时房源暂时无法加载。当前页面显示的是演示房源，请稍后重试。" : "Live listings are temporarily unavailable. This page is showing sample listings; please try again.");
+      })
+      .finally(() => {
+        requestSettled = true;
+        if (!cancelled) setRemoteListingsLoading(false);
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(loadingTimer);
     };
-  }, [hydrated]);
+  }, [hydrated, locale, remoteListingsRetry]);
 
   useEffect(() => {
     if (!accountOpen || !currentUser) return;
@@ -2799,7 +2919,9 @@ export default function HomePage() {
       descriptionZh: listing.descriptionZh || "",
       descriptionEn: listing.descriptionEn || "",
       photos: listing.photos || [],
+      photoThumbnails: listing.photoThumbnails || listing.photos || [],
       photoKeys: listing.photoKeys || [],
+      media: listing.media || [],
       contactName: listing.contactName || currentUser?.displayName || "",
       contactEmail: listing.contactEmail || currentUser?.email || "",
       tourPreference: listing.tourPreference || "flexible",
@@ -3319,12 +3441,9 @@ export default function HomePage() {
   const movePhoto = (index: number, direction: "up" | "down") => {
     const nextIndex = direction === "up" ? index - 1 : index + 1;
     if (nextIndex < 0 || nextIndex >= draft.photos.length) return;
-    const photos = [...draft.photos];
-    [photos[index], photos[nextIndex]] = [photos[nextIndex], photos[index]];
-    const photoKeys = [...draft.photoKeys];
-    while (photoKeys.length < photos.length) photoKeys.push("");
-    [photoKeys[index], photoKeys[nextIndex]] = [photoKeys[nextIndex], photoKeys[index]];
-    updateDraft({ photos, photoKeys });
+    const media = mediaFromDraft(draft);
+    [media[index], media[nextIndex]] = [media[nextIndex], media[index]];
+    updateDraft(draftArraysFromMedia(media));
   };
 
   const handlePhotoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -3333,14 +3452,11 @@ export default function HomePage() {
     setMediaUploading(true);
     setPostError("");
     try {
-      const nextPhotos = [...draft.photos];
-      const nextPhotoKeys = [...draft.photoKeys];
+      const nextMedia = [...mediaFromDraft(draft)];
       for (const file of files) {
-        const photoDataUrl = await compressPhoto(file);
-        const uploaded = await uploadPhotoToR2(photoDataUrl, file.name);
-        nextPhotos.push(uploaded.url);
-        nextPhotoKeys.push(uploaded.key);
-        updateDraft({ photos: nextPhotos.slice(0, 4), photoKeys: nextPhotoKeys.slice(0, 4) });
+        const uploaded = await uploadPhotoToR2(file);
+        nextMedia.push(uploaded);
+        updateDraft(draftArraysFromMedia(nextMedia.slice(0, 4)));
       }
     } catch (error) {
       console.error("[photo-upload]", error);
@@ -3426,7 +3542,8 @@ export default function HomePage() {
       setPostStep(([1, 2, 3, 4, 5] as PostStep[]).find((step) => Boolean(validatePostStep(step))) || 1);
       return;
     }
-    if (draft.photoKeys.length !== draft.photos.length) {
+    const draftMedia = mediaFromDraft(draft);
+    if (draftMedia.length !== draft.photos.length || draftMedia.some((media) => !media.key || !media.url)) {
       setPostError("Please re-upload the listing photos so they can be saved to cloud storage.");
       setPostStep(3);
       return;
@@ -3464,7 +3581,14 @@ export default function HomePage() {
           agentFeePlan: draft.agentFeePlan,
           agentFeeAmount: draft.agentFeeAmount,
           agentProfileId: draft.agentProfileId,
-          media: draft.photoKeys.map((key) => ({ key, contentType: "image/jpeg" })),
+          media: draftMedia.map((media) => ({
+            key: media.key,
+            contentType: media.contentType || "image/jpeg",
+            thumbnailKey: media.thumbnailKey,
+            thumbnailContentType: media.thumbnailContentType,
+            width: media.width,
+            height: media.height,
+          })),
         }),
       });
       const result = await response.json() as Listing & { error?: string; status?: string; code?: string; limit?: number; used?: number };
@@ -3561,6 +3685,8 @@ export default function HomePage() {
       lease: `${draft.lease} months`,
       image: draft.photos[0],
       photos: draft.photos,
+      photoThumbnails: draft.photoThumbnails,
+      media: mediaFromDraft(draft),
       features: draft.features,
       tagsZh,
       tagsEn,
@@ -4076,11 +4202,11 @@ export default function HomePage() {
         </section>
 
         <section className="search-workbench" aria-label={locale === "zh" ? "找房工作台" : "Rental search workbench"}>
-          <aside className={`filter-column ${mobileFiltersOpen ? "is-open" : ""}`} id="rental-filter-desk">
+          <aside ref={filterDialogRef} className={`filter-column ${mobileFiltersOpen ? "is-open" : ""}`} id="rental-filter-desk" role={isMobileViewport ? (mobileFiltersOpen ? "dialog" : "none") : undefined} aria-modal={isMobileViewport && mobileFiltersOpen ? "true" : undefined} aria-hidden={isMobileViewport ? !mobileFiltersOpen : undefined} aria-labelledby={isMobileViewport ? "filter-title" : undefined} inert={isMobileViewport && !mobileFiltersOpen ? true : undefined} tabIndex={isMobileViewport && mobileFiltersOpen ? -1 : undefined}>
             <div className="filter-header">
               <div>
                 <span className="section-label">FILTER DESK</span>
-                <h2>{t.filters}</h2>
+                <h2 id="filter-title">{t.filters}</h2>
               </div>
               <div className="filter-header-actions"><button className="text-button" type="button" onClick={resetFilters}>{t.reset}</button><button className="mobile-filter-close" type="button" onClick={() => setMobileFiltersOpen(false)}>{locale === "zh" ? "完成" : "Done"}</button></div>
             </div>
@@ -4262,7 +4388,12 @@ export default function HomePage() {
               <button className="notice-action" type="button" onClick={() => showToast(t.addressPrivate)}>{locale === "zh" ? "为什么" : "Why"}</button>
             </div>}
 
-            <div className="listing-list">
+            {remoteListingsError && <div className="live-listing-error" role="alert">
+              <div><strong>{locale === "zh" ? "实时房源加载失败" : "Live listings could not be loaded"}</strong><p>{remoteListingsError}</p></div>
+              <button className="outline-button" type="button" onClick={() => setRemoteListingsRetry((current) => current + 1)} disabled={remoteListingsLoading}>{remoteListingsLoading ? (locale === "zh" ? "Retrying…" : "Retrying…") : (locale === "zh" ? "重试" : "Retry")}</button>
+            </div>}
+
+            <div className="listing-list" aria-busy={remoteListingsLoading}>
               {filteredListings.length === 0 ? (
                 <StatusPanel
                   icon={<SearchIcon size={22} />}
@@ -4312,6 +4443,7 @@ export default function HomePage() {
                     price={formatPrice(listing)}
                     tags={tags}
                     photos={listingPhotos(listing)}
+                    thumbnailPhotos={listingPhotoThumbnails(listing)}
                     icons={{
                       pin: (options) => <PinIcon size={options?.size} />,
                       gallery: (options) => <GalleryIcon size={options?.size} />,
@@ -4367,7 +4499,7 @@ export default function HomePage() {
 
       {analyticsOpen && currentUser && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAnalyticsOpen(false); }}>
-          <aside className="drawer analytics-drawer" role="dialog" aria-modal="true" aria-labelledby="account-analytics-title">
+          <aside ref={analyticsDialogRef} className="drawer analytics-drawer" role="dialog" aria-modal="true" aria-labelledby="account-analytics-title" tabIndex={-1}>
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">PERFORMANCE DESK</span><button className="drawer-close" type="button" onClick={() => setAnalyticsOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="account-analytics-title">{locale === "zh" ? "房源表现" : "Listing performance"}</h2>
@@ -4380,7 +4512,7 @@ export default function HomePage() {
 
       {savedOpen && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSavedOpen(false); }}>
-          <aside className="drawer form-drawer" role="dialog" aria-modal="true" aria-labelledby="saved-title">
+          <aside ref={savedDialogRef} className="drawer form-drawer" role="dialog" aria-modal="true" aria-labelledby="saved-title" tabIndex={-1}>
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">SAVED DESK</span><button className="drawer-close" type="button" onClick={() => setSavedOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="saved-title">{locale === "zh" ? "我保存的房源" : "Saved listings"}</h2>
@@ -4397,7 +4529,7 @@ export default function HomePage() {
                 <div className="saved-list">
                   {savedListings.map((listing) => (
                     <button className="saved-item" type="button" key={listing.id} onClick={() => { openListing(listing); setSavedOpen(false); }}>
-                    <Image src={listing.image} alt="" width={76} height={62} unoptimized={listing.source !== "sample"} />
+                    <Image src={listing.image} alt="" width={76} height={62} />
                       <span><strong>{listingTitle(listing)}</strong><small>{listingArea(listing)} · {formatPrice(listing)}</small></span>
                       <ArrowIcon size={15} />
                     </button>
@@ -4411,7 +4543,7 @@ export default function HomePage() {
 
       {messagesOpen && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMessagesOpen(false); }}>
-          <aside className="drawer form-drawer" role="dialog" aria-modal="true" aria-labelledby="messages-title">
+          <aside ref={messagesDialogRef} className="drawer form-drawer" role="dialog" aria-modal="true" aria-labelledby="messages-title" tabIndex={-1}>
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">MESSAGE DESK</span><button className="drawer-close" type="button" onClick={() => setMessagesOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="messages-title">{locale === "zh" ? "我的咨询" : "My inquiries"}</h2>
@@ -4439,7 +4571,7 @@ export default function HomePage() {
 
       {compareOpen && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setCompareOpen(false); }}>
-          <aside className="drawer compare-drawer" role="dialog" aria-modal="true" aria-labelledby="compare-title">
+          <aside ref={compareDialogRef} className="drawer compare-drawer" role="dialog" aria-modal="true" aria-labelledby="compare-title" tabIndex={-1}>
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">COMPARE DESK</span><button className="drawer-close" type="button" onClick={() => setCompareOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="compare-title">{locale === "zh" ? "并排比较房源" : "Compare listings"}</h2>
@@ -4447,7 +4579,7 @@ export default function HomePage() {
               <div className="compare-grid">
                 {compareListings.map((listing) => (
                   <article className="compare-card" key={listing.id}>
-                    <Image src={listing.image} alt="" width={180} height={120} unoptimized={listing.source !== "sample"} />
+                    <Image src={listing.image} alt="" width={180} height={120} />
                     <strong>{listingTitle(listing)}</strong>
                     <span>{formatPrice(listing)} {t.month}</span>
                     <dl>
@@ -4487,7 +4619,7 @@ export default function HomePage() {
 
       {postOpen && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPostOpen(false); }}>
-          <aside className="drawer form-drawer post-drawer" role="dialog" aria-modal="true" aria-labelledby="post-title">
+          <aside ref={postDialogRef} className="drawer form-drawer post-drawer" role="dialog" aria-modal="true" aria-labelledby="post-title" tabIndex={-1}>
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">POSTER WORKFLOW</span><button className="drawer-close" type="button" onClick={() => setPostOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="post-title">{editingListingId ? (locale === "zh" ? "编辑房源" : "Edit listing") : t.postTitle}</h2>
@@ -4500,7 +4632,7 @@ export default function HomePage() {
                   <div><span className="section-label">{locale === "zh" ? "发布进度" : "POSTING PROGRESS"}</span><strong>{locale === "zh" ? `已完成 ${completedPostStageCount} / 5 步` : `${completedPostStageCount} of 5 steps complete`}</strong></div>
                   <span className={`draft-save-status ${draftSaveState}`}><span className="draft-save-dot" aria-hidden="true" />{draftSaveLabel}</span>
                 </div>
-                <div className="post-progress-track" aria-hidden="true"><span style={{ width: `${postProgressPercent}%` }} /></div>
+                <div className="post-progress-track" aria-hidden="true"><span style={{ transform: `scaleX(${postProgressPercent / 100})` }} /></div>
                 <div className="post-stage-health" role="status">
                   <span>{locale === "zh" ? "可以使用“上一步”返回修改；带“需补充”的步骤还需要信息。" : "Use Back to revise earlier steps; flagged steps still need details."}</span>
                   {postStageLabels.filter(({ step }) => step < postStep && Boolean(validatePostStep(step))).map(({ step, label }) => <button className="post-stage-health-action" type="button" key={step} onClick={() => { setPostStep(step); setPostError(""); }}>{label} · {locale === "zh" ? "需补充" : "Needs details"}</button>)}
@@ -4540,7 +4672,7 @@ export default function HomePage() {
               {postStep === 3 && (
                 <div className="post-form-grid">
                   <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 4 张，当前 ${draft.photos.length} 张。支持 JPG、PNG、WebP，照片会上传到云端。` : `Up to 4 photos, ${draft.photos.length} selected. JPG, PNG, and WebP upload to cloud storage.`}</span></label>
-                  {draft.photos.length > 0 && <div className="photo-preview field-span-2">{draft.photos.map((photo, index) => <div className="photo-preview-item" key={`${photo.slice(0, 24)}-${index}`}><Image src={photo} alt={`${locale === "zh" ? "房源照片" : "Listing photo"} ${index + 1}`} width={112} height={82} unoptimized /><span className="photo-order">{index === 0 ? (locale === "zh" ? "首图" : "Cover") : index + 1}</span><div className="photo-preview-actions"><button className="photo-action" type="button" onClick={() => movePhoto(index, "up")} disabled={index === 0} aria-label={locale === "zh" ? "设为首图" : "Move photo up"}><ChevronIcon direction="up" /></button><button className="photo-action" type="button" onClick={() => movePhoto(index, "down")} disabled={index === draft.photos.length - 1} aria-label={locale === "zh" ? "照片后移" : "Move photo down"}><ChevronIcon direction="down" /></button><button className="photo-action photo-remove" type="button" onClick={() => updateDraft({ photos: draft.photos.filter((_, photoIndex) => photoIndex !== index), photoKeys: draft.photoKeys.filter((_, photoIndex) => photoIndex !== index) })} aria-label={locale === "zh" ? `删除照片 ${index + 1}` : `Remove photo ${index + 1}`}><CloseIcon size={14} /></button></div></div>)}</div>}
+                  {draft.photos.length > 0 && <div className="photo-preview field-span-2">{draft.photos.map((photo, index) => <div className="photo-preview-item" key={`${photo.slice(0, 24)}-${index}`}><Image src={photo} alt={`${locale === "zh" ? "房源照片" : "Listing photo"} ${index + 1}`} width={112} height={82} /><span className="photo-order">{index === 0 ? (locale === "zh" ? "首图" : "Cover") : index + 1}</span><div className="photo-preview-actions"><button className="photo-action" type="button" onClick={() => movePhoto(index, "up")} disabled={index === 0} aria-label={locale === "zh" ? "设为首图" : "Move photo up"}><ChevronIcon direction="up" /></button><button className="photo-action" type="button" onClick={() => movePhoto(index, "down")} disabled={index === draft.photos.length - 1} aria-label={locale === "zh" ? "照片后移" : "Move photo down"}><ChevronIcon direction="down" /></button><button className="photo-action photo-remove" type="button" onClick={() => updateDraft(draftArraysFromMedia(mediaFromDraft(draft).filter((_, photoIndex) => photoIndex !== index)))} aria-label={locale === "zh" ? `删除照片 ${index + 1}` : `Remove photo ${index + 1}`}><CloseIcon size={14} /></button></div></div>)}</div>}
                   <fieldset className="location-lookup-panel field-span-2">
                     <legend>{t.lookupTitle}</legend>
                     <p className="field-help">{t.lookupHelp}</p>
@@ -4560,6 +4692,8 @@ export default function HomePage() {
                   {!locationContextLoading && locationContext && <p className={`ai-location-status field-span-2 ${locationContext.source === "google" ? "ready" : ""}`} role="status">{locationContext.source === "google" ? (locationContext.routeOrigin === "privateAddress" ? (locale === "zh" ? "已使用私密精确地址加入附近设施和出行时间；地址不会发送给 AI 或公开，发布前请复核。" : "Nearby places and travel times used the private address on the server; the address is not sent to AI or shown publicly. Review before publishing.") : (locale === "zh" ? "已加入大致区域的周边、华人生活圈和出行时间；发布前请复核。" : "Approximate-area nearby places, community destinations, and travel times were added; review before publishing.")) : locationContext.notes[0] || (locale === "zh" ? "没有加入未经验证的周边或交通说法。" : "No unverified nearby or transit claims were added.")}</p>}
                   {!locationContextLoading && locationContext?.source === "google" && (locationContext.destinations.length > 0 || locationContext.nearby.length > 0 || locationContext.transit.length > 0) && <div className="location-context-results field-span-2" role="note">
                     <div className="location-context-heading"><strong>{locale === "zh" ? "Google 返回的附近参考" : "Google-returned nearby references"}</strong><span>{locale === "zh" ? "这些是地图服务返回的地点与路线，发布前请复核。" : "These are map-returned places and routes; review them before publishing."}</span></div>
+                    <div className="location-context-meta"><span>{locale === "zh" ? "数据来源：Google 地图" : "Source: Google Maps"}</span><span>{locale === "zh" ? `最后检查：${locationCheckedAtLabel(locationContext.checkedAt, locale)}` : `Last checked: ${locationCheckedAtLabel(locationContext.checkedAt, locale)}`}</span><span>{locale === "zh" ? (locationContext.routeOrigin === "privateAddress" ? "路线起点：私密精确地址（仅服务器）" : "路线起点：大致区域") : (locationContext.routeOrigin === "privateAddress" ? "Route origin: private server-side address" : "Route origin: approximate area")}</span></div>
+                    {locationContext.diagnostics && (locationContext.diagnostics.placesQualityIssues > 0 || locationContext.diagnostics.routesQualityIssues > 0) && <p className="location-context-quality-warning">{locale === "zh" ? `已过滤 ${locationContext.diagnostics.placesQualityIssues} 项地点、${locationContext.diagnostics.routesQualityIssues} 项路线结果；原因可能是距离、类别、坐标或调用预算。` : `${locationContext.diagnostics.placesQualityIssues} place and ${locationContext.diagnostics.routesQualityIssues} route result(s) were filtered because of distance, category, coordinates, or call-budget checks.`}</p>}
                     <ul>
                       {locationContext.transit.map((station) => renderTransitContextItem(station, locale))}
                       {locationContext.destinations.map((destination) => <li key={`${destination.mode}-${destination.name}`}>
@@ -4568,7 +4702,7 @@ export default function HomePage() {
                         <small>{destination.minutes ? (locale === "zh" ? `约 ${destination.minutes} 分钟${destination.mode === "drive" ? "车程" : destination.mode === "transit" ? "公共交通" : "步行"}` : `About ${destination.minutes} minutes by ${destination.mode === "drive" ? "car" : destination.mode === "transit" ? "public transit" : "walking"}`) : (locale === "zh" ? "路线时间暂不可用" : "Travel time unavailable")}</small>
                         {destination.transitLines?.length ? <div className="location-transit-lines"><span className="location-transit-lines-label">{locale === "zh" ? "建议线路" : "Suggested lines"}</span>{destination.transitLines.map((line) => <span className="location-transit-line" key={`${destination.name}-${line.shortName || line.name}`}>{transitLineLabel(line, locale)}</span>)}</div> : null}
                       </li>)}
-                      {locationContext.nearby.map((place) => <li key={`nearby-${place.name}`}><span>{place.category}</span><strong>{place.name}</strong><small>{locale === "zh" ? "大致区域附近" : "Near the approximate area"}</small></li>)}
+                      {locationContext.nearby.map((place) => <li key={`nearby-${place.name}`}><span>{place.category}</span><strong>{place.name}</strong><small>{locale === "zh" ? "Google 返回的候选地点；未单独验证路线" : "Google candidate; route not independently verified"}</small></li>)}
                     </ul>
                     {locationContext.notes.length > 1 && <ul className="location-context-notes">{locationContext.notes.slice(1).map((note, index) => <li key={`${index}-${note}`}>{note}</li>)}</ul>}
                     <p>{locationContext.routeOrigin === "privateAddress" ? (locale === "zh" ? "以上路线使用私密精确地址计算，精确地址不会显示在公开房源；请发布前复核时间和地点。" : "These routes used the private address on the server; the exact address will not appear on the public listing. Review the times and places before publishing.") : (locale === "zh" ? "以上时间根据所选大致区域估算，不代表精确房屋地址；发布前请复核。" : "Times use the selected approximate area, not the exact property address. Review before publishing.")}</p>
@@ -4612,7 +4746,7 @@ export default function HomePage() {
                       {!agentProfilesLoading && !agentProfilesError && agentProfiles.length > 0 && <div className="agent-profile-options" role="radiogroup" aria-label={locale === "zh" ? "选择经纪" : "Choose an agent"}>
                         {agentProfiles.map((profile) => <label className={`agent-profile-option ${draft.agentProfileId === profile.id ? "active" : ""}`} key={profile.id}>
                           <input type="radio" name="agent-profile" value={profile.id} checked={draft.agentProfileId === profile.id} onChange={() => updateDraft({ agentProfileId: profile.id })} />
-                          <span className={portraitStyles.profileOptionBody}><span className={portraitStyles.profileAvatar} aria-hidden="true">{profile.portraitUrl ? <Image src={profile.portraitUrl} alt="" width={42} height={42} unoptimized /> : (locale === "zh" ? profile.displayNameZh : profile.displayNameEn).slice(0, 1)}</span><span className="agent-profile-copy"><span className="agent-profile-topline"><strong>{locale === "zh" ? profile.displayNameZh : profile.displayNameEn}</strong><span className={`agent-verification-chip ${profile.isVerified ? "verified" : "sample"}`}>{profile.isVerified ? (locale === "zh" ? "已核验" : "Verified") : (locale === "zh" ? "示例档案" : "Sample profile")}</span></span><small>{profile.brokerage} · {profile.licenseState} · {locale === "zh" ? "州执照已核验" : "State license checked"}</small><p>{profile.serviceAreas.slice(0, 3).join(" · ")} · {profile.languages.join(" / ")}</p></span></span>
+                          <span className={portraitStyles.profileOptionBody}><span className={portraitStyles.profileAvatar} aria-hidden="true">{profile.portraitUrl ? <Image src={profile.portraitUrl} alt="" width={42} height={42} /> : (locale === "zh" ? profile.displayNameZh : profile.displayNameEn).slice(0, 1)}</span><span className="agent-profile-copy"><span className="agent-profile-topline"><strong>{locale === "zh" ? profile.displayNameZh : profile.displayNameEn}</strong><span className={`agent-verification-chip ${profile.isVerified ? "verified" : "sample"}`}>{profile.isVerified ? (locale === "zh" ? "已核验" : "Verified") : (locale === "zh" ? "示例档案" : "Sample profile")}</span></span><small>{profile.brokerage} · {profile.licenseState} · {locale === "zh" ? "州执照已核验" : "State license checked"}</small><p>{profile.serviceAreas.slice(0, 3).join(" · ")} · {profile.languages.join(" / ")}</p></span></span>
                         </label>)}
                       </div>}
                       {!agentProfilesLoading && !agentProfilesError && agentProfiles.length === 0 && <div className="agent-profile-empty" role="note"><strong>{locale === "zh" ? "暂时没有可选经纪" : "No agents are available yet"}</strong><p>{locale === "zh" ? "你仍然可以提交匹配请求；经纪目录准备好后，再选择具体人选。" : "You can still submit a matching request and choose a specific agent when the directory is ready."}</p></div>}
@@ -4645,7 +4779,7 @@ export default function HomePage() {
                     <div className="listing-quality-checks">{listingQuality.checks.map((check) => <span className={check.done ? "done" : "missing"} key={check.key}><span aria-hidden="true">{check.done ? "✓" : "—"}</span>{locale === "zh" ? check.zh : check.en}</span>)}</div>
                   </section>
                   <div className="post-preview">
-                  <div className="preview-photo">{draft.photos[0] ? <Image src={draft.photos[0]} alt="" fill sizes="460px" unoptimized /> : null}<span>{locale === "zh" ? "公开预览" : "Public preview"}</span></div>
+                  <div className="preview-photo">{draft.photos[0] ? <Image src={draft.photos[0]} alt="" fill sizes="460px" /> : null}<span>{locale === "zh" ? "公开预览" : "Public preview"}</span></div>
                   <div className="preview-copy"><span className="listing-type">{draft.rentalType === "privateRoom" ? t.privateRoom : draft.rentalType === "sublet" ? t.sublet : t.entire}</span><h3>{draft.titleZh || (locale === "zh" ? "未命名房源" : "Untitled listing")}</h3><p className="listing-area"><PinIcon size={15} />{locale === "zh" ? toChineseLocationLabel(draft.areaZh || "大致区域") : draft.areaEn || draft.areaZh || "Approximate area"}</p><div className="price-line"><strong>{draft.price ? `$${Number(draft.price).toLocaleString("en-US")}` : "—"}</strong><span>{t.month}</span></div><p className="preview-move-in">{t.detailMoveIn}：{draft.moveInMode === "immediate" ? t.immediate : draft.moveInDate || "—"}</p><div className="tag-row">{draft.features.map((feature) => <span className="listing-tag" key={feature}>{featureLabel(feature)}</span>)}</div>{draft.agentService === "agentMatch" && <div className="agent-service-preview"><ShieldIcon size={16} /><div><strong>{selectedAgentProfile ? (locale === "zh" ? `已选择经纪：${selectedAgentProfile.displayNameZh}` : `Agent selected: ${selectedAgentProfile.displayNameEn}`) : (locale === "zh" ? "已请求经纪协助" : "Agent assistance requested")}</strong><p>{draft.agentFeePlan === "firstMonthRent" ? (locale === "zh" ? "费用意向：成交后支付一个月租金" : "Fee preference: one month’s rent after a lease") : draft.agentFeePlan === "flatFee" ? (locale === "zh" ? `费用意向：固定 $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")}` : `Fee preference: $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")} flat`) : (locale === "zh" ? "费用意向：请经纪报价" : "Fee preference: agent to quote")}</p></div></div>}<div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>精确地址不会出现在公开预览中。</p></div></div></div>
                   </div>
                 </>
@@ -4665,13 +4799,13 @@ export default function HomePage() {
 
       {shareListing && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShareListing(null); }}>
-          <aside className="drawer share-drawer" role="dialog" aria-modal="true" aria-labelledby="share-title">
+          <aside ref={shareDialogRef} className="drawer share-drawer" role="dialog" aria-modal="true" aria-labelledby="share-title" tabIndex={-1}>
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">SHARE DESK</span><button className="drawer-close" type="button" onClick={() => setShareListing(null)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="share-title">{locale === "zh" ? "房源已发布，发给朋友" : "Your listing is live — share it"}</h2>
               <p className="drawer-intro">{locale === "zh" ? "我们已经准备好房源链接和一段可直接使用的文案。选择一种方式，就可以发到微信、TikTok 或手机的系统分享菜单。" : "Your listing link and a ready-to-use caption are prepared. Choose a route for WeChat, TikTok, or your phone’s system share menu."}</p>
               <div className="share-preview">
-                <div className="share-preview-photo">{listingPhotos(shareListing)[0] ? <Image src={listingPhotos(shareListing)[0]} alt="" fill sizes="150px" unoptimized /> : <div className="image-fallback" aria-hidden="true" />}</div>
+                <div className="share-preview-photo">{listingPhotos(shareListing)[0] ? <Image src={listingPhotos(shareListing)[0]} alt="" fill sizes="150px" /> : <div className="image-fallback" aria-hidden="true" />}</div>
                 <div className="share-preview-copy"><span className="listing-type">{listingType(shareListing)}</span><h3>{listingTitle(shareListing)}</h3><p className="listing-area"><PinIcon size={14} />{listingArea(shareListing)}</p><strong>{formatPrice(shareListing)}<span className="share-preview-month">{t.month}</span></strong></div>
               </div>
               <section className="share-poster-panel" aria-labelledby="share-poster-title">
@@ -4733,7 +4867,7 @@ export default function HomePage() {
 
       {selectedListing && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedListing(null); }}>
-          <aside className="drawer detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+          <aside ref={detailDialogRef} className="drawer detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title" tabIndex={-1}>
             <ListingGallery
               title={listingTitle(selectedListing)}
               photos={selectedPhotos.length > 0 ? selectedPhotos : ["/listings/elmwood-light.png"]}
@@ -4744,7 +4878,6 @@ export default function HomePage() {
               nextLabel={locale === "zh" ? "下一张房源照片" : "Next listing photo"}
               closeLabel={t.close}
               expandLabel={locale === "zh" ? "查看大图" : "View fullscreen"}
-              sourceIsSample={selectedListing.source === "sample"}
               lockIcon={(options) => <LockIcon size={options?.size} />}
               closeIcon={(options) => <CloseIcon size={options?.size} />}
               onSelect={setSelectedPhotoIndex}
@@ -4811,7 +4944,7 @@ export default function HomePage() {
 
       {contactListing && (
         <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeContact(); }}>
-          <aside className="drawer form-drawer" role="dialog" aria-modal="true" aria-labelledby="contact-title">
+          <aside ref={contactDialogRef} className="drawer form-drawer" role="dialog" aria-modal="true" aria-labelledby="contact-title" tabIndex={-1}>
             <div className="drawer-content">
               <div className="drawer-heading"><span className="section-label">{contactListing.titleEn}</span><button className="drawer-close" type="button" onClick={closeContact} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="contact-title">{t.contactTitle}</h2>
