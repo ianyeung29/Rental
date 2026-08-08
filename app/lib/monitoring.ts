@@ -8,6 +8,8 @@ export type UsageAlertSettings = {
   googlePlacesMonthlyCalls: number;
   googleRoutesMonthlyCalls: number;
   blockedRequestsThreshold: number;
+  googlePlacesQualityIssuesThreshold: number;
+  googleRoutesQualityIssuesThreshold: number;
 };
 
 export const DEFAULT_USAGE_ALERT_SETTINGS: UsageAlertSettings = {
@@ -16,6 +18,8 @@ export const DEFAULT_USAGE_ALERT_SETTINGS: UsageAlertSettings = {
   googlePlacesMonthlyCalls: 4_000,
   googleRoutesMonthlyCalls: 8_000,
   blockedRequestsThreshold: 1,
+  googlePlacesQualityIssuesThreshold: 3,
+  googleRoutesQualityIssuesThreshold: 3,
 };
 
 export type UsageAlert = {
@@ -37,6 +41,8 @@ export type MonitoringSnapshot = {
     googlePlacesCalls: number;
     googleRoutesCalls: number;
     blockedRequests: number;
+    googlePlacesQualityIssues: number;
+    googleRoutesQualityIssues: number;
   };
   alerts: UsageAlert[];
   errors: {
@@ -83,6 +89,8 @@ function settingsFromRow(row: Record<string, unknown> | undefined): UsageAlertSe
     googlePlacesMonthlyCalls: Math.max(1, Math.round(numberValue(row?.google_places_monthly_calls, DEFAULT_USAGE_ALERT_SETTINGS.googlePlacesMonthlyCalls))),
     googleRoutesMonthlyCalls: Math.max(1, Math.round(numberValue(row?.google_routes_monthly_calls, DEFAULT_USAGE_ALERT_SETTINGS.googleRoutesMonthlyCalls))),
     blockedRequestsThreshold: Math.max(1, Math.round(numberValue(row?.blocked_requests_threshold, DEFAULT_USAGE_ALERT_SETTINGS.blockedRequestsThreshold))),
+    googlePlacesQualityIssuesThreshold: Math.max(1, Math.round(numberValue(row?.google_places_quality_issues_threshold, DEFAULT_USAGE_ALERT_SETTINGS.googlePlacesQualityIssuesThreshold))),
+    googleRoutesQualityIssuesThreshold: Math.max(1, Math.round(numberValue(row?.google_routes_quality_issues_threshold, DEFAULT_USAGE_ALERT_SETTINGS.googleRoutesQualityIssuesThreshold))),
   };
 }
 
@@ -142,6 +150,22 @@ function buildAlerts(settings: UsageAlertSettings, month: MonitoringSnapshot["mo
       threshold: settings.blockedRequestsThreshold,
       message: `Application rate limits blocked ${Math.round(month.blockedRequests).toLocaleString("en-US")} requests this month; threshold is ${settings.blockedRequestsThreshold.toLocaleString("en-US")}.`,
     },
+    {
+      key: "google_places_quality_issues",
+      provider: "Google Maps",
+      metric: "Places missing / rejected results",
+      value: month.googlePlacesQualityIssues,
+      threshold: settings.googlePlacesQualityIssuesThreshold,
+      message: `Google Places recorded ${Math.round(month.googlePlacesQualityIssues).toLocaleString("en-US")} missing or rejected results this month; threshold is ${settings.googlePlacesQualityIssuesThreshold.toLocaleString("en-US")}.`,
+    },
+    {
+      key: "google_routes_quality_issues",
+      provider: "Google Maps",
+      metric: "Routes missing / rejected results",
+      value: month.googleRoutesQualityIssues,
+      threshold: settings.googleRoutesQualityIssuesThreshold,
+      message: `Google Routes recorded ${Math.round(month.googleRoutesQualityIssues).toLocaleString("en-US")} missing or rejected results this month; threshold is ${settings.googleRoutesQualityIssuesThreshold.toLocaleString("en-US")}.`,
+    },
   ];
   return checks.map((check) => ({ ...check, active: check.value >= check.threshold, lastTriggeredAt: lastTriggered.get(check.key) || null }));
 }
@@ -188,11 +212,47 @@ export async function recordApplicationErrorSafely(input: Parameters<typeof reco
   }
 }
 
+export async function recordLocationQualityEvent(input: {
+  lookupKind?: string;
+  placesCalls: number;
+  routeCalls: number;
+  placesQualityIssues: number;
+  routesQualityIssues: number;
+  rejectionReasons?: string[];
+  metadata?: Record<string, unknown>;
+}) {
+  if (!sql) return;
+  await ensureDatabaseSchema();
+  await sql.query(`
+    INSERT INTO rental_location_quality_events (
+      id, lookup_kind, places_calls, route_calls, places_quality_issues,
+      routes_quality_issues, rejection_reasons, metadata
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+  `, [
+    randomUUID(),
+    safeText(input.lookupKind, 80) || "location-context",
+    Math.max(0, Math.round(input.placesCalls)),
+    Math.max(0, Math.round(input.routeCalls)),
+    Math.max(0, Math.round(input.placesQualityIssues)),
+    Math.max(0, Math.round(input.routesQualityIssues)),
+    JSON.stringify((input.rejectionReasons || []).filter(Boolean).slice(0, 12)),
+    JSON.stringify(input.metadata || {}),
+  ]);
+}
+
+export async function recordLocationQualityEventSafely(input: Parameters<typeof recordLocationQualityEvent>[0]) {
+  try {
+    await recordLocationQualityEvent(input);
+  } catch (error) {
+    console.error("[monitoring] location quality event could not be recorded", error);
+  }
+}
+
 export async function getUsageMonitoringSnapshot(): Promise<MonitoringSnapshot> {
   if (!sql) throw new Error("DATABASE_URL is not configured.");
   await ensureDatabaseSchema();
-  const [settingsRows, monthRows, blockedRows, errorTotalsRows, errorRows, alertRows, recipients] = await Promise.all([
-    sql.query("SELECT enabled, openai_monthly_cost_usd, google_places_monthly_calls, google_routes_monthly_calls, blocked_requests_threshold FROM rental_usage_alert_settings WHERE id = 'default' LIMIT 1"),
+  const [settingsRows, monthRows, blockedRows, qualityRows, errorTotalsRows, errorRows, alertRows, recipients] = await Promise.all([
+    sql.query("SELECT enabled, openai_monthly_cost_usd, google_places_monthly_calls, google_routes_monthly_calls, blocked_requests_threshold, google_places_quality_issues_threshold, google_routes_quality_issues_threshold FROM rental_usage_alert_settings WHERE id = 'default' LIMIT 1"),
     sql.query(`
       SELECT
         COALESCE(SUM(CASE WHEN provider = 'openai' THEN estimated_cost_usd ELSE 0 END), 0)::numeric AS openai_cost,
@@ -205,6 +265,13 @@ export async function getUsageMonitoringSnapshot(): Promise<MonitoringSnapshot> 
       SELECT COALESCE(SUM(blocked_count), 0)::bigint AS blocked_requests
       FROM rental_rate_limits
       WHERE updated_at >= date_trunc('month', NOW())
+    `),
+    sql.query(`
+      SELECT
+        COALESCE(SUM(places_quality_issues), 0)::bigint AS places_quality_issues,
+        COALESCE(SUM(routes_quality_issues), 0)::bigint AS routes_quality_issues
+      FROM rental_location_quality_events
+      WHERE created_at >= date_trunc('month', NOW())
     `),
     sql.query(`
       SELECT COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours')::int AS last_24_hours,
@@ -228,11 +295,14 @@ export async function getUsageMonitoringSnapshot(): Promise<MonitoringSnapshot> 
   const settings = settingsFromRow(settingsRows[0] as Record<string, unknown> | undefined);
   const monthRow = monthRows[0] as Record<string, unknown> | undefined;
   const blockedRow = blockedRows[0] as Record<string, unknown> | undefined;
+  const qualityRow = qualityRows[0] as Record<string, unknown> | undefined;
   const month = {
     openaiEstimatedCostUsd: numberValue(monthRow?.openai_cost),
     googlePlacesCalls: numberValue(monthRow?.places_calls),
     googleRoutesCalls: numberValue(monthRow?.route_calls),
     blockedRequests: numberValue(blockedRow?.blocked_requests),
+    googlePlacesQualityIssues: numberValue(qualityRow?.places_quality_issues),
+    googleRoutesQualityIssues: numberValue(qualityRow?.routes_quality_issues),
   };
   const lastTriggered = new Map(alertRows.map((row) => [String((row as Record<string, unknown>).alert_key || ""), dateValue((row as Record<string, unknown>).created_at)]));
   const errorTotals = errorTotalsRows[0] as Record<string, unknown> | undefined;
@@ -267,17 +337,21 @@ export async function updateUsageAlertSettings(input: UsageAlertSettings, update
   await sql.query(`
     INSERT INTO rental_usage_alert_settings (
       id, enabled, openai_monthly_cost_usd, google_places_monthly_calls,
-      google_routes_monthly_calls, blocked_requests_threshold, updated_by, updated_at
-    ) VALUES ('default', $1, $2, $3, $4, $5, $6, NOW())
+      google_routes_monthly_calls, blocked_requests_threshold,
+      google_places_quality_issues_threshold, google_routes_quality_issues_threshold,
+      updated_by, updated_at
+    ) VALUES ('default', $1, $2, $3, $4, $5, $6, $7, $8, NOW())
     ON CONFLICT (id) DO UPDATE SET
       enabled = EXCLUDED.enabled,
       openai_monthly_cost_usd = EXCLUDED.openai_monthly_cost_usd,
       google_places_monthly_calls = EXCLUDED.google_places_monthly_calls,
       google_routes_monthly_calls = EXCLUDED.google_routes_monthly_calls,
       blocked_requests_threshold = EXCLUDED.blocked_requests_threshold,
+      google_places_quality_issues_threshold = EXCLUDED.google_places_quality_issues_threshold,
+      google_routes_quality_issues_threshold = EXCLUDED.google_routes_quality_issues_threshold,
       updated_by = EXCLUDED.updated_by,
       updated_at = NOW()
-  `, [input.enabled, input.openaiMonthlyCostUsd, input.googlePlacesMonthlyCalls, input.googleRoutesMonthlyCalls, input.blockedRequestsThreshold, updatedBy]);
+  `, [input.enabled, input.openaiMonthlyCostUsd, input.googlePlacesMonthlyCalls, input.googleRoutesMonthlyCalls, input.blockedRequestsThreshold, input.googlePlacesQualityIssuesThreshold, input.googleRoutesQualityIssuesThreshold, updatedBy]);
 }
 
 export async function evaluateUsageAlerts() {

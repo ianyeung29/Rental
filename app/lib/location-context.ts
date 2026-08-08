@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { readLocationContextCache, writeLocationContextCache } from "./db";
+import {
+  DEFAULT_LOCATION_LOOKUP_SETTINGS,
+  readLocationContextCache,
+  readLocationLookupSettings,
+  writeLocationContextCache,
+} from "./db";
 import {
   hasRailTransitLine as ruleHasRailTransitLine,
   hasUrbanTransitLine as ruleHasUrbanTransitLine,
@@ -31,8 +36,8 @@ export type LocationLookupOption = typeof LOCATION_LOOKUP_OPTIONS[number];
 
 export const DEFAULT_LOCATION_LOOKUP_OPTIONS: readonly LocationLookupOption[] = ["community", "transit"];
 export const MAX_LOCATION_LOOKUP_OPTIONS = 3;
-export const MAX_PLACES_CALLS_PER_LOOKUP = 3;
-export const MAX_ROUTE_CALLS_PER_LOOKUP = 2;
+export const DEFAULT_PLACES_CALLS_PER_LOOKUP = DEFAULT_LOCATION_LOOKUP_SETTINGS.placesCallsPerLookup;
+export const DEFAULT_ROUTE_CALLS_PER_LOOKUP = DEFAULT_LOCATION_LOOKUP_SETTINGS.routeCallsPerLookup;
 
 export type LocationContextPlace = {
   name: string;
@@ -67,6 +72,15 @@ export type LocationContextUsage = {
   cacheHit: boolean;
 };
 
+export type LocationContextDiagnostics = {
+  checkedAt: string;
+  placesAttempted: number;
+  routesAttempted: number;
+  placesQualityIssues: number;
+  routesQualityIssues: number;
+  rejectionReasons: string[];
+};
+
 export type LocationContextRouteOrigin = "privateAddress" | "approximateArea";
 
 export type CommuteMode = "drive" | "walk" | "transit";
@@ -80,6 +94,7 @@ export type CommuteEstimate = {
   transitLines?: LocationContextTransitLine[];
   cached: boolean;
   note: string;
+  checkedAt?: string;
   usage: LocationContextUsage;
 };
 
@@ -93,6 +108,8 @@ export type LocationContext = {
   destinations: LocationContextDestination[];
   notes: string[];
   cached: boolean;
+  checkedAt?: string;
+  diagnostics?: LocationContextDiagnostics;
 };
 
 type LocationContextRequest = {
@@ -138,11 +155,28 @@ type TransitRegion = RuleTransitRegion;
 type LocationLookupBudget = {
   placesCalls: number;
   routeCalls: number;
+  placesLimit: number;
+  routeLimit: number;
 };
+
+async function currentLocationLookupSettings() {
+  try {
+    return await readLocationLookupSettings();
+  } catch {
+    return { ...DEFAULT_LOCATION_LOOKUP_SETTINGS };
+  }
+}
 
 const CONTEXT_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
 const contextCache = new Map<string, { expiresAt: number; value: LocationContext }>();
 const commuteCache = new Map<string, { expiresAt: number; value: CommuteEstimate }>();
+
+export function clearLocationContextMemoryCache() {
+  const cleared = contextCache.size + commuteCache.size;
+  contextCache.clear();
+  commuteCache.clear();
+  return cleared;
+}
 
 function clean(value: unknown, max = 180) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -171,7 +205,20 @@ export function normalizeLocationLookupOptions(value: unknown, fallback = DEFAUL
 }
 
 function emptyContext(area: string, note: string, lookupOptions: LocationLookupOption[], routeOrigin: LocationContextRouteOrigin = "approximateArea"): LocationContext {
-  return { source: "none", approximateArea: area, routeOrigin, lookupOptions, nearby: [], transit: [], destinations: [], notes: [note], cached: false };
+  const checkedAt = new Date().toISOString();
+  return {
+    source: "none",
+    approximateArea: area,
+    routeOrigin,
+    lookupOptions,
+    nearby: [],
+    transit: [],
+    destinations: [],
+    notes: [note],
+    cached: false,
+    checkedAt,
+    diagnostics: { checkedAt, placesAttempted: 0, routesAttempted: 0, placesQualityIssues: 0, routesQualityIssues: 0, rejectionReasons: [] },
+  };
 }
 
 function displayName(value: unknown) {
@@ -239,6 +286,19 @@ function placeFromValue(value: unknown): PlaceResult | null {
   };
 }
 
+function locationContextDiagnostics(value: unknown): LocationContextDiagnostics {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const integer = (candidate: unknown) => Number.isFinite(Number(candidate)) ? Math.max(0, Math.round(Number(candidate))) : 0;
+  return {
+    checkedAt: typeof record.checkedAt === "string" ? record.checkedAt : new Date().toISOString(),
+    placesAttempted: integer(record.placesAttempted),
+    routesAttempted: integer(record.routesAttempted),
+    placesQualityIssues: integer(record.placesQualityIssues),
+    routesQualityIssues: integer(record.routesQualityIssues),
+    rejectionReasons: Array.isArray(record.rejectionReasons) ? record.rejectionReasons.filter((reason): reason is string => typeof reason === "string").slice(0, 8) : [],
+  };
+}
+
 function locationContextFromCache(value: unknown, fallbackOptions: LocationLookupOption[]): LocationContext | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -285,6 +345,8 @@ function locationContextFromCache(value: unknown, fallbackOptions: LocationLooku
     destinations,
     notes: Array.isArray(record.notes) ? record.notes.filter((note): note is string => typeof note === "string").slice(0, 3) : [],
     cached: true,
+    ...(typeof record.checkedAt === "string" ? { checkedAt: record.checkedAt } : {}),
+    ...(record.diagnostics && typeof record.diagnostics === "object" && !Array.isArray(record.diagnostics) ? { diagnostics: locationContextDiagnostics(record.diagnostics) } : {}),
   };
 }
 
@@ -374,7 +436,7 @@ async function searchPlacesWithinBudget(
   budget: LocationLookupBudget,
   includeTransitDetails = false,
 ) {
-  if (budget.placesCalls >= MAX_PLACES_CALLS_PER_LOOKUP) return [] as PlaceResult[];
+  if (budget.placesCalls >= budget.placesLimit) return [] as PlaceResult[];
   budget.placesCalls += 1;
   return searchPlaces(apiKey, body, languageCode, includeTransitDetails);
 }
@@ -387,7 +449,7 @@ async function routeMinutesWithinBudget(
   languageCode: string,
   budget: LocationLookupBudget,
 ) : Promise<RouteResult> {
-  if (budget.routeCalls >= MAX_ROUTE_CALLS_PER_LOOKUP) return { transitLines: [] };
+  if (budget.routeCalls >= budget.routeLimit) return { transitLines: [] };
   budget.routeCalls += 1;
   return routeMinutes(apiKey, origin, destination, travelMode, languageCode);
 }
@@ -477,7 +539,8 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
       : "Server-side map context is not configured; AI will not invent nearby places or travel times.", lookupOptions);
   }
 
-  const cacheKey = JSON.stringify({ version: 8, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
+  const lookupSettings = await currentLocationLookupSettings();
+  const cacheKey = JSON.stringify({ version: 10, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, lookupSettings: { placesCallsPerLookup: lookupSettings.placesCallsPerLookup, routeCallsPerLookup: lookupSettings.routeCallsPerLookup }, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
   const cached = contextCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     reportUsage({ placesCalls: 0, routeCalls: 0, cacheHit: true });
@@ -495,11 +558,22 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   }
 
   const languageCode = locale === "zh" ? "zh-CN" : "en";
-  const budget: LocationLookupBudget = { placesCalls: 0, routeCalls: 0 };
+  const budget: LocationLookupBudget = {
+    placesCalls: 0,
+    routeCalls: 0,
+    placesLimit: lookupSettings.placesCallsPerLookup,
+    routeLimit: lookupSettings.routeCallsPerLookup,
+  };
   const routeOrigin = privateAddress ? "privateAddress" : "approximateArea";
   const routeOriginQuery = privateAddress || queryArea;
   const routeOriginValue: RouteWaypoint = privateAddress || queryArea;
   const region = transitRegion(areaEn, areaZh, boroughEn, boroughZh);
+  let placesQualityIssues = 0;
+  let routesQualityIssues = 0;
+  const rejectionReasons: string[] = [];
+  const addRejectionReason = (reason: string) => {
+    if (!rejectionReasons.includes(reason)) rejectionReasons.push(reason);
+  };
   const nearbyDefinitions: Record<Exclude<LocationLookupOption, "transit" | "community">, NearbyDefinition> = {
     grocery: { query: "Chinese supermarket Chinese grocery Asian supermarket", categoryZh: "中文超市 / 亚洲超市", categoryEn: "Chinese / Asian supermarket", includedType: "supermarket" },
     park: { query: "park", categoryZh: "公园休闲", categoryEn: "Parks and recreation", includedType: "park" },
@@ -509,9 +583,15 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     restaurant: { query: "restaurant", categoryZh: "餐饮", categoryEn: "Restaurants", includedType: "restaurant" },
   };
   const community = lookupOptions.includes("community") ? communityDefinition(areaEn, areaZh, boroughEn, boroughZh) : null;
+  const communityPlacesBeforeLookup = budget.placesCalls;
   const communityPlace = community
     ? (await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(community.query, routeOriginQuery), pageSize: 3 }, languageCode, budget))[0] || null
     : null;
+  const communityAttempted = budget.placesCalls > communityPlacesBeforeLookup;
+  if (community && !communityPlace) {
+    placesQualityIssues += 1;
+    addRejectionReason(communityAttempted ? "community-place-not-found" : "community-place-budget-exhausted");
+  }
   let transitPlaces: PlaceResult[] = [];
   if (lookupOptions.includes("transit")) {
     if (region === "urban") {
@@ -529,7 +609,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
         const kind = urbanTransitKind(place);
         return kind === "bus" || kind === "both";
       });
-      if (!hasBusResult && budget.placesCalls < MAX_PLACES_CALLS_PER_LOOKUP) {
+      if (!hasBusResult && budget.placesCalls < budget.placesLimit) {
         transitPlaces = await searchPlacesWithinBudget(apiKey, {
           textQuery: nearbyQuery("subway station", routeOriginQuery),
           pageSize: 8,
@@ -548,31 +628,63 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     const definition = nearbyDefinitions[option];
     const placesBeforeLookup = budget.placesCalls;
     let places = await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(definition.query, routeOriginQuery), pageSize: option === "grocery" ? 10 : 1, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget);
-    const attempted = budget.placesCalls > placesBeforeLookup;
+    let rejectedCandidates = 0;
     if (option === "grocery") {
       let place = places.find(isChineseOrAsianMarket) || null;
+      rejectedCandidates += place ? 0 : places.length;
       if (!place) {
         places = await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery("Asian grocery store", routeOriginQuery), pageSize: 10, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget);
         place = places.find(isChineseOrAsianMarket) || null;
+        rejectedCandidates += place ? 0 : places.length;
       }
-      return { option, place, attempted };
+      const attempted = budget.placesCalls > placesBeforeLookup;
+      if (!place && attempted) placesQualityIssues += 1;
+      if (rejectedCandidates > 0) {
+        placesQualityIssues += Math.min(2, rejectedCandidates);
+        addRejectionReason("non-matching-supermarket-candidate");
+      } else if (!place) {
+        addRejectionReason(attempted ? "grocery-place-not-found" : "grocery-place-budget-exhausted");
+      }
+      return { option, place, attempted, rejectedCandidates };
     }
-    return { option, place: places[0] || null, attempted };
+    const place = places[0] || null;
+    const attempted = budget.placesCalls > placesBeforeLookup;
+    if (!place && attempted) {
+      placesQualityIssues += 1;
+      addRejectionReason(`${option}-place-not-found`);
+    } else if (!place) {
+      placesQualityIssues += 1;
+      addRejectionReason(`${option}-place-budget-exhausted`);
+    }
+    return { option, place, attempted, rejectedCandidates };
   }));
   const transitCandidates = uniquePlaces(transitPlaces).filter((place) => region === "urban" ? hasUrbanTransitLine(place) : region === "longIsland" ? hasRailTransitLine(place) : true);
   const transitPlacesForResults = region === "urban" ? selectUrbanTransitPlaces(transitCandidates) : transitCandidates.slice(0, 1);
   const transitPlace = transitPlacesForResults[0] || null;
+  if (lookupOptions.includes("transit") && !transitPlace) {
+    placesQualityIssues += 1;
+    addRejectionReason(budget.placesCalls >= budget.placesLimit ? "transit-place-budget-exhausted" : "transit-place-not-found");
+  }
   // Start the primary transit route before other optional destinations so the
   // two-route budget is spent on the nearby bus/LIRR result first.
   const transitResultPromise: Promise<LocationContextTransit | null> = transitPlace
     ? (() => {
       const isLongIsland = region === "longIsland";
-      const route = transitPlace.coordinates
-        ? routeMinutesWithinBudget(apiKey, routeOriginValue, transitPlace.coordinates, isLongIsland ? "DRIVE" : "WALK", languageCode, budget)
-        : Promise.resolve({ transitLines: [] } as RouteResult);
-      return route.then((routeResult) => {
-        if (!routeResult.minutes || (!isLongIsland && !isAcceptableNearbyWalkMinutes(routeResult.minutes))) return null;
-        const mode = transitModeLabel(transitPlace, locale, isLongIsland);
+       const route = transitPlace.coordinates
+         ? routeMinutesWithinBudget(apiKey, routeOriginValue, transitPlace.coordinates, isLongIsland ? "DRIVE" : "WALK", languageCode, budget)
+         : Promise.resolve({ transitLines: [] } as RouteResult);
+       return route.then((routeResult) => {
+         if (!routeResult.minutes) {
+           routesQualityIssues += 1;
+           addRejectionReason(transitPlace.coordinates ? "transit-route-not-verifiable" : "transit-place-no-coordinates");
+           return null;
+         }
+         if (!isLongIsland && !isAcceptableNearbyWalkMinutes(routeResult.minutes)) {
+           routesQualityIssues += 1;
+           addRejectionReason("transit-route-too-far");
+           return null;
+         }
+         const mode = transitModeLabel(transitPlace, locale, isLongIsland);
         return { name: transitPlace.name, mode, ...(isLongIsland ? { driveMinutes: routeResult.minutes } : { walkMinutes: routeResult.minutes }), ...(transitPlace.transitLines.length ? { lines: transitPlace.transitLines } : {}) };
       });
     })()
@@ -589,6 +701,10 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     : [];
   const highwayAttempted = budget.placesCalls > highwayPlacesBeforeLookup;
   const highwayPlace = uniquePlaces(highwayPlaces).find(isLongIslandHighway) || null;
+  if (region === "longIsland" && lookupOptions.includes("transit") && !highwayPlace) {
+    placesQualityIssues += 1;
+    addRejectionReason(highwayAttempted ? "highway-place-not-found" : "highway-place-budget-exhausted");
+  }
   const groceryPlace = nearbyResults.find((result) => result.option === "grocery")?.place;
   const groceryRoutePlanned = Boolean(groceryPlace?.coordinates && (region !== "longIsland" || !lookupOptions.includes("transit") || !highwayPlace));
   const routeJobs: Array<{ place: PlaceResult; name: string; category: string; mode: "drive" | "walk" | "transit"; travelMode: "DRIVE" | "WALK" | "TRANSIT" }> = [];
@@ -606,7 +722,16 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   }
   const destinationResults: Array<LocationContextDestination | null> = await Promise.all(routeJobs.map(async (job) => {
     const route = job.place.coordinates ? await routeMinutesWithinBudget(apiKey, routeOriginValue, job.place.coordinates, job.travelMode, languageCode, budget) : { transitLines: [] };
-    if (!route.minutes || (job.travelMode === "WALK" && !isAcceptableNearbyWalkMinutes(route.minutes))) return null;
+    if (!route.minutes) {
+      routesQualityIssues += 1;
+      addRejectionReason(job.travelMode === "WALK" ? (job.place.coordinates ? "walking-route-not-verifiable" : "walking-place-no-coordinates") : `${job.mode}-route-not-verifiable`);
+      return null;
+    }
+    if (job.travelMode === "WALK" && !isAcceptableNearbyWalkMinutes(route.minutes)) {
+      routesQualityIssues += 1;
+      addRejectionReason("walking-route-too-far");
+      return null;
+    }
     return { name: job.name, category: job.category, mode: job.mode, minutes: route.minutes, ...(route.transitLines.length ? { transitLines: route.transitLines } : {}) };
   }));
   const destinations = destinationResults.filter((destination): destination is LocationContextDestination => destination !== null);
@@ -617,12 +742,21 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   const transitResult = await transitResultPromise;
   const secondaryTransitPlace = transitPlacesForResults[1] || null;
   const secondaryTransitResult: Promise<LocationContextTransit | null> = secondaryTransitPlace
-    ? (secondaryTransitPlace.coordinates
-      ? routeMinutesWithinBudget(apiKey, routeOriginValue, secondaryTransitPlace.coordinates, region === "longIsland" ? "DRIVE" : "WALK", languageCode, budget)
-      : Promise.resolve({ transitLines: [] } as RouteResult)
-    ).then((routeResult) => {
-      if (!routeResult.minutes || (region !== "longIsland" && !isAcceptableNearbyWalkMinutes(routeResult.minutes))) return null;
-      return {
+     ? (secondaryTransitPlace.coordinates
+       ? routeMinutesWithinBudget(apiKey, routeOriginValue, secondaryTransitPlace.coordinates, region === "longIsland" ? "DRIVE" : "WALK", languageCode, budget)
+       : Promise.resolve({ transitLines: [] } as RouteResult)
+     ).then((routeResult) => {
+       if (!routeResult.minutes) {
+         routesQualityIssues += 1;
+         addRejectionReason(secondaryTransitPlace.coordinates ? "secondary-transit-route-not-verifiable" : "secondary-transit-place-no-coordinates");
+         return null;
+       }
+       if (region !== "longIsland" && !isAcceptableNearbyWalkMinutes(routeResult.minutes)) {
+         routesQualityIssues += 1;
+         addRejectionReason("secondary-transit-route-too-far");
+         return null;
+       }
+       return {
         name: secondaryTransitPlace.name,
         mode: transitModeLabel(secondaryTransitPlace, locale, region === "longIsland"),
         ...(region === "longIsland" ? { driveMinutes: routeResult.minutes } : { walkMinutes: routeResult.minutes }),
@@ -658,6 +792,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   const contextNote = routeOrigin === "privateAddress"
     ? (locale === "zh" ? "周边和出行时间使用发布者填写的私密地址计算；精确地址不会发送给 AI 或显示在公开页面，发布前请复核。" : "Nearby facts and travel times use the poster's private address on the server; the exact address is not sent to AI or shown publicly. Review before publishing.")
     : (locale === "zh" ? "周边和目的地时间按所选大致区域估算，不代表精确房址；车程、公共交通和步行时间请发布前复核。" : "Nearby facts and destination times use the selected area, not the exact property address; driving, public-transit, and walking times are approximate. Review before publishing.");
+  const checkedAt = new Date().toISOString();
   const result: LocationContext = {
     source: hasFacts ? "google" : "none",
     approximateArea: area,
@@ -673,8 +808,20 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
       ...(groceryNote ? [groceryNote] : []),
       ...(transitNote ? [transitNote] : []),
       ...(highwayNote ? [highwayNote] : []),
+      ...(placesQualityIssues > 0 || routesQualityIssues > 0
+        ? [locale === "zh" ? "部分地图地点或路线因类别、距离或调用预算无法验证，未加入房源文案；请发布前复核。" : "Some map places or routes could not be verified because of category, distance, or call-budget checks; they were left out of the listing copy."]
+        : []),
     ],
     cached: false,
+    checkedAt,
+    diagnostics: {
+      checkedAt,
+      placesAttempted: budget.placesCalls,
+      routesAttempted: budget.routeCalls,
+      placesQualityIssues,
+      routesQualityIssues,
+      rejectionReasons: rejectionReasons.slice(0, 8),
+    },
   };
   reportUsage({ placesCalls: budget.placesCalls, routeCalls: budget.routeCalls, cacheHit: false });
   if (hasFacts) {
@@ -711,6 +858,7 @@ function commuteCacheValue(value: unknown): CommuteEstimate | null {
     ...(Number.isFinite(minutes) && minutes > 0 ? { minutes: Math.round(minutes) } : {}),
     ...(Array.isArray(record.transitLines) ? { transitLines: uniqueTransitLines(record.transitLines.map(contextTransitLine).filter((line): line is LocationContextTransitLine => Boolean(line))) } : {}),
     cached: true,
+    ...(typeof record.checkedAt === "string" ? { checkedAt: record.checkedAt } : {}),
     note: clean(record.note, 300),
     usage: {
       placesCalls: Number(usage.placesCalls) || 0,
@@ -743,6 +891,7 @@ export async function buildCommuteEstimate(request: {
     destination,
     mode,
     cached,
+    checkedAt: new Date().toISOString(),
     note,
     usage: { placesCalls: 0, routeCalls: 0, cacheHit: cached },
   });
@@ -753,8 +902,9 @@ export async function buildCommuteEstimate(request: {
 
   const queryArea = [areaEn || areaZh, boroughEn || boroughZh, "New York"].filter(Boolean).join(", ");
   const privateTarget = privateDestination(destination);
+  const lookupSettings = await currentLocationLookupSettings();
   const cacheKey = JSON.stringify({
-    version: 2,
+    version: 3,
     kind: "commute",
     areaEn,
     areaZh,
@@ -763,6 +913,7 @@ export async function buildCommuteEstimate(request: {
     destinationHash: createHash("sha256").update(destination.toLocaleLowerCase()).digest("hex").slice(0, 24),
     mode,
     locale,
+    lookupSettings: { placesCallsPerLookup: lookupSettings.placesCallsPerLookup, routeCallsPerLookup: lookupSettings.routeCallsPerLookup },
   });
   if (!privateTarget) {
     const cached = commuteCache.get(cacheKey);
@@ -779,7 +930,12 @@ export async function buildCommuteEstimate(request: {
   }
 
   const languageCode = locale === "zh" ? "zh-CN" : "en";
-  const budget: LocationLookupBudget = { placesCalls: 0, routeCalls: 0 };
+  const budget: LocationLookupBudget = {
+    placesCalls: 0,
+    routeCalls: 0,
+    placesLimit: lookupSettings.placesCallsPerLookup,
+    routeLimit: lookupSettings.routeCallsPerLookup,
+  };
   try {
     const centerResults = await searchPlacesWithinBudget(apiKey, { textQuery: queryArea, pageSize: 1 }, languageCode, budget);
     const center = centerResults[0]?.coordinates || null;
@@ -801,6 +957,7 @@ export async function buildCommuteEstimate(request: {
       minutes: route.minutes,
       ...(route.transitLines.length ? { transitLines: route.transitLines } : {}),
       cached: false,
+      checkedAt: new Date().toISOString(),
       note: locale === "zh"
         ? "这是从所选大致区域中心计算的估算，不代表精确房址或固定通勤时间；公共交通班次会随日期和时段变化。"
         : "This is an estimate from the selected approximate area, not the exact property address or a guaranteed commute time; transit schedules vary by date and departure time.",

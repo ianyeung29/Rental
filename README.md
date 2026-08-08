@@ -156,7 +156,7 @@ R2_SECRET_ACCESS_KEY=your_r2_secret_access_key
 R2_PUBLIC_URL=https://your-public-bucket-url
 ```
 
-The R2 token should be limited to Object Read & Write for the selected bucket. Configure the bucket CORS policy to allow the local app origin and production app origin to use `PUT` for presigned browser uploads. Keep the R2 bucket public URL separate from the S3 API endpoint.
+The R2 token should be limited to Object Read & Write for the selected bucket. Configure the bucket CORS policy to allow the local app origin and production app origin to use `PUT` for presigned browser uploads, with `Content-Type` and `Cache-Control` as allowed request headers. Keep the R2 bucket public URL separate from the S3 API endpoint. New media is stored as immutable display and thumbnail objects, so do not reuse an object key for a different image.
 
 ## Enable WeChat JS-SDK sharing
 

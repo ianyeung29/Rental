@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../../../lib/db";
 import { getCurrentUser } from "../../../../lib/auth";
-import { publicUrlForKey } from "../../../../lib/r2";
 import { listingSafetyError } from "../../../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../../../lib/email";
 import { listingLimitFor } from "../../../../lib/account-types";
+import { normalizeListingMedia } from "../../../../lib/listing-media";
 
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
@@ -90,8 +90,6 @@ type ListingBody = {
   media?: unknown;
 };
 
-type NormalizedMedia = { key: string; contentType: string; publicUrl: string; sortOrder: number };
-
 function text(value: unknown, max = MAX_TEXT_LENGTH) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -114,18 +112,6 @@ function stringList(value: unknown) {
     .map((item) => item.trim())
     .filter((item) => item && ALLOWED_FEATURES.has(item))
     .slice(0, 20);
-}
-
-function mediaList(value: unknown): NormalizedMedia[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item, index) => {
-    if (!item || typeof item !== "object") return [];
-    const record = item as { key?: unknown; contentType?: unknown };
-    const key = text(record.key, 240);
-    const contentType = text(record.contentType, 80);
-    if (!key.startsWith("listings/") || !/^image\/(jpeg|png|webp)$/.test(contentType)) return [];
-    return [{ key, contentType, publicUrl: publicUrlForKey(key), sortOrder: index }];
-  }).slice(0, 4);
 }
 
 function normalizeBody(body: ListingBody) {
@@ -163,7 +149,7 @@ function normalizeBody(body: ListingBody) {
     agentFeePlan,
     agentFeeAmount: Number.isFinite(agentFeeAmount) ? agentFeeAmount : null,
     agentProfileId,
-    media: mediaList(body.media),
+    media: normalizeListingMedia(body.media),
   };
 }
 
@@ -339,9 +325,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         : tx.query("UPDATE rental_agent_requests SET status = 'cancelled', updated_at = NOW() WHERE listing_id = $1", [id]),
       tx.query("DELETE FROM rental_listing_media WHERE listing_id = $1", [id]),
       ...input.media.map((media) => tx.query(`
-        INSERT INTO rental_listing_media (id, listing_id, object_key, public_url, content_type, sort_order)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [randomUUID(), id, media.key, media.publicUrl, media.contentType, media.sortOrder])),
+        INSERT INTO rental_listing_media (
+          id, listing_id, object_key, public_url, content_type,
+          thumbnail_object_key, thumbnail_public_url, thumbnail_content_type,
+          width, height, sort_order
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [randomUUID(), id, media.key, media.publicUrl, media.contentType, media.thumbnailKey || null, media.thumbnailPublicUrl || null, media.thumbnailContentType || null, media.width || null, media.height || null, media.sortOrder])),
     ]);
     const updated = result[0]?.[0] as { id?: unknown; status?: unknown; expires_on?: unknown } | undefined;
     if (!updated?.id) return NextResponse.json({ error: "Listing not found." }, { status: 404 });

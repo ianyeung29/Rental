@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useDialogA11y } from "../lib/use-dialog-a11y";
 
 type Locale = "zh" | "en";
 type Notification = { id: string; type: string; titleZh: string; titleEn: string; bodyZh: string; bodyEn: string; link: string; readAt: string | null; createdAt: string };
@@ -50,6 +51,7 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
   const [pushStatus, setPushStatus] = useState<PushStatus>("idle");
   const [pushLoading, setPushLoading] = useState(false);
   const [pushError, setPushError] = useState("");
+  const dialogRef = useDialogA11y(open, () => setOpen(false));
 
   const load = async () => {
     setLoading(true);
@@ -220,7 +222,7 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
   return <>
     <button className="notification-trigger" type="button" onClick={openCenter} aria-label={zh ? "打开通知" : "Open notifications"}><BellIcon />{unreadCount > 0 && <span className="notification-count">{unreadCount > 9 ? "9+" : unreadCount}</span>}</button>
     {open && <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
-      <aside className="drawer notification-drawer" role="dialog" aria-modal="true" aria-labelledby="notification-title">
+      <aside ref={dialogRef} className="drawer notification-drawer" role="dialog" aria-modal="true" aria-labelledby="notification-title" tabIndex={-1}>
         <div className="drawer-content">
           <div className="drawer-heading"><span className="section-label">SIGNAL DESK</span><button className="drawer-close" type="button" onClick={() => setOpen(false)} aria-label={zh ? "关闭" : "Close"}><CloseIcon /></button></div>
           <div className="notification-heading">

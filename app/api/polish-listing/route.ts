@@ -4,7 +4,7 @@ import { buildLocationContext, DEFAULT_LOCATION_LOOKUP_OPTIONS, normalizeLocatio
 import type { LocationContext, LocationContextUsage, LocationLookupOption } from "../../lib/location-context";
 import { hasRestrictedHousingLanguage } from "../../lib/safety";
 import { consumeRateLimit } from "../../lib/rate-limit";
-import { recordApplicationErrorSafely } from "../../lib/monitoring";
+import { recordApplicationErrorSafely, recordLocationQualityEventSafely } from "../../lib/monitoring";
 import { estimateOpenAICost, recordApiUsageSafely } from "../../lib/usage";
 
 type ListingInput = {
@@ -264,6 +264,17 @@ export async function POST(request: Request) {
       routeCalls: mapUsage.routeCalls,
       cacheHit: mapUsage.cacheHit,
       status: mapUsage.cacheHit ? "cached" : "success",
+      metadata: { lookupOptions: input.locationLookupOptions },
+    });
+  }
+  if (!mapUsage.cacheHit && input.locationContext?.diagnostics && (mapUsage.placesCalls > 0 || mapUsage.routeCalls > 0 || input.locationContext.diagnostics.placesQualityIssues > 0 || input.locationContext.diagnostics.routesQualityIssues > 0)) {
+    await recordLocationQualityEventSafely({
+      lookupKind: "listing-polish",
+      placesCalls: input.locationContext.diagnostics.placesAttempted,
+      routeCalls: input.locationContext.diagnostics.routesAttempted,
+      placesQualityIssues: input.locationContext.diagnostics.placesQualityIssues,
+      routesQualityIssues: input.locationContext.diagnostics.routesQualityIssues,
+      rejectionReasons: input.locationContext.diagnostics.rejectionReasons,
       metadata: { lookupOptions: input.locationLookupOptions },
     });
   }

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth";
-import { ensureDatabaseSchema, sql } from "../../../lib/db";
+import { clearLocationContextCache, DEFAULT_LOCATION_LOOKUP_SETTINGS, LOCATION_LOOKUP_LIMITS, ensureDatabaseSchema, readLocationLookupSettings, sql, updateLocationLookupSettings } from "../../../lib/db";
 import { DEFAULT_USAGE_ALERT_SETTINGS, getUsageMonitoringSnapshot, updateUsageAlertSettings } from "../../../lib/monitoring";
+import { clearLocationContextMemoryCache } from "../../../lib/location-context";
 import { estimateGoogleMapsGrossCost, GOOGLE_PLACES_PRO_COST_PER_THOUSAND, GOOGLE_ROUTES_COST_PER_THOUSAND } from "../../../lib/usage";
 
 async function adminContext() {
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
   const days = requestedDays === 7 || requestedDays === 90 ? requestedDays : 30;
   try {
     await ensureDatabaseSchema();
-    const [summaryRows, monitoring, endpointRows, dailyRows, rateRows] = await Promise.all([
+    const [summaryRows, monitoring, endpointRows, dailyRows, rateRows, locationLookup] = await Promise.all([
       sql!.query(`
         SELECT provider,
                COUNT(*)::int AS requests,
@@ -104,6 +105,7 @@ export async function GET(request: Request) {
         FROM rental_rate_limits
         WHERE updated_at >= NOW() - ($1 * INTERVAL '1 day')
       `, [days]),
+      readLocationLookupSettings(),
     ]);
 
     const summary = summaryRows.map((row) => summaryFromRow(row as Record<string, unknown>));
@@ -141,6 +143,7 @@ export async function GET(request: Request) {
         googleRoutesCostPerCall: GOOGLE_ROUTES_COST_PER_THOUSAND / 1000,
         note: "Google gross estimates do not subtract the monthly free usage caps; OpenAI estimates use recorded token counts.",
       },
+      locationLookup,
       monitoring,
     });
   } catch {
@@ -153,26 +156,59 @@ export async function PATCH(request: Request) {
   if (context.error) return context.error;
   try {
     const rawBody = await request.text();
-    if (rawBody.length > 2_000) return NextResponse.json({ error: "Alert settings are too large." }, { status: 413 });
+    if (rawBody.length > 2_000) return NextResponse.json({ error: "Admin settings are too large." }, { status: 413 });
     const body = JSON.parse(rawBody) as Record<string, unknown>;
-    const openaiMonthlyCostUsd = Number(body.openaiMonthlyCostUsd);
-    const googlePlacesMonthlyCalls = Number(body.googlePlacesMonthlyCalls);
-    const googleRoutesMonthlyCalls = Number(body.googleRoutesMonthlyCalls);
-    const blockedRequestsThreshold = Number(body.blockedRequestsThreshold);
-    const settings = {
-      enabled: body.enabled === undefined ? DEFAULT_USAGE_ALERT_SETTINGS.enabled : Boolean(body.enabled),
-      openaiMonthlyCostUsd,
-      googlePlacesMonthlyCalls,
-      googleRoutesMonthlyCalls,
-      blockedRequestsThreshold,
-    };
-    if (!Number.isFinite(openaiMonthlyCostUsd) || openaiMonthlyCostUsd < 0.01 || openaiMonthlyCostUsd > 1_000_000) return NextResponse.json({ error: "Set an OpenAI threshold between $0.01 and $1,000,000." }, { status: 400 });
-    if (!Number.isInteger(googlePlacesMonthlyCalls) || googlePlacesMonthlyCalls < 1 || googlePlacesMonthlyCalls > 100_000_000) return NextResponse.json({ error: "Set a valid Google Places call threshold." }, { status: 400 });
-    if (!Number.isInteger(googleRoutesMonthlyCalls) || googleRoutesMonthlyCalls < 1 || googleRoutesMonthlyCalls > 100_000_000) return NextResponse.json({ error: "Set a valid Google Routes call threshold." }, { status: 400 });
-    if (!Number.isInteger(blockedRequestsThreshold) || blockedRequestsThreshold < 1 || blockedRequestsThreshold > 100_000_000) return NextResponse.json({ error: "Set a valid blocked-request threshold." }, { status: 400 });
-    await updateUsageAlertSettings(settings, context.user.id);
-    return NextResponse.json({ settings });
+    const hasLocationLookup = body.locationLookup !== undefined;
+    const hasAlertSettings = ["enabled", "openaiMonthlyCostUsd", "googlePlacesMonthlyCalls", "googleRoutesMonthlyCalls", "blockedRequestsThreshold", "googlePlacesQualityIssuesThreshold", "googleRoutesQualityIssuesThreshold"].some((key) => Object.prototype.hasOwnProperty.call(body, key));
+    const clearLocationCacheRequested = body.clearLocationCache === true;
+    if (!hasLocationLookup && !hasAlertSettings && !clearLocationCacheRequested) return NextResponse.json({ error: "No admin setting changes were supplied." }, { status: 400 });
+
+    let settings;
+    if (hasAlertSettings) {
+      const openaiMonthlyCostUsd = Number(body.openaiMonthlyCostUsd);
+      const googlePlacesMonthlyCalls = Number(body.googlePlacesMonthlyCalls);
+      const googleRoutesMonthlyCalls = Number(body.googleRoutesMonthlyCalls);
+      const blockedRequestsThreshold = Number(body.blockedRequestsThreshold);
+      const googlePlacesQualityIssuesThreshold = Number(body.googlePlacesQualityIssuesThreshold);
+      const googleRoutesQualityIssuesThreshold = Number(body.googleRoutesQualityIssuesThreshold);
+      settings = {
+        enabled: body.enabled === undefined ? DEFAULT_USAGE_ALERT_SETTINGS.enabled : Boolean(body.enabled),
+        openaiMonthlyCostUsd,
+        googlePlacesMonthlyCalls,
+        googleRoutesMonthlyCalls,
+        blockedRequestsThreshold,
+        googlePlacesQualityIssuesThreshold,
+        googleRoutesQualityIssuesThreshold,
+      };
+      if (!Number.isFinite(openaiMonthlyCostUsd) || openaiMonthlyCostUsd < 0.01 || openaiMonthlyCostUsd > 1_000_000) return NextResponse.json({ error: "Set an OpenAI threshold between $0.01 and $1,000,000." }, { status: 400 });
+      if (!Number.isInteger(googlePlacesMonthlyCalls) || googlePlacesMonthlyCalls < 1 || googlePlacesMonthlyCalls > 100_000_000) return NextResponse.json({ error: "Set a valid Google Places call threshold." }, { status: 400 });
+      if (!Number.isInteger(googleRoutesMonthlyCalls) || googleRoutesMonthlyCalls < 1 || googleRoutesMonthlyCalls > 100_000_000) return NextResponse.json({ error: "Set a valid Google Routes call threshold." }, { status: 400 });
+      if (!Number.isInteger(blockedRequestsThreshold) || blockedRequestsThreshold < 1 || blockedRequestsThreshold > 100_000_000) return NextResponse.json({ error: "Set a valid blocked-request threshold." }, { status: 400 });
+      if (!Number.isInteger(googlePlacesQualityIssuesThreshold) || googlePlacesQualityIssuesThreshold < 1 || googlePlacesQualityIssuesThreshold > 100_000_000) return NextResponse.json({ error: "Set a valid Places quality-issue threshold." }, { status: 400 });
+      if (!Number.isInteger(googleRoutesQualityIssuesThreshold) || googleRoutesQualityIssuesThreshold < 1 || googleRoutesQualityIssuesThreshold > 100_000_000) return NextResponse.json({ error: "Set a valid Routes quality-issue threshold." }, { status: 400 });
+      await updateUsageAlertSettings(settings, context.user.id);
+    }
+
+    let locationLookup;
+    if (hasLocationLookup) {
+      if (!body.locationLookup || typeof body.locationLookup !== "object" || Array.isArray(body.locationLookup)) return NextResponse.json({ error: "Map lookup settings are invalid." }, { status: 400 });
+      const input = body.locationLookup as Record<string, unknown>;
+      const placesCallsPerLookup = Number(input.placesCallsPerLookup);
+      const routeCallsPerLookup = Number(input.routeCallsPerLookup);
+      if (!Number.isInteger(placesCallsPerLookup) || placesCallsPerLookup < LOCATION_LOOKUP_LIMITS.minPlacesCallsPerLookup || placesCallsPerLookup > LOCATION_LOOKUP_LIMITS.maxPlacesCallsPerLookup) return NextResponse.json({ error: `Places lookups must be a whole number from ${LOCATION_LOOKUP_LIMITS.minPlacesCallsPerLookup} to ${LOCATION_LOOKUP_LIMITS.maxPlacesCallsPerLookup} per uncached lookup.` }, { status: 400 });
+      if (!Number.isInteger(routeCallsPerLookup) || routeCallsPerLookup < LOCATION_LOOKUP_LIMITS.minRouteCallsPerLookup || routeCallsPerLookup > LOCATION_LOOKUP_LIMITS.maxRouteCallsPerLookup) return NextResponse.json({ error: `Routes lookups must be a whole number from ${LOCATION_LOOKUP_LIMITS.minRouteCallsPerLookup} to ${LOCATION_LOOKUP_LIMITS.maxRouteCallsPerLookup} per uncached lookup.` }, { status: 400 });
+      locationLookup = await updateLocationLookupSettings({ placesCallsPerLookup, routeCallsPerLookup }, context.user.id);
+    }
+
+    let clearedLocationCache;
+    if (clearLocationCacheRequested) {
+      const persistent = await clearLocationContextCache();
+      const memory = clearLocationContextMemoryCache();
+      clearedLocationCache = { persistent, memory };
+    }
+
+    return NextResponse.json({ ...(settings ? { settings } : {}), ...(locationLookup ? { locationLookup } : {}), ...(clearedLocationCache ? { clearedLocationCache } : {}) });
   } catch {
-    return NextResponse.json({ error: "Alert settings could not be saved right now." }, { status: 502 });
+    return NextResponse.json({ error: "Admin settings could not be saved right now." }, { status: 502 });
   }
 }

@@ -61,6 +61,7 @@ type ListingCardProps = {
   price: string;
   tags: string[];
   photos: string[];
+  thumbnailPhotos?: string[];
   icons: {
     pin: IconRenderer;
     gallery: IconRenderer;
@@ -103,6 +104,7 @@ export default function ListingCard({
   price,
   tags,
   photos,
+  thumbnailPhotos,
   icons,
   onOpen,
   onSave,
@@ -115,7 +117,7 @@ export default function ListingCard({
   const touchStartX = useRef<number | null>(null);
   const ignoreNextClick = useRef(false);
   const safePhotoIndex = photoCount > 0 ? Math.min(photoIndex, photoCount - 1) : 0;
-  const currentPhoto = photos[safePhotoIndex] || photos[0] || listing.image;
+  const currentPhoto = thumbnailPhotos?.[safePhotoIndex] || thumbnailPhotos?.[0] || photos[safePhotoIndex] || photos[0] || listing.image;
 
   const movePhoto = (direction: -1 | 1) => {
     if (photoCount < 2) return;
@@ -158,7 +160,6 @@ export default function ListingCard({
           sizes="(max-width: 600px) 100vw, (max-width: 1080px) 40vw, 31vw"
           priority={featured}
           loading={featured ? "eager" : "lazy"}
-          unoptimized={listing.source !== "sample"}
         />
         <button className="listing-image-open" type="button" onClick={openFromImage} aria-label={locale === "zh" ? `查看${title}的房源照片` : `Browse photos for ${title}`} />
         <span className="image-label"><span className="image-label-dot" aria-hidden="true" />{freshness}</span>

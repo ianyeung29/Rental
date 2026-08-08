@@ -1,8 +1,22 @@
 import { neon } from "@neondatabase/serverless";
+import { DEFAULT_LOCATION_LOOKUP_SETTINGS as DEFAULT_LOOKUP_BUDGET, LOCATION_LOOKUP_LIMITS } from "./location-lookup-settings";
+
+export { LOCATION_LOOKUP_LIMITS } from "./location-lookup-settings";
 
 const databaseUrl = process.env.DATABASE_URL;
 
 export const sql = databaseUrl ? neon(databaseUrl) : null;
+
+export type LocationLookupSettings = {
+  placesCallsPerLookup: number;
+  routeCallsPerLookup: number;
+  updatedAt: string | null;
+};
+
+export const DEFAULT_LOCATION_LOOKUP_SETTINGS: LocationLookupSettings = {
+  ...DEFAULT_LOOKUP_BUDGET,
+  updatedAt: null,
+};
 
 let schemaPromise: Promise<void> | null = null;
 
@@ -237,10 +251,20 @@ export async function ensureDatabaseSchema() {
         object_key TEXT NOT NULL,
         public_url TEXT NOT NULL,
         content_type TEXT NOT NULL,
+        thumbnail_object_key TEXT,
+        thumbnail_public_url TEXT,
+        thumbnail_content_type TEXT,
+        width INTEGER,
+        height INTEGER,
         sort_order INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await sql.query("ALTER TABLE rental_listing_media ADD COLUMN IF NOT EXISTS thumbnail_object_key TEXT");
+    await sql.query("ALTER TABLE rental_listing_media ADD COLUMN IF NOT EXISTS thumbnail_public_url TEXT");
+    await sql.query("ALTER TABLE rental_listing_media ADD COLUMN IF NOT EXISTS thumbnail_content_type TEXT");
+    await sql.query("ALTER TABLE rental_listing_media ADD COLUMN IF NOT EXISTS width INTEGER");
+    await sql.query("ALTER TABLE rental_listing_media ADD COLUMN IF NOT EXISTS height INTEGER");
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_inquiries (
         id TEXT PRIMARY KEY,
@@ -427,10 +451,14 @@ export async function ensureDatabaseSchema() {
         google_places_monthly_calls INTEGER NOT NULL DEFAULT 4000,
         google_routes_monthly_calls INTEGER NOT NULL DEFAULT 8000,
         blocked_requests_threshold INTEGER NOT NULL DEFAULT 1,
+        google_places_quality_issues_threshold INTEGER NOT NULL DEFAULT 3,
+        google_routes_quality_issues_threshold INTEGER NOT NULL DEFAULT 3,
         updated_by TEXT REFERENCES rental_users(id) ON DELETE SET NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await sql.query("ALTER TABLE rental_usage_alert_settings ADD COLUMN IF NOT EXISTS google_places_quality_issues_threshold INTEGER NOT NULL DEFAULT 3");
+    await sql.query("ALTER TABLE rental_usage_alert_settings ADD COLUMN IF NOT EXISTS google_routes_quality_issues_threshold INTEGER NOT NULL DEFAULT 3");
     await sql.query(`
       INSERT INTO rental_usage_alert_settings (id)
       VALUES ('default')
@@ -451,6 +479,19 @@ export async function ensureDatabaseSchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE (alert_key, period_key)
+      )
+    `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_location_quality_events (
+        id TEXT PRIMARY KEY,
+        lookup_kind TEXT NOT NULL DEFAULT 'location-context',
+        places_calls INTEGER NOT NULL DEFAULT 0,
+        route_calls INTEGER NOT NULL DEFAULT 0,
+        places_quality_issues INTEGER NOT NULL DEFAULT 0,
+        routes_quality_issues INTEGER NOT NULL DEFAULT 0,
+        rejection_reasons JSONB NOT NULL DEFAULT '[]'::jsonb,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
     await sql.query("ALTER TABLE rental_inquiries ADD COLUMN IF NOT EXISTS owner_read_at TIMESTAMPTZ");
@@ -540,6 +581,25 @@ export async function ensureDatabaseSchema() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_location_lookup_settings (
+        id TEXT PRIMARY KEY,
+        places_calls_per_lookup INTEGER NOT NULL DEFAULT 5,
+        route_calls_per_lookup INTEGER NOT NULL DEFAULT 5,
+        updated_by TEXT REFERENCES rental_users(id) ON DELETE SET NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query(`
+      INSERT INTO rental_location_lookup_settings (id)
+      VALUES ('default')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    await sql.query(`
+      UPDATE rental_location_lookup_settings
+      SET route_calls_per_lookup = 5
+      WHERE id = 'default' AND updated_by IS NULL AND route_calls_per_lookup = 7
+    `);
     await sql.query("CREATE INDEX IF NOT EXISTS rental_sessions_user_idx ON rental_sessions(user_id, expires_at)");
     await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS rental_users_google_subject_idx ON rental_users(google_subject) WHERE google_subject IS NOT NULL");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_users_account_type_idx ON rental_users(account_type, agent_verification_status)");
@@ -551,6 +611,7 @@ export async function ensureDatabaseSchema() {
     await sql.query("CREATE INDEX IF NOT EXISTS rental_error_events_created_idx ON rental_error_events(created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_error_events_source_idx ON rental_error_events(source, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_usage_alert_events_period_idx ON rental_usage_alert_events(period_key, created_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_location_quality_events_created_idx ON rental_location_quality_events(created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_listings_user_idx ON rental_saved_listings(user_id, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_listings_listing_idx ON rental_saved_listings(listing_id, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_saved_searches_alert_idx ON rental_saved_searches(alert_frequency, last_alert_at)");
@@ -611,4 +672,54 @@ export async function writeLocationContextCache(cacheKey: string, payload: unkno
       expires_at = EXCLUDED.expires_at,
       updated_at = NOW()
   `, [cacheKey, JSON.stringify(payload), ttlDays]);
+}
+
+export async function clearLocationContextCache() {
+  if (!sql) throw new Error("DATABASE_URL is not configured.");
+  await ensureDatabaseSchema();
+  const rows = await sql.query("DELETE FROM rental_location_context_cache RETURNING cache_key");
+  return rows.length;
+}
+
+function boundedInteger(value: unknown, fallback: number, minimum: number, maximum: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+}
+
+function timestampValue(value: unknown) {
+  return value instanceof Date ? value.toISOString() : value ? String(value) : null;
+}
+
+export async function readLocationLookupSettings(): Promise<LocationLookupSettings> {
+  if (!sql) return { ...DEFAULT_LOCATION_LOOKUP_SETTINGS };
+  await ensureDatabaseSchema();
+  const rows = await sql.query(`
+    SELECT places_calls_per_lookup, route_calls_per_lookup, updated_at
+    FROM rental_location_lookup_settings
+    WHERE id = 'default'
+    LIMIT 1
+  `);
+  const row = rows[0] as Record<string, unknown> | undefined;
+  return {
+    placesCallsPerLookup: boundedInteger(row?.places_calls_per_lookup, DEFAULT_LOCATION_LOOKUP_SETTINGS.placesCallsPerLookup, LOCATION_LOOKUP_LIMITS.minPlacesCallsPerLookup, LOCATION_LOOKUP_LIMITS.maxPlacesCallsPerLookup),
+    routeCallsPerLookup: boundedInteger(row?.route_calls_per_lookup, DEFAULT_LOCATION_LOOKUP_SETTINGS.routeCallsPerLookup, LOCATION_LOOKUP_LIMITS.minRouteCallsPerLookup, LOCATION_LOOKUP_LIMITS.maxRouteCallsPerLookup),
+    updatedAt: timestampValue(row?.updated_at),
+  };
+}
+
+export async function updateLocationLookupSettings(input: Omit<LocationLookupSettings, "updatedAt">, updatedBy: string) {
+  if (!sql) throw new Error("DATABASE_URL is not configured.");
+  await ensureDatabaseSchema();
+  await sql.query(`
+    INSERT INTO rental_location_lookup_settings (
+      id, places_calls_per_lookup, route_calls_per_lookup, updated_by, updated_at
+    ) VALUES ('default', $1, $2, $3, NOW())
+    ON CONFLICT (id) DO UPDATE SET
+      places_calls_per_lookup = EXCLUDED.places_calls_per_lookup,
+      route_calls_per_lookup = EXCLUDED.route_calls_per_lookup,
+      updated_by = EXCLUDED.updated_by,
+      updated_at = NOW()
+  `, [input.placesCallsPerLookup, input.routeCallsPerLookup, updatedBy]);
+  return readLocationLookupSettings();
 }

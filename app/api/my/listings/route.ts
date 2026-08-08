@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { getCurrentUser } from "../../../lib/auth";
+import { listingMediaFromDatabase } from "../../../lib/listing-media";
 
 function list(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -12,17 +13,10 @@ function dateOnly(value: unknown) {
 }
 
 function ownerListing(row: Record<string, unknown>) {
-  const media = Array.isArray(row.media) ? row.media : [];
-  const photos = media.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const url = (item as { url?: unknown }).url;
-    return typeof url === "string" && url ? [url] : [];
-  });
-  const photoKeys = media.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const key = (item as { key?: unknown }).key;
-    return typeof key === "string" && key ? [key] : [];
-  });
+  const media = listingMediaFromDatabase(row.media);
+  const photos = media.map((item) => item.url);
+  const photoThumbnails = media.map((item) => item.thumbnailUrl || item.url);
+  const photoKeys = media.map((item) => item.key);
   const type = String(row.rental_type || "entire");
   const typeLabels = type === "privateRoom" ? ["独立房间", "Private room"] : type === "sublet" ? ["转租", "Sublet"] : ["整套住房", "Entire home"];
   return {
@@ -45,7 +39,9 @@ function ownerListing(row: Record<string, unknown>) {
     lease: String(row.lease || ""),
     image: photos[0] || "",
     photos,
+    photoThumbnails,
     photoKeys,
+    media,
     features: list(row.features),
     tagsZh: list(row.tags_zh),
     tagsEn: list(row.tags_en),
@@ -100,7 +96,16 @@ export async function GET() {
         a.display_name_zh AS agent_profile_name_zh, a.display_name_en AS agent_profile_name_en,
         ar.id AS agent_request_id, ar.status AS agent_request_status, ar.agent_note AS agent_request_note,
         COALESCE(
-          jsonb_agg(jsonb_build_object('key', m.object_key, 'url', m.public_url) ORDER BY m.sort_order)
+          jsonb_agg(jsonb_build_object(
+            'key', m.object_key,
+            'url', m.public_url,
+            'thumbnailKey', m.thumbnail_object_key,
+            'thumbnailUrl', m.thumbnail_public_url,
+            'thumbnailContentType', m.thumbnail_content_type,
+            'contentType', m.content_type,
+            'width', m.width,
+            'height', m.height
+          ) ORDER BY m.sort_order)
           FILTER (WHERE m.id IS NOT NULL),
           '[]'::jsonb
         ) AS media

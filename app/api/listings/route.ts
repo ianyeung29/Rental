@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
-import { publicUrlForKey } from "../../lib/r2";
 import { getCurrentUser } from "../../lib/auth";
 import { recordAuditEventSafely } from "../../lib/audit";
 import { listingSafetyError } from "../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../lib/email";
 import { demoModeEnabled } from "../../lib/demo";
 import { listingLimitFor } from "../../lib/account-types";
+import { listingMediaFromDatabase, normalizeListingMedia } from "../../lib/listing-media";
 
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
@@ -93,8 +93,6 @@ type ListingBody = {
   media?: unknown;
 };
 
-type NormalizedMedia = { key: string; contentType: string; publicUrl: string; sortOrder: number };
-
 function text(value: unknown, max = MAX_TEXT_LENGTH) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -124,18 +122,6 @@ function stringList(value: unknown, allowed?: Set<string>) {
     .slice(0, 20);
 }
 
-function mediaList(value: unknown): NormalizedMedia[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item, index) => {
-    if (!item || typeof item !== "object") return [];
-    const record = item as { key?: unknown; contentType?: unknown };
-    const key = text(record.key, 240);
-    const contentType = text(record.contentType, 80);
-    if (!key.startsWith("listings/") || !/^image\/(jpeg|png|webp)$/.test(contentType)) return [];
-    return [{ key, contentType, publicUrl: publicUrlForKey(key), sortOrder: index }];
-  }).slice(0, 4);
-}
-
 function listingTypeLabels(type: string) {
   if (type === "privateRoom") return ["独立房间", "Private room"] as const;
   if (type === "sublet") return ["转租", "Sublet"] as const;
@@ -143,12 +129,9 @@ function listingTypeLabels(type: string) {
 }
 
 function toClientListing(row: Record<string, unknown>) {
-  const media = Array.isArray(row.media) ? row.media : [];
-  const photos = media.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const url = (item as { url?: unknown }).url;
-    return typeof url === "string" && url ? [url] : [];
-  });
+  const media = listingMediaFromDatabase(row.media);
+  const photos = media.map((item) => item.url);
+  const photoThumbnails = media.map((item) => item.thumbnailUrl || item.url);
   const features = stringList(row.features);
   const tagsZh = stringList(row.tags_zh);
   const tagsEn = stringList(row.tags_en);
@@ -184,6 +167,7 @@ function toClientListing(row: Record<string, unknown>) {
     lease: String(row.lease || ""),
     image: photos[0] || "",
     photos,
+    photoThumbnails,
     features,
     tagsZh,
     tagsEn,
@@ -232,7 +216,7 @@ function normalizeBody(body: ListingBody) {
   const agentFeePlan = agentService === "agentMatch" && ALLOWED_AGENT_FEE_PLANS.has(requestedAgentFeePlan) ? requestedAgentFeePlan : "agentQuote";
   const agentFeeAmount = agentService === "agentMatch" && agentFeePlan === "flatFee" ? Number(body.agentFeeAmount) : null;
   const agentProfileId = agentService === "agentMatch" ? text(body.agentProfileId, 120) || null : null;
-  const media = mediaList(body.media);
+  const media = normalizeListingMedia(body.media);
   return {
     titleZh,
     titleEn,
@@ -317,7 +301,16 @@ export async function GET(request: Request) {
             AND popularity_events.event_type IN ('view', 'save', 'contact', 'share', 'compare')
         ) AS popularity_score,
         COALESCE(
-          jsonb_agg(jsonb_build_object('key', m.object_key, 'url', m.public_url) ORDER BY m.sort_order)
+          jsonb_agg(jsonb_build_object(
+            'key', m.object_key,
+            'url', m.public_url,
+            'thumbnailKey', m.thumbnail_object_key,
+            'thumbnailUrl', m.thumbnail_public_url,
+            'thumbnailContentType', m.thumbnail_content_type,
+            'contentType', m.content_type,
+            'width', m.width,
+            'height', m.height
+          ) ORDER BY m.sort_order)
           FILTER (WHERE m.id IS NOT NULL),
           '[]'::jsonb
         ) AS media
@@ -452,9 +445,13 @@ export async function POST(request: Request) {
         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
       `, [agentRequestId, id, ownerId, input.agentProfileId, input.agentFeePlan, input.agentFeeAmount])] : []),
       ...input.media.map((media) => tx.query(`
-        INSERT INTO rental_listing_media (id, listing_id, object_key, public_url, content_type, sort_order)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [randomUUID(), id, media.key, media.publicUrl, media.contentType, media.sortOrder])),
+        INSERT INTO rental_listing_media (
+          id, listing_id, object_key, public_url, content_type,
+          thumbnail_object_key, thumbnail_public_url, thumbnail_content_type,
+          width, height, sort_order
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [randomUUID(), id, media.key, media.publicUrl, media.contentType, media.thumbnailKey || null, media.thumbnailPublicUrl || null, media.thumbnailContentType || null, media.width || null, media.height || null, media.sortOrder])),
     ]);
 
     const row = {
@@ -478,7 +475,16 @@ export async function POST(request: Request) {
       description_en: input.descriptionEn,
       poster_role: input.posterRole,
       expires_on: input.expiresOn || null,
-      media: input.media.map((media) => ({ key: media.key, url: media.publicUrl })),
+      media: input.media.map((media) => ({
+        key: media.key,
+        url: media.publicUrl,
+        contentType: media.contentType,
+        thumbnailKey: media.thumbnailKey,
+        thumbnailUrl: media.thumbnailPublicUrl,
+        thumbnailContentType: media.thumbnailContentType,
+        width: media.width,
+        height: media.height,
+      })),
     };
     let agentNotificationSent = false;
     if (agentRequestId && input.agentProfileId && emailIsConfigured()) {

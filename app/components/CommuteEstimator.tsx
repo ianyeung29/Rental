@@ -14,6 +14,7 @@ type CommuteResult = {
   transitLines?: LocationContextTransitLine[];
   cached: boolean;
   note: string;
+  checkedAt?: string;
 };
 
 const quickDestinations = [
@@ -26,6 +27,15 @@ function transitLineLabel(line: LocationContextTransitLine, zh: boolean) {
   const vehicle = line.vehicleType === "BUS" ? (zh ? "公交" : "Bus") : line.vehicleType === "SUBWAY" || line.vehicleType === "METRO_RAIL" ? (zh ? "地铁" : "Subway") : line.vehicleType === "TRAIN" || line.vehicleType === "RAIL" || line.vehicleType === "HEAVY_RAIL" || line.vehicleType === "COMMUTER_TRAIN" ? (zh ? "铁路" : "Rail") : "";
   const name = line.shortName || line.name;
   return vehicle ? `${vehicle} ${name}` : name;
+}
+
+function checkedAtLabel(value: string | undefined, zh: boolean) {
+  if (!value) return zh ? "检查时间暂不可用" : "Checked time unavailable";
+  try {
+    return new Intl.DateTimeFormat(zh ? "zh-CN" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }
 
 export default function CommuteEstimator({ locale, areaZh, areaEn }: { locale: Locale; areaZh: string; areaEn: string }) {
@@ -67,6 +77,6 @@ export default function CommuteEstimator({ locale, areaZh, areaEn }: { locale: L
     </form>
     <div className="commute-quick-options" aria-label={zh ? "常用目的地" : "Common destinations"}>{quickDestinations.map((item) => <button className="commute-quick-option" type="button" key={item.en} onClick={() => { setDestination(zh ? item.valueZh : item.valueEn); setMode(item.mode); setError(""); }}>{zh ? item.zh : item.en}</button>)}</div>
     {error && <p className="commute-error" role="alert">{error}</p>}
-    {result && <div className={`commute-result ${result.source === "google" ? "ready" : "empty"}`} role="status"><div><strong>{result.minutes ? (zh ? `约 ${result.minutes} 分钟` : `About ${result.minutes} min`) : (zh ? "暂时没有路线时间" : "No route time yet")}</strong><span>{result.destination}</span></div>{result.transitLines?.length ? <div className="commute-transit-lines"><span className="commute-transit-lines-label">{zh ? "线路参考" : "Line reference"}</span>{result.transitLines.map((line) => <span className="commute-transit-line" key={line.shortName || line.name}>{transitLineLabel(line, zh)}</span>)}</div> : null}<p>{result.note}</p>{result.cached && <small>{zh ? "已使用缓存，没有重复查询地图。" : "Cached result; no new map lookup was made."}</small>}{result.source === "google" && <small className="google-attribution">Powered by Google, © 2026 Google</small>}</div>}
+    {result && <div className={`commute-result ${result.source === "google" ? "ready" : "empty"}`} role="status"><div><strong>{result.minutes ? (zh ? `约 ${result.minutes} 分钟` : `About ${result.minutes} min`) : (zh ? "暂时没有路线时间" : "No route time yet")}</strong><span>{result.destination}</span></div>{result.transitLines?.length ? <div className="commute-transit-lines"><span className="commute-transit-lines-label">{zh ? "线路参考" : "Line reference"}</span>{result.transitLines.map((line) => <span className="commute-transit-line" key={line.shortName || line.name}>{transitLineLabel(line, zh)}</span>)}</div> : null}<p>{result.note}</p><small>{zh ? `数据来源：Google 地图 · 最后检查：${checkedAtLabel(result.checkedAt, zh)}` : `Source: Google Maps · Last checked: ${checkedAtLabel(result.checkedAt, zh)}`}</small>{result.cached && <small>{zh ? "已使用缓存，没有重复查询地图。" : "Cached result; no new map lookup was made."}</small>}{result.source === "google" && <small className="google-attribution">Powered by Google, © 2026 Google</small>}</div>}
   </section>;
 }

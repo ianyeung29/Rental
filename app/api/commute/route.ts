@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildCommuteEstimate } from "../../lib/location-context";
-import { recordApplicationErrorSafely } from "../../lib/monitoring";
+import { recordApplicationErrorSafely, recordLocationQualityEventSafely } from "../../lib/monitoring";
 import { consumeRateLimit, hashRateLimitPart, requestAddress } from "../../lib/rate-limit";
 import { recordApiUsageSafely } from "../../lib/usage";
 
@@ -50,6 +50,20 @@ export async function POST(request: Request) {
       routeCalls: estimate.usage.routeCalls,
       cacheHit: estimate.usage.cacheHit,
       status: estimate.usage.cacheHit ? "cached" : estimate.source === "google" ? "success" : "empty",
+      metadata: { mode: estimate.mode },
+    });
+  }
+  if (!estimate.cached && (estimate.usage.placesCalls > 0 || estimate.usage.routeCalls > 0)) {
+    await recordLocationQualityEventSafely({
+      lookupKind: "commute",
+      placesCalls: estimate.usage.placesCalls,
+      routeCalls: estimate.usage.routeCalls,
+      placesQualityIssues: estimate.source === "none" && estimate.usage.placesCalls > 0 ? 1 : 0,
+      routesQualityIssues: !estimate.minutes && estimate.usage.routeCalls > 0 ? 1 : 0,
+      rejectionReasons: [
+        ...(estimate.source === "none" && estimate.usage.placesCalls > 0 ? ["commute-place-not-found"] : []),
+        ...(!estimate.minutes && estimate.usage.routeCalls > 0 ? ["commute-route-not-verifiable"] : []),
+      ],
       metadata: { mode: estimate.mode },
     });
   }

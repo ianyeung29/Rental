@@ -108,7 +108,7 @@ export default function AgentDirectory() {
           const expanded = expandedId === profile.id;
           const name = profileName(profile, locale);
           return <article className={`agent-directory-row ${expanded ? "expanded" : ""}`} key={profile.id}>
-            <div className="agent-directory-avatar" aria-hidden="true">{profile.portraitUrl ? <Image src={profile.portraitUrl} alt="" width={72} height={72} unoptimized /> : name.slice(0, 1)}</div>
+            <div className="agent-directory-avatar" aria-hidden="true">{profile.portraitUrl ? <Image src={profile.portraitUrl} alt="" width={72} height={72} /> : name.slice(0, 1)}</div>
             <div className="agent-directory-main">
               <div className="agent-directory-row-heading"><div><span className="agent-directory-verified"><span aria-hidden="true" />{zh ? "执照已核验" : "License checked"}</span><h3>{name}</h3></div><button className="text-button" type="button" onClick={() => setExpandedId(expanded ? null : profile.id)} aria-expanded={expanded}>{expanded ? (zh ? "收起资料" : "Hide profile") : (zh ? "查看资料" : "View profile")}</button></div>
               <p className="agent-directory-brokerage">{profile.brokerage} · {profile.licenseState} {zh ? "州" : "state"}</p>

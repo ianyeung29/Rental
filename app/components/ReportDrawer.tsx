@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent } from "react";
+import { useDialogA11y } from "../lib/use-dialog-a11y";
 
 type Locale = "zh" | "en";
 
@@ -23,9 +24,10 @@ function CloseIcon({ size = 18 }: { size?: number }) {
 
 export default function ReportDrawer({ locale, listingTitle, loading, error, onClose, onSubmit }: ReportDrawerProps) {
   const zh = locale === "zh";
+  const dialogRef = useDialogA11y(true, onClose);
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside className="drawer form-drawer report-drawer" role="dialog" aria-modal="true" aria-labelledby="report-title">
+      <aside ref={dialogRef} className="drawer form-drawer report-drawer" role="dialog" aria-modal="true" aria-labelledby="report-title" tabIndex={-1}>
         <div className="drawer-content">
           <div className="drawer-heading">
             <span className="section-label">{zh ? "安全反馈" : "SAFETY REPORT"}</span>

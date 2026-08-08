@@ -6,6 +6,8 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { listingLimitFor } from "../lib/account-types";
 import { toChineseLocationLabel } from "../lib/location-labels";
 import { exactOccupantOrDefault, OCCUPANT_OPTIONS } from "../lib/renter-options";
+import { useDialogA11y } from "../lib/use-dialog-a11y";
+import { optimizeImageFile } from "../lib/image-optimizer";
 import portraitStyles from "./AgentPortrait.module.css";
 
 type Locale = "zh" | "en";
@@ -207,6 +209,7 @@ function CloseIcon({ size = 18 }: { size?: number }) {
 
 export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, blockedPublishers, blockLoadingId, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onRevealInquiryAddress, onApplicationStatusChange, onUnblockPublisher, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentVerificationStatusChange }: AccountDrawerProps) {
   const zh = locale === "zh";
+  const dialogRef = useDialogA11y(true, onClose);
   const initial = user.displayName.trim().slice(0, 1).toUpperCase() || "U";
   const listingLimit = listingLimitFor(user.accountType, user.agentVerified);
   const today = new Date().toISOString().slice(0, 10);
@@ -469,14 +472,15 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   const uploadAgentPortrait = async () => {
     if (!portraitFile) return "";
     setPortraitUploadStatus("uploading");
+    const optimized = await optimizeImageFile(portraitFile, "agentPortrait");
     const presignResponse = await fetch("/api/media/presign", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ purpose: "agentPortrait", filename: portraitFile.name, contentType: portraitFile.type, size: portraitFile.size }),
+      body: JSON.stringify({ purpose: "agentPortrait", filename: portraitFile.name, contentType: optimized.contentType, size: optimized.blob.size }),
     });
-    const presign = await presignResponse.json().catch(() => ({})) as { error?: string; key?: string; uploadUrl?: string };
+    const presign = await presignResponse.json().catch(() => ({})) as { error?: string; key?: string; uploadUrl?: string; contentType?: string; cacheControl?: string };
     if (!presignResponse.ok || !presign.key || !presign.uploadUrl) throw new Error(presign.error || (zh ? "头像上传准备失败。" : "The portrait upload could not be prepared."));
-    const uploadResponse = await fetch(presign.uploadUrl, { method: "PUT", headers: { "Content-Type": portraitFile.type }, body: portraitFile });
+    const uploadResponse = await fetch(presign.uploadUrl, { method: "PUT", headers: { "Content-Type": optimized.contentType, "Cache-Control": presign.cacheControl || "public, max-age=31536000, immutable" }, body: optimized.blob });
     if (!uploadResponse.ok) throw new Error(zh ? "头像上传失败，请检查 R2 设置后重试。" : "The portrait upload failed. Check the R2 settings and try again.");
     setPortraitUploadStatus("uploaded");
     return presign.key;
@@ -510,14 +514,14 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   };
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside className="drawer account-drawer" role="dialog" aria-modal="true" aria-labelledby="account-title">
+      <aside ref={dialogRef} className="drawer account-drawer" role="dialog" aria-modal="true" aria-labelledby="account-title" tabIndex={-1}>
         <div className="drawer-content">
           <div className="drawer-heading">
             <span className="section-label">{zh ? "我的工作台" : "MY DESK"}</span>
             <button className="drawer-close" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}><CloseIcon /></button>
           </div>
           <div className="account-identity">
-            <div className={portraitStyles.accountAvatarLarge} aria-hidden="true">{verificationApplication?.portraitUrl ? <Image src={verificationApplication.portraitUrl} alt="" width={46} height={46} unoptimized /> : initial}</div>
+            <div className={portraitStyles.accountAvatarLarge} aria-hidden="true">{verificationApplication?.portraitUrl ? <Image src={verificationApplication.portraitUrl} alt="" width={46} height={46} /> : initial}</div>
             <div><h2 id="account-title">{user.displayName}</h2><p>{user.email}</p><div className="account-verification"><span className={`status-chip ${user.emailVerified ? "published" : "unpublished"}`}>{user.emailVerified ? (zh ? "邮箱已验证" : "Email verified") : (zh ? "邮箱未验证" : "Email not verified")}</span>{user.accountType === "agent" && <span className={`status-chip ${user.agentVerified ? "published" : user.agentVerificationStatus === "rejected" || user.agentVerificationStatus === "expired" ? "expired" : "unpublished"}`}>{agentStatusLabel}</span>}{!user.emailVerified && <button className="text-button" type="button" onClick={onResendVerification} disabled={resendLoading}>{resendLoading ? (zh ? "发送中…" : "Sending…") : (zh ? "重新发送" : "Resend")}</button>}</div></div>
           </div>
           {user.role === "admin" && <Link className="admin-access-panel" href="/admin/agent-verifications" onClick={onClose}>
