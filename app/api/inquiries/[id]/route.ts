@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { emailIsConfigured, sendInquiryStatusUpdate } from "../../../lib/email";
-import { hasActiveListingNotificationAddon } from "../../../lib/listing-notification-addon";
 import { emailAlertsAllowed } from "../../../lib/notification-preferences";
 import { sendPushToUser } from "../../../lib/push";
 
@@ -51,15 +50,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const rows = await sql.query(`
       SELECT i.id, i.listing_id, i.requester_id, i.status, i.address_reveal_status, i.address_revealed_at,
              l.owner_id, l.title_zh, l.title_en, pd.private_address,
-             EXISTS (
-               SELECT 1
-               FROM rental_listing_notification_addons na
-               WHERE na.listing_id = l.id
-                 AND na.owner_id = l.owner_id
-                 AND na.status = 'active'
-                 AND na.payment_status = 'paid'
-                 AND (na.expires_at IS NULL OR na.expires_at >= CURRENT_DATE)
-             ) AS owner_notification_addon_active,
              u.display_name AS requester_name, u.email AS requester_email
       FROM rental_inquiries i
       JOIN rental_listings l ON l.id = i.listing_id
@@ -100,16 +90,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       await sql.query(`UPDATE rental_inquiries SET status = $1, ${readColumn} = COALESCE(${readColumn}, NOW()), updated_at = NOW() WHERE id = $2`, [status, id]);
       const recipientId = isOwner ? String(inquiry.requester_id || "") : String(inquiry.owner_id || "");
       if (recipientId) {
-        const recipientIsOwner = !isOwner && String(inquiry.owner_id || "") === recipientId;
-        const ownerNotificationAddonActive = Boolean(inquiry.owner_notification_addon_active) || await hasActiveListingNotificationAddon(String(inquiry.listing_id || ""), String(inquiry.owner_id || ""));
-        if (!recipientIsOwner || ownerNotificationAddonActive) {
-          const titleZh = status === "closed" ? "咨询已完成" : "房源咨询有新进展";
-          const titleEn = status === "closed" ? "Inquiry closed" : "Inquiry updated";
-          await sql.query(`
-            INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
-            VALUES ($1, $2, 'inquiry', $3, $4, $5, $6, $7)
-          `, [`notification-${randomUUID()}`, recipientId, titleZh, titleEn, `「${String(inquiry.title_zh || inquiry.title_en || "房源")}」的咨询状态已更新。`, `The inquiry for “${String(inquiry.title_en || inquiry.title_zh || "your listing")}" was updated.`, "/#messages"]);
-        }
+        const titleZh = status === "closed" ? "咨询已完成" : "房源咨询有新进展";
+        const titleEn = status === "closed" ? "Inquiry closed" : "Inquiry updated";
+        await sql.query(`
+          INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
+          VALUES ($1, $2, 'inquiry', $3, $4, $5, $6, $7)
+        `, [`notification-${randomUUID()}`, recipientId, titleZh, titleEn, `「${String(inquiry.title_zh || inquiry.title_en || "房源")}」的咨询状态已更新。`, `The inquiry for “${String(inquiry.title_en || inquiry.title_zh || "your listing")}" was updated.`, "/#messages"]);
       }
     } else {
       await sql.query(`UPDATE rental_inquiries SET ${readColumn} = NOW(), updated_at = NOW() WHERE id = $1`, [id]);

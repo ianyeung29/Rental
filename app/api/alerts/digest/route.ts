@@ -85,10 +85,16 @@ export async function GET(request: Request) {
       LIMIT 500
     `);
     const listings = await sql.query(`
-      SELECT id, title_zh, title_en, area_zh, area_en, price, bedrooms, bathrooms, square_feet, rental_type, move_in, features, created_at
+      SELECT id, owner_id, title_zh, title_en, area_zh, area_en, price, bedrooms, bathrooms, square_feet, rental_type, move_in, features, created_at
       FROM rental_listings
       WHERE status = 'published' AND moderation_status = 'approved' AND (expires_on IS NULL OR expires_on >= CURRENT_DATE)
         AND created_at > NOW() - INTERVAL '30 days'
+        AND EXISTS (
+          SELECT 1 FROM rental_listing_notification_addons addon
+          WHERE addon.listing_id = rental_listings.id AND addon.owner_id = rental_listings.owner_id
+            AND addon.status = 'active' AND addon.payment_status = 'paid'
+            AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
+        )
       ORDER BY created_at DESC
       LIMIT 1000
     `);

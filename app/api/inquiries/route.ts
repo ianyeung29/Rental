@@ -4,7 +4,6 @@ import { getCurrentUser } from "../../lib/auth";
 import { recordAuditEventSafely } from "../../lib/audit";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { emailIsConfigured, sendInquiryConfirmation, sendInquiryNotification } from "../../lib/email";
-import { hasActiveListingNotificationAddon } from "../../lib/listing-notification-addon";
 import { emailAlertsAllowed } from "../../lib/notification-preferences";
 import { sendPushToUser } from "../../lib/push";
 import { isExactOccupantCount } from "../../lib/renter-options";
@@ -124,13 +123,7 @@ export async function POST(request: Request) {
     if (tourRequestedDate && (!/^\d{4}-\d{2}-\d{2}$/.test(tourRequestedDate) || tourRequestedDate < new Date().toISOString().slice(0, 10))) return NextResponse.json({ error: "Choose today or a future preferred tour date." }, { status: 400 });
     await ensureDatabaseSchema();
     const listingRows = await sql.query(`
-      SELECT l.id, l.owner_id, l.title_zh, l.title_en, pd.contact_name, pd.contact_email,
-             EXISTS (
-               SELECT 1 FROM rental_listing_notification_addons addon
-               WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
-                 AND addon.status = 'active' AND addon.payment_status = 'paid'
-                 AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
-             ) AS owner_notification_addon_active
+      SELECT l.id, l.owner_id, l.title_zh, l.title_en, pd.contact_name, pd.contact_email
       FROM rental_listings l
       LEFT JOIN rental_listing_private_details pd ON pd.listing_id = l.id
       WHERE l.id = $1 AND l.status = 'published' AND l.moderation_status = 'approved' AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
@@ -145,8 +138,7 @@ export async function POST(request: Request) {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::date, $10, $11)
     `, [id, listingId, user.id, moveIn, leaseLength, occupants, pets, tourPreference, tourRequestedDate, tourRequestedWindow, message]);
     await recordAuditEventSafely({ request, eventType: "inquiry.create", user, metadata: { inquiryId: id, listingId, tourPreference } });
-    const ownerNotificationAddonActive = Boolean(listing.owner_notification_addon_active) || await hasActiveListingNotificationAddon(listingId, String(listing.owner_id || ""));
-    if (listing.owner_id && String(listing.owner_id) !== user.id && ownerNotificationAddonActive) {
+    if (listing.owner_id && String(listing.owner_id) !== user.id) {
       await sql.query(`
         INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
         VALUES ($1, $2, 'inquiry', '收到新的房源咨询', 'New listing inquiry', $3, $4, '/#messages')
@@ -179,7 +171,7 @@ export async function POST(request: Request) {
     let notificationSent = false;
     let confirmationSent = false;
     if (emailIsConfigured()) {
-      if (listing.owner_id && ownerNotificationAddonActive && await emailAlertsAllowed(String(listing.owner_id), "inquiry_alerts") && emailInput.recipientEmail && !emailInput.recipientEmail.endsWith(".invalid")) {
+      if (listing.owner_id && await emailAlertsAllowed(String(listing.owner_id), "inquiry_alerts") && emailInput.recipientEmail && !emailInput.recipientEmail.endsWith(".invalid")) {
         try {
           await sendInquiryNotification(emailInput);
           notificationSent = true;

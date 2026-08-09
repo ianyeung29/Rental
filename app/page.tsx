@@ -2,6 +2,10 @@
 
 import { ChangeEvent, FormEvent, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
+import { Browser } from "@capacitor/browser";
+import { Capacitor } from "@capacitor/core";
+import { Directory, Filesystem } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
 import AccountDrawer from "./components/AccountDrawer";
 import ApplicationDrawer, { type ApplicationFormValues } from "./components/ApplicationDrawer";
 import AreaContextPanel from "./components/AreaContextPanel";
@@ -12,6 +16,7 @@ import ListingCard from "./components/ListingCard";
 import ListingGallery from "./components/ListingGallery";
 import ListingAnalyticsPanel from "./components/ListingAnalyticsPanel";
 import NotificationCenter from "./components/NotificationCenter";
+import NativeMediaActions from "./components/NativeMediaActions";
 import ReportDrawer from "./components/ReportDrawer";
 import SafetyNotice from "./components/SafetyNotice";
 import SiteFooter from "./components/SiteFooter";
@@ -937,6 +942,16 @@ async function photoFingerprint(blob: Blob) {
   }
   const fileName = "name" in blob && typeof (blob as File).name === "string" ? (blob as File).name : "";
   return `${blob.type}:${blob.size}:${fileName}`;
+}
+
+async function blobToBase64(blob: Blob) {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("The file could not be read."));
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.readAsDataURL(blob);
+  });
+  return dataUrl.split(",", 2)[1] || "";
 }
 
 type PhotoUploadErrorCode = "unsupported" | "decode" | "prepare" | "presign" | "auth" | "size" | "storage" | "network";
@@ -3534,15 +3549,15 @@ export default function HomePage() {
     updateDraft(draftArraysFromMedia(media));
   };
 
-  const handlePhotoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []).slice(0, 4 - draft.photos.length);
-    if (files.length === 0) return;
+  const processPhotoFiles = async (files: File[]) => {
+    const limitedFiles = files.slice(0, 4 - draft.photos.length);
+    if (limitedFiles.length === 0) return;
     setMediaUploading(true);
     setPostError("");
     try {
       const nextMedia = [...mediaFromDraft(draft)];
       const fingerprints = new Set(nextMedia.map((media) => media.fingerprint).filter((value): value is string => Boolean(value)));
-      for (const file of files) {
+      for (const file of limitedFiles) {
         const fingerprint = await photoFingerprint(file);
         if (fingerprints.has(fingerprint)) {
           setPostError(locale === "zh" ? "这张照片与已上传照片重复，已跳过。" : "This photo duplicates one already uploaded, so it was skipped.");
@@ -3558,8 +3573,14 @@ export default function HomePage() {
       setPostError(photoUploadMessage(error, locale));
     } finally {
       setMediaUploading(false);
-      event.target.value = "";
     }
+  };
+
+  const handlePhotoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+    await processPhotoFiles(files);
+    event.target.value = "";
   };
 
   const polishListingWithAi = async () => {
@@ -4132,6 +4153,21 @@ export default function HomePage() {
     if (!poster || !shareListing) return;
     const filename = `${shareListing.id.replace(/[^a-z0-9-_]/gi, "-")}-moments-share.jpg`;
     const file = new File([poster.blob], filename, { type: poster.blob.type || "image/jpeg" });
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const canShare = await Share.canShare();
+        if (canShare.value) {
+          const base64 = await blobToBase64(poster.blob);
+          const saved = await Filesystem.writeFile({ path: `share-posters/${filename}`, data: base64, directory: Directory.Cache, recursive: true });
+          await Share.share({ files: [saved.uri], title: listingTitle(shareListing), text: shareText, url: shareUrl, dialogTitle: locale === "zh" ? "分享房源海报" : "Share listing poster" });
+          trackListingEvent(shareListing.id, "share", { channel: "poster" });
+          setShareFeedback(locale === "zh" ? "海报已交给手机分享菜单，请选择微信或其他应用。" : "The poster is in the phone share menu. Choose WeChat or another app.");
+          return;
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+      }
+    }
     let canShareFile = false;
     try {
       canShareFile = typeof navigator.share === "function" && typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
@@ -4154,6 +4190,19 @@ export default function HomePage() {
   };
   const handleNativeShare = async () => {
     if (!shareListing) return;
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const canShare = await Share.canShare();
+        if (canShare.value) {
+          await Share.share({ title: listingTitle(shareListing), text: shareText, url: shareUrl, dialogTitle: locale === "zh" ? "分享房源" : "Share listing" });
+          trackListingEvent(shareListing.id, "share", { channel: "native-system" });
+          setShareFeedback(locale === "zh" ? "已打开手机分享菜单。" : "The phone share menu is open.");
+          return;
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
+      }
+    }
     if (typeof navigator.share === "function") {
       try {
         await navigator.share({ title: listingTitle(shareListing), text: shareText, url: shareUrl });
@@ -4825,7 +4874,7 @@ export default function HomePage() {
 
               {postStep === 3 && (
                 <div className="post-form-grid">
-                  <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 4 张，当前 ${draft.photos.length} 张。支持 JPG、PNG、WebP，照片会上传到云端。` : `Up to 4 photos, ${draft.photos.length} selected. JPG, PNG, and WebP upload to cloud storage.`}</span></label>
+                  <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 4 张，当前 ${draft.photos.length} 张。支持 JPG、PNG、WebP，照片会上传到云端。` : `Up to 4 photos, ${draft.photos.length} selected. JPG, PNG, and WebP upload to cloud storage.`}</span></label><NativeMediaActions locale={locale} remaining={Math.max(0, 4 - draft.photos.length)} disabled={mediaUploading} onFiles={(files) => processPhotoFiles(files)} />
                   {draft.photos.length > 0 && <div className="photo-preview field-span-2">{draft.photos.map((photo, index) => <div className="photo-preview-item" key={`${photo.slice(0, 24)}-${index}`}><Image src={photo} alt={`${locale === "zh" ? "房源照片" : "Listing photo"} ${index + 1}`} width={112} height={82} /><span className="photo-order">{index === 0 ? (locale === "zh" ? "首图" : "Cover") : index + 1}</span><div className="photo-preview-actions"><button className="photo-action" type="button" onClick={() => movePhoto(index, "up")} disabled={index === 0} aria-label={locale === "zh" ? "设为首图" : "Move photo up"}><ChevronIcon direction="up" /></button><button className="photo-action" type="button" onClick={() => movePhoto(index, "down")} disabled={index === draft.photos.length - 1} aria-label={locale === "zh" ? "照片后移" : "Move photo down"}><ChevronIcon direction="down" /></button><button className="photo-action photo-remove" type="button" onClick={() => updateDraft(draftArraysFromMedia(mediaFromDraft(draft).filter((_, photoIndex) => photoIndex !== index)))} aria-label={locale === "zh" ? `删除照片 ${index + 1}` : `Remove photo ${index + 1}`}><CloseIcon size={14} /></button></div></div>)}</div>}
                   <fieldset className="location-lookup-panel field-span-2">
                     <legend>{t.lookupTitle}</legend>
@@ -5165,7 +5214,7 @@ export default function HomePage() {
 
       {applicationListing && currentUser && <ApplicationDrawer locale={locale} listingTitle={listingTitle(applicationListing)} listingArea={listingArea(applicationListing)} profileDefaults={{ displayName: currentUser.displayName, phone: currentUser.phone }} loading={applicationLoading} error={applicationError} onClose={() => { setApplicationListing(null); setApplicationError(""); }} onSubmit={submitApplication} />}
 
-      {authOpen && <AuthDrawer locale={locale} mode={authMode} loading={authLoading} error={authError} onGoogleLogin={(accountType) => { window.location.assign(`/api/auth/google?accountType=${accountType || "user"}`); }} onClose={() => { setAuthOpen(false); setAuthError(""); }} onModeChange={(mode) => { setAuthMode(mode); setAuthError(""); }} onSubmit={handleAuthSubmit} />}
+      {authOpen && <AuthDrawer locale={locale} mode={authMode} loading={authLoading} error={authError} onGoogleLogin={(accountType) => { const query = `?accountType=${encodeURIComponent(accountType || "user")}`; if (Capacitor.isNativePlatform()) { const redirect = new URL(`/api/auth/google${query}&native=1&redirectUri=${encodeURIComponent("com.anjurentals.app://auth/callback")}`, window.location.origin).toString(); void Browser.open({ url: redirect }); return; } window.location.assign(`/api/auth/google${query}`); }} onClose={() => { setAuthOpen(false); setAuthError(""); }} onModeChange={(mode) => { setAuthMode(mode); setAuthError(""); }} onSubmit={handleAuthSubmit} />}
 
       {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} applications={renterApplications} receivedApplications={receivedApplications} agentRequests={agentRequests} blockedPublishers={blockedPublishers} blockLoadingId={blockLoadingId} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} applicationActionLoadingId={applicationActionLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onUpdateProfile={handleProfileUpdate} onAgentVerificationStatusChange={handleAgentVerificationStatusChange} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} onInquiryStatusChange={(id, status) => updateInquiryStatus(id, status)} onScheduleInquiry={scheduleInquiry} onRevealInquiryAddress={revealInquiryAddress} onApplicationStatusChange={updateApplicationStatus} onUnblockPublisher={unblockPublisher} onListingOperationalChange={(id, updates) => setDashboardListings((current) => current.map((listing) => listing.id === id ? { ...listing, ...updates } : listing))} />}
 

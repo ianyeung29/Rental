@@ -8,5 +8,15 @@ dev-server-error.log
 .env
 .env*.local
 !.env.example
+android/keystore.properties
+android/keystore/
+android/app/google-services.json
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/build/
+android/local.properties
+ios/App/App/GoogleService-Info.plist
 .impeccable/
 *-review.png

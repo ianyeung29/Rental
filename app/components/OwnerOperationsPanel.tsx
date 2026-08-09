@@ -26,7 +26,6 @@ type OperationListing = OwnerListing & {
   views30d: number;
   shares30d: number;
   inquiries30d: number;
-  ownerAlertsActive: boolean;
 };
 
 type OperationsPayload = {
@@ -47,7 +46,7 @@ function fallbackPayload(listings: OwnerListing[]): OperationsPayload {
   return {
     staleDays: 14,
     summary: { activeListings: listings.filter((listing) => listing.status === "published").length, needsConfirmation: 0, views30d: 0, shares30d: 0, inquiries30d: 0 },
-    listings: listings.map((listing) => ({ ...listing, expiresOn: null, availabilityConfirmedAt: null, needsConfirmation: false, views30d: 0, shares30d: 0, inquiries30d: 0, ownerAlertsActive: false })),
+    listings: listings.map((listing) => ({ ...listing, expiresOn: null, availabilityConfirmedAt: null, needsConfirmation: false, views30d: 0, shares30d: 0, inquiries30d: 0 })),
     replyTemplates: DEFAULT_REPLY_TEMPLATES,
   };
 }

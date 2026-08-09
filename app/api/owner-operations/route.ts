@@ -57,7 +57,6 @@ function operationListing(row: Record<string, unknown>) {
     views30d: number(row.views_30d),
     shares30d: number(row.shares_30d),
     inquiries30d: number(row.inquiries_30d),
-    ownerAlertsActive: Boolean(row.owner_alerts_active),
   };
 }
 
@@ -79,13 +78,7 @@ async function loadOperationRows(userId: string) {
            COALESCE(l.availability_confirmed_at, l.published_at, l.updated_at, l.created_at) AS availability_anchor,
            (SELECT COUNT(*) FROM rental_listing_events e WHERE e.listing_id = l.id AND e.event_type = 'view' AND e.created_at >= NOW() - INTERVAL '30 days' AND (e.user_id IS NULL OR e.user_id <> l.owner_id))::int AS views_30d,
            (SELECT COUNT(*) FROM rental_listing_events e WHERE e.listing_id = l.id AND e.event_type = 'share' AND e.created_at >= NOW() - INTERVAL '30 days')::int AS shares_30d,
-           (SELECT COUNT(*) FROM rental_inquiries i WHERE i.listing_id = l.id AND i.created_at >= NOW() - INTERVAL '30 days')::int AS inquiries_30d,
-           EXISTS (
-             SELECT 1 FROM rental_listing_notification_addons addon
-             WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
-               AND addon.status = 'active' AND addon.payment_status = 'paid'
-               AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
-           ) AS owner_alerts_active
+           (SELECT COUNT(*) FROM rental_inquiries i WHERE i.listing_id = l.id AND i.created_at >= NOW() - INTERVAL '30 days')::int AS inquiries_30d
     FROM rental_listings l
     WHERE l.owner_id = $1
     ORDER BY CASE WHEN l.status = 'published' THEN 0 ELSE 1 END, l.updated_at DESC
@@ -100,7 +93,7 @@ export async function GET() {
     const rows = await loadOperationRows(result.user.id);
     for (const row of rows as Record<string, unknown>[]) {
       const listing = operationListing(row);
-      if (!listing.needsConfirmation || !listing.ownerAlertsActive) continue;
+      if (!listing.needsConfirmation) continue;
       const updatedRows = await sql!.query(`
         UPDATE rental_listings
         SET availability_reminder_sent_at = NOW()

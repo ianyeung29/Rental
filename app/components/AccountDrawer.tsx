@@ -559,7 +559,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <b aria-hidden="true">→</b>
           </Link>}
           {user.role === "admin" && <Link className="admin-access-panel" href="/admin/listing-notification-addons" onClick={onClose}>
-            <span><strong>{zh ? "房源提醒队列" : "Listing alert queue"}</strong><small>{zh ? "确认房主付款后开通单套房源提醒。" : "Confirm payment before activating per-listing owner alerts."}</small></span>
+            <span><strong>{zh ? "保存搜索曝光队列" : "Saved-search exposure queue"}</strong><small>{zh ? "确认付款后开通单套房源的保存搜索曝光。" : "Confirm payment before activating per-listing saved-search exposure."}</small></span>
             <b aria-hidden="true">→</b>
           </Link>}
           {user.role === "admin" && <Link className="admin-access-panel" href="/admin/reports" onClick={onClose}>

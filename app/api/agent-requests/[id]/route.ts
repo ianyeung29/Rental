@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { getCurrentUser } from "../../../lib/auth";
 import { emailIsConfigured, sendAgentRequestResponse } from "../../../lib/email";
-import { hasActiveListingNotificationAddon } from "../../../lib/listing-notification-addon";
 import { emailAlertsAllowed } from "../../../lib/notification-preferences";
+import { sendPushToUser } from "../../../lib/push";
 
 const MAX_BODY_LENGTH = 2_000;
 
@@ -47,12 +48,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const requestRows = await sql.query(`
       SELECT ar.id, ar.listing_id, ar.owner_id, ar.fee_plan, ar.fee_amount, ar.status,
              l.title_zh, l.title_en, l.area_zh, l.area_en,
-             EXISTS (
-               SELECT 1 FROM rental_listing_notification_addons addon
-               WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
-                 AND addon.status = 'active' AND addon.payment_status = 'paid'
-                 AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
-             ) AS owner_notification_addon_active,
              owner.display_name AS owner_name, owner.email AS owner_email,
              ap.display_name_zh AS agent_profile_name_zh, ap.display_name_en AS agent_profile_name_en
       FROM rental_agent_requests ar
@@ -75,8 +70,26 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     let notificationSent = false;
     const ownerEmail = String(agentRequest.owner_email || "");
-    const ownerNotificationAddonActive = Boolean(agentRequest.owner_notification_addon_active) || await hasActiveListingNotificationAddon(String(agentRequest.listing_id || ""), String(agentRequest.owner_id || ""));
-    if (emailIsConfigured() && ownerNotificationAddonActive && await emailAlertsAllowed(String(agentRequest.owner_id || ""), "agent_response_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
+    const ownerId = String(agentRequest.owner_id || "");
+    if (ownerId) {
+      await sql.query(`
+        INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
+        VALUES ($1, $2, 'agentResponse', '经纪人已回复房源协助请求', 'Agent responded to your request', $3, $4, '/#messages')
+      `, [
+        `notification-${randomUUID()}`,
+        ownerId,
+        `关于「${String(agentRequest.title_zh || agentRequest.title_en || "房源")}」的经纪协助请求已有回复。`,
+        `An agent responded to your request for “${String(agentRequest.title_en || agentRequest.title_zh || "your listing")}".`,
+      ]);
+      await sendPushToUser(ownerId, {
+        title: "安居 / Anjurentals",
+        body: `经纪人已回复「${String(agentRequest.title_zh || agentRequest.title_en || "房源")}」的协助请求。 / An agent responded to your listing request.`,
+        url: "/#messages",
+        tag: `agent-response-${id}`,
+      }).catch(() => undefined);
+      notificationSent = true;
+    }
+    if (emailIsConfigured() && await emailAlertsAllowed(ownerId, "agent_response_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
       try {
         await sendAgentRequestResponse({
           recipientEmail: ownerEmail,

@@ -594,6 +594,28 @@ export async function ensureDatabaseSchema() {
       )
     `);
     await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_native_push_tokens (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES rental_users(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL CHECK (platform IN ('android', 'ios')),
+        token TEXT NOT NULL,
+        user_agent TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (platform, token)
+      )
+    `);
+    await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_mobile_auth_handoffs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES rental_users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        used_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_listing_expiration_alerts (
         listing_id TEXT NOT NULL REFERENCES rental_listings(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL REFERENCES rental_users(id) ON DELETE CASCADE,
@@ -705,6 +727,8 @@ export async function ensureDatabaseSchema() {
     await sql.query("CREATE INDEX IF NOT EXISTS rental_notification_preferences_updated_idx ON rental_notification_preferences(updated_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_notification_addons_owner_idx ON rental_listing_notification_addons(owner_id, status, updated_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_push_subscriptions_user_idx ON rental_push_subscriptions(user_id, updated_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_native_push_tokens_user_idx ON rental_native_push_tokens(user_id, updated_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_mobile_auth_handoffs_expiry_idx ON rental_mobile_auth_handoffs(expires_at, used_at)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_expiration_alerts_user_idx ON rental_listing_expiration_alerts(user_id, expires_on)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_events_listing_idx ON rental_listing_events(listing_id, event_type, created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_listing_events_user_idx ON rental_listing_events(user_id, created_at DESC)");
