@@ -6,9 +6,11 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { listingLimitFor } from "../lib/account-types";
 import { toChineseLocationLabel } from "../lib/location-labels";
 import { exactOccupantOrDefault, OCCUPANT_OPTIONS } from "../lib/renter-options";
+import { DEFAULT_RENTER_PROFILE_SHARING, type RenterProfileShareOptions } from "../lib/renter-application";
 import { useDialogA11y } from "../lib/use-dialog-a11y";
 import { optimizeImageFile } from "../lib/image-optimizer";
 import portraitStyles from "./AgentPortrait.module.css";
+import OwnerOperationsPanel from "./OwnerOperationsPanel";
 
 type Locale = "zh" | "en";
 type DashboardTab = "listings" | "inquiries" | "applications" | "agentRequests" | "safety";
@@ -59,6 +61,7 @@ type DashboardListing = {
   moderationNote?: string;
   expiresOn?: string | null;
   publishedAt?: string | null;
+  availabilityConfirmedAt?: string | null;
   createdAt: string;
 };
 
@@ -88,6 +91,8 @@ type DashboardInquiry = {
   occupants: string;
   pets: string;
   tourPreference: string;
+  tourRequestedDate?: string | null;
+  tourRequestedWindow?: string;
   message: string;
   status?: string;
   readAt?: string | null;
@@ -112,6 +117,7 @@ type DashboardApplication = {
   listingId: string;
   listingTitle: string;
   listingArea: string;
+  currentCity?: string;
   preferredName: string;
   phone: string;
   moveIn: string;
@@ -126,6 +132,10 @@ type DashboardApplication = {
   requesterNote: string;
   submittedAt: string;
   updatedAt: string;
+  ownerReadAt?: string;
+  requesterReadAt?: string;
+  unread?: boolean;
+  events?: Array<{ id: string; status: string; note: string; actorRole: "renter" | "owner"; createdAt: string }>;
   applicantName?: string;
   applicantEmail?: string;
   ownerName?: string;
@@ -143,7 +153,7 @@ type RenterProfile = {
   moveIn: string;
   leaseLength: string;
   note: string;
-};
+} & RenterProfileShareOptions;
 
 type AccountDrawerProps = {
   locale: Locale;
@@ -179,6 +189,7 @@ type AccountDrawerProps = {
   onRevealInquiryAddress: (id: string) => Promise<void>;
   onApplicationStatusChange: (id: string, status: "reviewing" | "approved" | "declined" | "withdrawn", note: string) => Promise<void>;
   onUnblockPublisher: (id: string) => void;
+  onListingOperationalChange: (id: string, updates: { status?: "published" | "paused"; availabilityConfirmedAt?: string | null }) => void;
 };
 
 const AGENT_PORTRAIT_MAX_BYTES = 8 * 1024 * 1024;
@@ -196,6 +207,7 @@ function defaultRenterProfile(user: Pick<AccountUser, "displayName" | "phone">):
     moveIn: "immediate",
     leaseLength: "12",
     note: "",
+    ...DEFAULT_RENTER_PROFILE_SHARING,
   };
 }
 
@@ -207,7 +219,7 @@ function CloseIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, blockedPublishers, blockLoadingId, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onRevealInquiryAddress, onApplicationStatusChange, onUnblockPublisher, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentVerificationStatusChange }: AccountDrawerProps) {
+export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, blockedPublishers, blockLoadingId, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onRevealInquiryAddress, onApplicationStatusChange, onUnblockPublisher, onListingOperationalChange, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentVerificationStatusChange }: AccountDrawerProps) {
   const zh = locale === "zh";
   const dialogRef = useDialogA11y(true, onClose);
   const initial = user.displayName.trim().slice(0, 1).toUpperCase() || "U";
@@ -254,6 +266,18 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   const [scheduleError, setScheduleError] = useState("");
   const [inquiryActionId, setInquiryActionId] = useState<string | null>(null);
   const [applicationNotes, setApplicationNotes] = useState<Record<string, string>>({});
+  const [readApplicationIds, setReadApplicationIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (tab !== "applications") return;
+    const unreadIds = [...applications, ...receivedApplications]
+      .filter((application) => application.unread && !readApplicationIds.has(application.id))
+      .map((application) => application.id);
+    if (unreadIds.length === 0) return;
+    void Promise.all(unreadIds.map((id) => fetch(`/api/applications/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ read: true }) }).catch(() => undefined))).then(() => {
+      setReadApplicationIds((current) => new Set([...current, ...unreadIds]));
+    });
+  }, [applications, receivedApplications, readApplicationIds, tab]);
+  const applicationIsUnread = (application: DashboardApplication) => Boolean(application.unread && !readApplicationIds.has(application.id));
   const handleProfileSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setProfileSaving(true);
@@ -323,6 +347,8 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
     if (status === "withdrawn") return zh ? "已撤回" : "Withdrawn";
     return zh ? "已提交" : "Submitted";
   };
+  const applicationEventActorLabel = (role: "renter" | "owner") => role === "owner" ? (zh ? "房源方" : "Listing side") : (zh ? "租客" : "Renter");
+  const applicationEventsLabel = (application: DashboardApplication) => application.events?.length ? application.events : [{ id: `legacy-${application.id}`, status: application.status, note: "", actorRole: "renter" as const, createdAt: application.submittedAt }];
   const applicationStatusClass = (status: string) => status === "approved" ? "published" : status === "declined" || status === "withdrawn" ? "closed" : status === "reviewing" ? "contacted" : "unpublished";
   const applicationDateLabel = (value: string) => value ? new Date(value).toLocaleDateString(zh ? "zh-CN" : "en-US") : "—";
   const renterMoveInLabel = (value: string) => value === "immediate" ? (zh ? "立即入住" : "Move in immediately") : value === "august" ? (zh ? "2026年8月" : "Aug 2026") : value === "september" ? (zh ? "2026年9月" : "Sep 2026") : value === "october" ? (zh ? "2026年10月" : "Oct 2026") : value || (zh ? "未填写" : "Not set");
@@ -532,6 +558,10 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <span><strong>{zh ? "房源推广队列" : "Promotion queue"}</strong><small>{zh ? "处理房主提交的推广申请，未来可接入付款。" : "Review owner promotion requests before payment is added."}</small></span>
             <b aria-hidden="true">→</b>
           </Link>}
+          {user.role === "admin" && <Link className="admin-access-panel" href="/admin/listing-notification-addons" onClick={onClose}>
+            <span><strong>{zh ? "房源提醒队列" : "Listing alert queue"}</strong><small>{zh ? "确认房主付款后开通单套房源提醒。" : "Confirm payment before activating per-listing owner alerts."}</small></span>
+            <b aria-hidden="true">→</b>
+          </Link>}
           {user.role === "admin" && <Link className="admin-access-panel" href="/admin/reports" onClick={onClose}>
             <span><strong>{zh ? "安全审核队列" : "Safety review queue"}</strong><small>{zh ? "查看举报，留下审核说明，并隐藏或恢复房源。" : "Review reports, add notes, and hide or restore listings."}</small></span>
             <b aria-hidden="true">→</b>
@@ -578,6 +608,13 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
               <div><span>{zh ? "宠物" : "Pets"}</span><strong>{renterPetsLabel(renterProfile.pets)}</strong></div>
               <div><span>{zh ? "工作情况 / 收入" : "Employment / income"}</span><strong>{renterEmploymentLabel(renterProfile.employmentStatus)} · {renterIncomeLabel(renterProfile.incomeRange)}</strong></div>
             </div> : <form className="profile-form renter-profile-form" onSubmit={handleRenterProfileSubmit}>
+              <fieldset className="application-sharing-controls">
+                <legend>{zh ? "新申请的分享默认" : "Default sharing for new applications"}</legend>
+                <p>{zh ? "默认不分享可选资料。提交每一套房源时，你仍可以单独调整。" : "Optional details stay private by default. You can change these choices for each application."}</p>
+                <label className="application-share-option"><input type="checkbox" checked={renterProfileDraft.shareCurrentCity} onChange={(event) => updateRenterProfile("shareCurrentCity", event.target.checked)} /><span><strong>{zh ? "目前所在城市" : "Current city"}</strong><small>{zh ? "只分享城市或行政区，不分享精确地址。" : "Share only a city or borough, never an exact address."}</small></span></label>
+                <label className="application-share-option"><input type="checkbox" checked={renterProfileDraft.shareEmployment} onChange={(event) => updateRenterProfile("shareEmployment", event.target.checked)} /><span><strong>{zh ? "工作情况" : "Employment status"}</strong><small>{zh ? "房主可能用来了解基本申请背景。" : "May help the owner understand basic application context."}</small></span></label>
+                <label className="application-share-option"><input type="checkbox" checked={renterProfileDraft.shareIncome} onChange={(event) => updateRenterProfile("shareIncome", event.target.checked)} /><span><strong>{zh ? "月收入范围" : "Monthly income range"}</strong><small>{zh ? "只分享你选择的范围，不上传收入证明。" : "Shares only the selected range; no income documents are uploaded."}</small></span></label>
+              </fieldset>
               <div className="form-row"><label className="profile-field"><span className="profile-field-label">{zh ? "称呼" : "Preferred name"}</span><input value={renterProfileDraft.preferredName} onChange={(event) => updateRenterProfile("preferredName", event.target.value)} autoComplete="name" maxLength={100} required /></label><label className="profile-field"><span className="profile-field-label">{zh ? "联系电话" : "Phone"}</span><input value={renterProfileDraft.phone} onChange={(event) => updateRenterProfile("phone", event.target.value)} autoComplete="tel" maxLength={40} inputMode="tel" required /></label></div>
               <label className="profile-field"><span className="profile-field-label">{zh ? "目前所在城市（可选）" : "Current city (optional)"}</span><input value={renterProfileDraft.currentCity} onChange={(event) => updateRenterProfile("currentCity", event.target.value)} maxLength={100} placeholder={zh ? "例如：皇后区" : "Example: Queens"} /></label>
               <div className="form-row"><label className="profile-field"><span className="profile-field-label">{zh ? "预计入住" : "Move-in"}</span><select value={renterProfileDraft.moveIn} onChange={(event) => updateRenterProfile("moveIn", event.target.value)}><option value="immediate">{zh ? "立即入住" : "Move in immediately"}</option><option value="august">{zh ? "2026年8月" : "Aug 2026"}</option><option value="september">{zh ? "2026年9月" : "Sep 2026"}</option><option value="october">{zh ? "2026年10月" : "Oct 2026"}</option></select></label><label className="profile-field"><span className="profile-field-label">{zh ? "预计租期" : "Lease length"}</span><select value={renterProfileDraft.leaseLength} onChange={(event) => updateRenterProfile("leaseLength", event.target.value)}><option value="6">{zh ? "6个月" : "6 months"}</option><option value="12">{zh ? "12个月" : "12 months"}</option><option value="24">{zh ? "24个月以上" : "24+ months"}</option><option value="undefined">{zh ? "未确定" : "Undefined"}</option></select></label></div>
@@ -627,7 +664,14 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
           </div>
           {error && <p className="form-error" role="alert">{error}</p>}
           {loading ? <div className="dashboard-loading" aria-live="polite"><span /><span /><span /></div> : tab === "listings" ? (
-            listings.length === 0 ? <div className="drawer-empty"><h3>{zh ? "还没有房源" : "No listings yet"}</h3><p>{zh ? "发布第一套房源后，它会在这里显示。" : "Publish your first listing and it will appear here."}</p></div> :
+            <>
+            <OwnerOperationsPanel
+              locale={locale}
+              listings={listings.map((listing) => ({ id: listing.id, titleZh: listing.titleZh, titleEn: listing.titleEn, status: listing.status }))}
+              inquiries={inquiries.map((inquiry) => ({ id: inquiry.id, listingTitle: inquiry.listingTitle, requesterName: inquiry.requesterName, requesterEmail: inquiry.requesterEmail }))}
+              onListingOperationalChange={onListingOperationalChange}
+            />
+            {listings.length === 0 ? <div className="drawer-empty"><h3>{zh ? "还没有房源" : "No listings yet"}</h3><p>{zh ? "发布第一套房源后，它会在这里显示。" : "Publish your first listing and it will appear here."}</p></div> :
               <div className="dashboard-list">
                 {listings.map((listing) => {
                   const published = listing.status === "published";
@@ -645,6 +689,8 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
                   </article>;
                 })}
               </div>
+            }
+            </>
           ) : tab === "inquiries" ? (
             inquiries.length === 0 ? <div className="drawer-empty"><h3>{zh ? "还没有咨询" : "No inquiries yet"}</h3><p>{zh ? "租客发送咨询后，内容会在这里显示。" : "Renter inquiries will appear here when someone contacts you."}</p></div> :
               <div className="dashboard-list inquiry-list">
@@ -657,6 +703,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
                       <p>{inquiry.requesterName || (zh ? "租客" : "Renter")} · {inquiry.requesterEmail}</p>
                       <small>{zh ? "入住" : "Move-in"}: {inquiry.moveIn} · {zh ? "租期" : "Lease"}: {inquiry.leaseLength} · {zh ? "人数" : "Occupants"}: {inquiry.occupants}</small>
                       {inquiry.tourPreference && <small>{zh ? "看房偏好" : "Tour preference"}: {inquiry.tourPreference}</small>}
+                      {(inquiry.tourRequestedDate || (inquiry.tourRequestedWindow && inquiry.tourRequestedWindow !== "any")) && <small className="inquiry-tour-request">{zh ? "租客希望" : "Renter requested"}: {inquiry.tourRequestedDate || (zh ? "日期未定" : "Date flexible")} · {inquiry.tourRequestedWindow === "weekdayDay" ? (zh ? "工作日白天" : "Weekday daytime") : inquiry.tourRequestedWindow === "weekdayEvening" ? (zh ? "工作日晚上" : "Weekday evening") : inquiry.tourRequestedWindow === "weekendDay" ? (zh ? "周末白天" : "Weekend daytime") : inquiry.tourRequestedWindow === "weekendEvening" ? (zh ? "周末晚上" : "Weekend evening") : (zh ? "时间不限" : "Any time")}</small>}
                       {inquiry.pets && <small>{zh ? "宠物" : "Pets"}: {inquiry.pets}</small>}
                       {inquiry.message && <blockquote>{inquiry.message}</blockquote>}
                       {inquiry.tourScheduledAt && <small className="inquiry-tour-details">{zh ? "看房时间" : "Tour"}: {inquiryTourDateLabel(inquiry.tourScheduledAt, inquiry.tourTimeZone)}{inquiry.tourTimeZone ? ` · ${inquiry.tourTimeZone}` : ""}{inquiry.tourNote ? ` · ${inquiry.tourNote}` : ""}</small>}
@@ -691,7 +738,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
                     {applications.map((application) => {
                       const isBusy = applicationActionLoadingId === application.id;
                       return <article className="dashboard-row application-row" key={application.id}>
-                        <div className="dashboard-row-main"><div className="dashboard-row-heading"><h4>{application.listingTitle}</h4><span className={`status-chip ${applicationStatusClass(application.status)}`}>{applicationStatusLabel(application.status)}</span></div><p>{application.listingArea}</p><small>{zh ? "提交" : "Submitted"}: {applicationDateLabel(application.submittedAt)} · {zh ? "入住" : "Move-in"}: {application.moveIn} · {zh ? "租期" : "Lease"}: {application.leaseLength}</small><small>{zh ? "房主" : "Owner"}: {application.ownerName || "—"}{application.ownerEmail ? ` · ${application.ownerEmail}` : ""}</small>{application.ownerNote && <blockquote>{zh ? "房主备注：" : "Owner note: "}{application.ownerNote}</blockquote>}</div>
+                        <div className="dashboard-row-main"><div className="dashboard-row-heading"><h4>{application.listingTitle}</h4><span className={`status-chip ${applicationStatusClass(application.status)}`}>{applicationStatusLabel(application.status)}</span>{applicationIsUnread(application) && <span className="application-unread-chip">{zh ? "有更新" : "New update"}</span>}</div><p>{application.listingArea}</p><small>{zh ? "提交" : "Submitted"}: {applicationDateLabel(application.submittedAt)} · {zh ? "入住" : "Move-in"}: {application.moveIn} · {zh ? "租期" : "Lease"}: {application.leaseLength}</small><small>{zh ? "房主" : "Owner"}: {application.ownerName || "—"}{application.ownerEmail ? ` · ${application.ownerEmail}` : ""}</small>{application.ownerNote && <blockquote>{zh ? "房主备注：" : "Owner note: "}{application.ownerNote}</blockquote>}{applicationEventsLabel(application).length > 0 && <ol className="application-status-timeline" aria-label={zh ? "申请状态记录" : "Application status history"}>{applicationEventsLabel(application).map((event) => <li key={event.id} className={event.status === application.status ? "current" : ""}><div><strong>{applicationStatusLabel(event.status)}</strong><span>{applicationEventActorLabel(event.actorRole)} · {applicationDateLabel(event.createdAt)}</span></div>{event.note && <p>{event.note}</p>}</li>)}</ol>}</div>
                         <div className="dashboard-row-actions">{application.status !== "withdrawn" && application.status !== "declined" && <button className="text-button" type="button" onClick={() => { void onApplicationStatusChange(application.id, "withdrawn", ""); }} disabled={isBusy}>{isBusy ? (zh ? "处理中…" : "Working…") : (zh ? "撤回申请" : "Withdraw")}</button>}</div>
                       </article>;
                     })}
@@ -704,7 +751,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
                       const isBusy = applicationActionLoadingId === application.id;
                       const note = applicationNotes[application.id] ?? application.ownerNote;
                       return <article className="dashboard-row application-row application-review-row" key={application.id}>
-                        <div className="dashboard-row-main"><div className="dashboard-row-heading"><h4>{application.listingTitle}</h4><span className={`status-chip ${applicationStatusClass(application.status)}`}>{applicationStatusLabel(application.status)}</span></div><p>{application.applicantName || application.preferredName} · {application.applicantEmail || "—"}</p><small>{zh ? "入住" : "Move-in"}: {application.moveIn} · {zh ? "租期" : "Lease"}: {application.leaseLength} · {zh ? "人数" : "Occupants"}: {application.occupants} · {zh ? "宠物" : "Pets"}: {application.pets}</small><small>{zh ? "工作情况" : "Employment"}: {application.employmentStatus || (zh ? "未提供" : "Not provided")} · {zh ? "收入范围" : "Income range"}: {application.incomeRange || (zh ? "未提供" : "Not provided")}</small>{application.message && <blockquote>{application.message}</blockquote>}<label className="application-note-field"><span>{zh ? "给租客的备注（可选）" : "Note for renter (optional)"}</span><textarea rows={2} maxLength={1_000} value={note} onChange={(event) => setApplicationNotes((current) => ({ ...current, [application.id]: event.target.value }))} placeholder={zh ? "例如：可以安排周末看房。" : "Example: We can arrange a weekend tour."} /></label></div>
+                        <div className="dashboard-row-main"><div className="dashboard-row-heading"><h4>{application.listingTitle}</h4><span className={`status-chip ${applicationStatusClass(application.status)}`}>{applicationStatusLabel(application.status)}</span>{applicationIsUnread(application) && <span className="application-unread-chip">{zh ? "新申请" : "New"}</span>}</div><p>{application.applicantName || application.preferredName} · {application.applicantEmail || "—"}</p><small>{zh ? "入住" : "Move-in"}: {application.moveIn} · {zh ? "租期" : "Lease"}: {application.leaseLength} · {zh ? "人数" : "Occupants"}: {application.occupants} · {zh ? "宠物" : "Pets"}: {application.pets}</small>{application.currentCity && <small>{zh ? "目前所在城市" : "Current city"}: {application.currentCity}</small>}<small>{zh ? "工作情况" : "Employment"}: {application.employmentStatus || (zh ? "未提供" : "Not provided")} · {zh ? "收入范围" : "Income range"}: {application.incomeRange || (zh ? "未提供" : "Not provided")}</small>{application.message && <blockquote>{application.message}</blockquote>}{applicationEventsLabel(application).length > 0 && <ol className="application-status-timeline" aria-label={zh ? "申请状态记录" : "Application status history"}>{applicationEventsLabel(application).map((event) => <li key={event.id} className={event.status === application.status ? "current" : ""}><div><strong>{applicationStatusLabel(event.status)}</strong><span>{applicationEventActorLabel(event.actorRole)} · {applicationDateLabel(event.createdAt)}</span></div>{event.note && <p>{event.note}</p>}</li>)}</ol>}<label className="application-note-field"><span>{zh ? "给租客的备注（可选）" : "Note for renter (optional)"}</span><textarea rows={2} maxLength={1_000} value={note} onChange={(event) => setApplicationNotes((current) => ({ ...current, [application.id]: event.target.value }))} placeholder={zh ? "例如：可以安排周末看房。" : "Example: We can arrange a weekend tour."} /></label></div>
                         <div className="dashboard-row-actions"><button className="text-button" type="button" onClick={() => { void onApplicationStatusChange(application.id, "reviewing", note); }} disabled={isBusy || application.status === "reviewing" || application.status === "approved" || application.status === "declined"}>{zh ? "标记审核中" : "Mark reviewing"}</button><button className="outline-button" type="button" onClick={() => { void onApplicationStatusChange(application.id, "approved", note); }} disabled={isBusy || application.status === "approved" || application.status === "declined"}>{zh ? "通过" : "Approve"}</button><button className="text-button" type="button" onClick={() => { void onApplicationStatusChange(application.id, "declined", note); }} disabled={isBusy || application.status === "declined"}>{zh ? "不通过" : "Decline"}</button></div>
                       </article>;
                     })}

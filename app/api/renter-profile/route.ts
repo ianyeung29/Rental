@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { isExactOccupantCount } from "../../lib/renter-options";
+import { normalizeRenterProfileSharing } from "../../lib/renter-application";
 
 function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -18,6 +19,9 @@ function profileFromRow(row: Record<string, unknown> | undefined, fallback: { di
     pets: text(row?.pets, 40) || "no",
     moveIn: text(row?.move_in, 80),
     leaseLength: text(row?.lease_length, 40),
+    shareCurrentCity: row?.share_current_city === true,
+    shareEmployment: row?.share_employment === true,
+    shareIncome: row?.share_income === true,
     note: text(row?.note, 1_000),
     updatedAt: row?.updated_at instanceof Date ? row.updated_at.toISOString() : String(row?.updated_at || ""),
   };
@@ -43,7 +47,8 @@ export async function GET() {
     await ensureDatabaseSchema();
     const rows = await context.db.query(`
       SELECT preferred_name, phone, current_city, employment_status, income_range,
-             household_size, pets, move_in, lease_length, note, updated_at
+             household_size, pets, move_in, lease_length,
+             share_current_city, share_employment, share_income, note, updated_at
       FROM rental_renter_profiles
       WHERE user_id = $1
       LIMIT 1
@@ -68,6 +73,7 @@ export async function PATCH(request: Request) {
     pets: text(body.pets, 40) || "no",
     moveIn: text(body.moveIn, 80),
     leaseLength: text(body.leaseLength, 40),
+    ...normalizeRenterProfileSharing(body),
     note: text(body.note, 1_000),
   };
   if (profile.preferredName.length < 1 || profile.phone.length < 3) return NextResponse.json({ error: "Add a name and phone number before saving your renter profile." }, { status: 400 });
@@ -79,7 +85,8 @@ export async function PATCH(request: Request) {
       INSERT INTO rental_renter_profiles (
         user_id, preferred_name, phone, current_city, employment_status, income_range,
         household_size, pets, move_in, lease_length, note
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        , share_current_city, share_employment, share_income
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       ON CONFLICT (user_id) DO UPDATE SET
         preferred_name = EXCLUDED.preferred_name,
         phone = EXCLUDED.phone,
@@ -90,11 +97,15 @@ export async function PATCH(request: Request) {
         pets = EXCLUDED.pets,
         move_in = EXCLUDED.move_in,
         lease_length = EXCLUDED.lease_length,
+        share_current_city = EXCLUDED.share_current_city,
+        share_employment = EXCLUDED.share_employment,
+        share_income = EXCLUDED.share_income,
         note = EXCLUDED.note,
         updated_at = NOW()
       RETURNING preferred_name, phone, current_city, employment_status, income_range,
-                household_size, pets, move_in, lease_length, note, updated_at
-    `, [context.user.id, profile.preferredName, profile.phone, profile.currentCity, profile.employmentStatus, profile.incomeRange, profile.householdSize, profile.pets, profile.moveIn, profile.leaseLength, profile.note]);
+                household_size, pets, move_in, lease_length,
+                share_current_city, share_employment, share_income, note, updated_at
+    `, [context.user.id, profile.preferredName, profile.phone, profile.currentCity, profile.employmentStatus, profile.incomeRange, profile.householdSize, profile.pets, profile.moveIn, profile.leaseLength, profile.note, profile.shareCurrentCity, profile.shareEmployment, profile.shareIncome]);
     return NextResponse.json({ profile: profileFromRow(rows[0] as Record<string, unknown>, context.user) });
   } catch {
     return NextResponse.json({ error: "Your renter profile could not be saved right now." }, { status: 502 });

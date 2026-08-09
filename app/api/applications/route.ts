@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { emailIsConfigured, sendApplicationNotification, sendApplicationStatusUpdate } from "../../lib/email";
+import { hasActiveListingNotificationAddon } from "../../lib/listing-notification-addon";
 import { emailAlertsAllowed } from "../../lib/notification-preferences";
 import { sendPushToUser } from "../../lib/push";
 import { isExactOccupantCount } from "../../lib/renter-options";
+import { applicationFieldsForSharing, normalizeRenterProfileSharing, type RenterProfileShareOptions } from "../../lib/renter-application";
 
 const MAX_BODY_LENGTH = 8_000;
 
@@ -18,6 +20,26 @@ function dateTime(value: unknown) {
   return value ? String(value) : "";
 }
 
+function applicationEvents(value: unknown, fallback: { id: string; status: string; createdAt: string }) {
+  let raw: unknown = value;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      raw = [];
+    }
+  }
+  const events = Array.isArray(raw) ? raw.filter((event): event is Record<string, unknown> => Boolean(event) && typeof event === "object") : [];
+  if (events.length === 0 && fallback.createdAt) return [{ id: `legacy-${fallback.id}`, status: fallback.status, note: "", actorRole: "renter", createdAt: fallback.createdAt }];
+  return events.map((event) => ({
+    id: String(event.id || `event-${fallback.id}`),
+    status: String(event.status || fallback.status),
+    note: String(event.note || ""),
+    actorRole: event.actorRole === "owner" ? "owner" : "renter",
+    createdAt: dateTime(event.createdAt),
+  }));
+}
+
 function applicationFromRow(row: Record<string, unknown>, received: boolean) {
   return {
     id: String(row.id),
@@ -28,6 +50,7 @@ function applicationFromRow(row: Record<string, unknown>, received: boolean) {
     listingAreaEn: String(row.area_en || row.area_zh || ""),
     preferredName: String(row.preferred_name || ""),
     phone: String(row.phone || ""),
+    currentCity: String(row.current_city || ""),
     moveIn: String(row.move_in || ""),
     leaseLength: String(row.lease_length || ""),
     occupants: String(row.occupants || ""),
@@ -40,6 +63,10 @@ function applicationFromRow(row: Record<string, unknown>, received: boolean) {
     requesterNote: String(row.requester_note || ""),
     submittedAt: dateTime(row.created_at),
     updatedAt: dateTime(row.updated_at),
+    ownerReadAt: dateTime(row.owner_read_at),
+    requesterReadAt: dateTime(row.requester_read_at),
+    unread: received ? !row.owner_read_at : !row.requester_read_at,
+    events: applicationEvents(row.events, { id: String(row.id), status: String(row.status || "submitted"), createdAt: dateTime(row.created_at) }),
     ...(received
       ? { applicantName: String(row.requester_name || row.preferred_name || ""), applicantEmail: String(row.requester_email || "") }
       : { ownerName: String(row.owner_name || ""), ownerEmail: String(row.owner_email || "") }),
@@ -61,11 +88,23 @@ async function currentApplicant() {
 
 const APPLICATION_SELECT = `
   SELECT a.id, a.listing_id, a.requester_id, a.preferred_name, a.phone, a.move_in,
-         a.lease_length, a.occupants, a.pets, a.employment_status, a.income_range,
-         a.message, a.status, a.owner_note, a.requester_note, a.created_at, a.updated_at,
+         a.current_city, a.lease_length, a.occupants, a.pets, a.employment_status, a.income_range,
+         a.message, a.status, a.owner_note, a.requester_note, a.owner_read_at, a.requester_read_at,
+         a.created_at, a.updated_at,
          l.title_zh, l.title_en, l.area_zh, l.area_en,
          owner.display_name AS owner_name, owner.email AS owner_email,
-         requester.display_name AS requester_name, requester.email AS requester_email
+         requester.display_name AS requester_name, requester.email AS requester_email,
+         COALESCE((
+           SELECT json_agg(json_build_object(
+             'id', e.id,
+             'status', e.status,
+             'note', e.note,
+             'actorRole', e.actor_role,
+             'createdAt', e.created_at
+           ) ORDER BY e.created_at ASC)
+           FROM rental_application_events e
+           WHERE e.application_id = a.id
+         ), '[]'::json) AS events
   FROM rental_applications a
   JOIN rental_listings l ON l.id = a.listing_id
   LEFT JOIN rental_users owner ON owner.id = l.owner_id
@@ -110,11 +149,19 @@ export async function POST(request: Request) {
     const incomeRange = text(body.incomeRange, 40);
     const message = text(body.message, 1_000);
     const currentCity = text(body.currentCity, 100);
+    const sharing: RenterProfileShareOptions = normalizeRenterProfileSharing(body);
+    const sharedFields = applicationFieldsForSharing({ currentCity, employmentStatus, incomeRange }, sharing);
     if (!listingId || !preferredName || !phone || !moveIn || !leaseLength || !occupants || !pets) return NextResponse.json({ error: "Complete the required application details first." }, { status: 400 });
     if (!isExactOccupantCount(occupants)) return NextResponse.json({ error: "Choose the exact number of occupants." }, { status: 400 });
     await ensureDatabaseSchema();
     const listingRows = await context.db.query(`
       SELECT l.id, l.owner_id, l.title_zh, l.title_en, l.area_zh, l.area_en,
+             EXISTS (
+               SELECT 1 FROM rental_listing_notification_addons addon
+               WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
+                 AND addon.status = 'active' AND addon.payment_status = 'paid'
+                 AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
+             ) AS owner_notification_addon_active,
              owner.display_name AS owner_name, owner.email AS owner_email,
              pd.contact_name, pd.contact_email
       FROM rental_listings l
@@ -134,8 +181,9 @@ export async function POST(request: Request) {
     await context.db.query(`
       INSERT INTO rental_renter_profiles (
         user_id, preferred_name, phone, current_city, employment_status, income_range,
-        household_size, pets, move_in, lease_length, note
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        household_size, pets, move_in, lease_length,
+        share_current_city, share_employment, share_income, note
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       ON CONFLICT (user_id) DO UPDATE SET
         preferred_name = EXCLUDED.preferred_name,
         phone = EXCLUDED.phone,
@@ -146,19 +194,23 @@ export async function POST(request: Request) {
         pets = EXCLUDED.pets,
         move_in = EXCLUDED.move_in,
         lease_length = EXCLUDED.lease_length,
+        share_current_city = EXCLUDED.share_current_city,
+        share_employment = EXCLUDED.share_employment,
+        share_income = EXCLUDED.share_income,
         updated_at = NOW()
-    `, [context.user.id, preferredName, phone, currentCity, employmentStatus, incomeRange, occupants, pets, moveIn, leaseLength, ""]);
+    `, [context.user.id, preferredName, phone, currentCity, employmentStatus, incomeRange, occupants, pets, moveIn, leaseLength, sharing.shareCurrentCity, sharing.shareEmployment, sharing.shareIncome, ""]);
     const applicationId = `application-${randomUUID()}`;
     const rows = await context.db.query(`
       INSERT INTO rental_applications (
         id, listing_id, requester_id, inquiry_id, preferred_name, phone, move_in,
-        lease_length, occupants, pets, employment_status, income_range, message,
+        current_city, lease_length, occupants, pets, employment_status, income_range, message,
         status, owner_note, requester_note, owner_read_at, requester_read_at
-      ) VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11, $12, $13, 'submitted', '', '', NULL, NOW())
+      ) VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'submitted', '', '', NULL, NOW())
       ON CONFLICT (listing_id, requester_id) DO UPDATE SET
         inquiry_id = COALESCE(EXCLUDED.inquiry_id, rental_applications.inquiry_id),
         preferred_name = EXCLUDED.preferred_name,
         phone = EXCLUDED.phone,
+        current_city = EXCLUDED.current_city,
         move_in = EXCLUDED.move_in,
         lease_length = EXCLUDED.lease_length,
         occupants = EXCLUDED.occupants,
@@ -173,9 +225,14 @@ export async function POST(request: Request) {
         requester_read_at = NOW(),
         updated_at = NOW()
       RETURNING id
-    `, [applicationId, listingId, context.user.id, inquiryId, preferredName, phone, moveIn, leaseLength, occupants, pets, employmentStatus, incomeRange, message]);
+    `, [applicationId, listingId, context.user.id, inquiryId, preferredName, phone, sharedFields.currentCity, moveIn, leaseLength, occupants, pets, sharedFields.employmentStatus, sharedFields.incomeRange, message]);
     const savedId = String(rows[0]?.id || applicationId);
-    if (listing.owner_id && String(listing.owner_id) !== context.user.id) {
+    await context.db.query(`
+      INSERT INTO rental_application_events (id, application_id, actor_id, actor_role, status, note)
+      VALUES ($1, $2, $3, 'renter', 'submitted', '')
+    `, [`application-event-${randomUUID()}`, savedId, context.user.id]);
+    const ownerNotificationAddonActive = Boolean(listing.owner_notification_addon_active) || await hasActiveListingNotificationAddon(listingId, String(listing.owner_id || ""));
+    if (listing.owner_id && String(listing.owner_id) !== context.user.id && ownerNotificationAddonActive) {
       await context.db.query(`
         INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
         VALUES ($1, $2, 'application', '收到新的租赁申请', 'New rental application', $3, $4, '/#messages')
@@ -193,7 +250,7 @@ export async function POST(request: Request) {
     let confirmationSent = false;
     if (emailIsConfigured()) {
       const ownerEmail = String(listing.contact_email || listing.owner_email || "");
-      if (await emailAlertsAllowed(String(listing.owner_id || ""), "inquiry_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
+      if (ownerNotificationAddonActive && await emailAlertsAllowed(String(listing.owner_id || ""), "inquiry_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
         try {
           await sendApplicationNotification({
             recipientEmail: ownerEmail,
@@ -203,12 +260,13 @@ export async function POST(request: Request) {
             applicantName: preferredName,
             applicantEmail: context.user.email,
             phone,
+            currentCity: sharedFields.currentCity,
             moveIn,
             leaseLength,
             occupants,
             pets,
-            employmentStatus,
-            incomeRange,
+            employmentStatus: sharedFields.employmentStatus,
+            incomeRange: sharedFields.incomeRange,
             message,
           });
           notificationSent = true;

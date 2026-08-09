@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../../../lib/db";
 import { getCurrentUser } from "../../../../lib/auth";
-import { listingSafetyError } from "../../../../lib/safety";
+import { reviewListingSafety } from "../../../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../../../lib/email";
 import { listingLimitFor } from "../../../../lib/account-types";
 import { normalizeListingMedia } from "../../../../lib/listing-media";
+import { duplicateMediaCount } from "../../../../lib/listing-quality";
 
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
@@ -163,6 +164,7 @@ function validationError(input: ReturnType<typeof normalizeBody>) {
   if (input.expiresOn && (!isDateOnly(input.expiresOn) || input.expiresOn < new Date().toISOString().slice(0, 10))) return "Choose today or a future listing expiration date.";
   if (input.agentService === "agentMatch" && input.agentFeePlan === "flatFee" && (!input.agentFeeAmount || input.agentFeeAmount <= 0)) return "Add a valid agent flat fee or choose another fee preference.";
   if (input.media.length === 0) return "Keep at least one listing image.";
+  if (duplicateMediaCount(input.media) > 0) return "Remove duplicate listing images before saving.";
   return "";
 }
 
@@ -260,8 +262,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
   const validation = validationError(input);
   if (validation) return NextResponse.json({ error: validation }, { status: 400 });
-  const safetyError = listingSafetyError([input.titleZh, input.titleEn, input.descriptionZh, input.descriptionEn]);
-  if (safetyError) return NextResponse.json({ error: safetyError }, { status: 400 });
+  const safetyReview = reviewListingSafety({ titleZh: input.titleZh, titleEn: input.titleEn, descriptionZh: input.descriptionZh, descriptionEn: input.descriptionEn });
+  if (safetyReview.blocking.length > 0) {
+    return NextResponse.json({ error: safetyReview.blocking[0].detailEn, code: "SAFETY_REVIEW_REQUIRED", safety: safetyReview }, { status: 400 });
+  }
 
   try {
     await ensureDatabaseSchema();

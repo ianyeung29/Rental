@@ -32,7 +32,7 @@ const ALLOWED_FEATURES = new Set([
   "nearTransit",
   "shortTerm",
 ]);
-const ALLOWED_ALERT_FREQUENCIES = new Set(["off", "daily"]);
+const ALLOWED_ALERT_FREQUENCIES = new Set(["off", "daily", "instant"]);
 
 function snapshotFromRow(row: Record<string, unknown>) {
   return {

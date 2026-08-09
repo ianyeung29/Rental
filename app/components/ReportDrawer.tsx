@@ -34,7 +34,7 @@ export default function ReportDrawer({ locale, listingTitle, loading, error, onC
             <button className="drawer-close" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}><CloseIcon /></button>
           </div>
           <h2 id="report-title">{zh ? "举报此房源" : "Report this listing"}</h2>
-          <p className="drawer-intro">{zh ? `告诉我们 ${listingTitle} 可能存在的问题。我们会把反馈交给审核人员。` : `Tell us what may be wrong with ${listingTitle}. Your report will go to the moderation queue.`}</p>
+          <p className="drawer-intro">{zh ? `告诉我们 ${listingTitle} 可能存在的问题。我们会把反馈交给审核人员，并在需要时把房源标记为复核中。` : `Tell us what may be wrong with ${listingTitle}. Your report goes to the moderation queue and may place the listing under review.`}</p>
           <form className="report-form" onSubmit={onSubmit}>
             <label className="field-label" htmlFor="report-reason">{zh ? "问题类型" : "Reason"}
               <select id="report-reason" name="reason" defaultValue="" required>
@@ -50,7 +50,7 @@ export default function ReportDrawer({ locale, listingTitle, loading, error, onC
               <textarea id="report-details" name="details" rows={5} maxLength={1000} placeholder={zh ? "请描述你看到的问题" : "Describe what you noticed"} />
             </label>
             {error && <p className="form-error" role="alert">{error}</p>}
-            <p className="form-safety">{zh ? "请只提交与房源安全、真实性或隐私有关的反馈。" : "Please use reports for safety, accuracy, or privacy concerns."}</p>
+            <p className="form-safety">{zh ? "请只提交与房源安全、真实性或隐私有关的反馈。提交后，审核人员会查看；发布者不会看到你的联系方式。" : "Please use reports for safety, accuracy, or privacy concerns. Moderators will review it; the publisher will not see your contact details."}</p>
             <button className="primary-button full-button" type="submit" disabled={loading}>{loading ? (zh ? "提交中…" : "Submitting…") : (zh ? "提交举报" : "Submit report")}</button>
           </form>
         </div>

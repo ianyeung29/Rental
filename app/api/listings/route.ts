@@ -3,11 +3,13 @@ import { randomUUID } from "node:crypto";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { getCurrentUser } from "../../lib/auth";
 import { recordAuditEventSafely } from "../../lib/audit";
-import { listingSafetyError } from "../../lib/safety";
+import { reviewListingSafety } from "../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../lib/email";
 import { demoModeEnabled } from "../../lib/demo";
 import { listingLimitFor } from "../../lib/account-types";
 import { listingMediaFromDatabase, normalizeListingMedia } from "../../lib/listing-media";
+import { notifyInstantSavedSearches } from "../../lib/saved-search-alerts";
+import { duplicateMediaCount } from "../../lib/listing-quality";
 
 const MAX_BODY_LENGTH = 32_000;
 const MAX_TEXT_LENGTH = 2_500;
@@ -260,6 +262,7 @@ function validateListing(input: ReturnType<typeof normalizeBody>) {
   if (input.expiresOn && (!isDateOnly(input.expiresOn) || input.expiresOn < new Date().toISOString().slice(0, 10))) return "Choose today or a future listing expiration date.";
   if (input.agentService === "agentMatch" && input.agentFeePlan === "flatFee" && (!input.agentFeeAmount || input.agentFeeAmount <= 0)) return "Add a valid agent flat fee or choose another fee preference.";
   if (input.media.length === 0) return "Upload at least one image before publishing.";
+  if (duplicateMediaCount(input.media) > 0) return "Remove duplicate listing images before publishing.";
   return "";
 }
 
@@ -285,9 +288,11 @@ export async function GET(request: Request) {
         ? "CASE WHEN l.move_in = 'immediate' THEN 0 WHEN l.move_in ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN 1 ELSE 2 END, CASE WHEN l.move_in ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN l.move_in END ASC NULLS LAST, l.created_at DESC"
         : sort === "popular"
           ? "popularity_score DESC, l.created_at DESC"
-        : sort === "verified"
-          ? "CASE WHEN COALESCE(ap.is_verified, FALSE) OR u.email_verified_at IS NOT NULL THEN 0 ELSE 1 END, l.created_at DESC"
-          : "l.created_at DESC";
+          : sort === "fresh"
+            ? "COALESCE(l.updated_at, l.created_at) DESC, l.created_at DESC"
+            : sort === "verified"
+              ? "CASE WHEN COALESCE(ap.is_verified, FALSE) OR u.email_verified_at IS NOT NULL THEN 0 ELSE 1 END, COALESCE(l.updated_at, l.created_at) DESC"
+              : "l.created_at DESC";
     const rows = await sql.query(`
       SELECT
         l.id, l.owner_id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type,
@@ -373,8 +378,10 @@ export async function POST(request: Request) {
   }
   const validationError = validateListing(input);
   if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
-  const safetyError = listingSafetyError([input.titleZh, input.titleEn, input.descriptionZh, input.descriptionEn]);
-  if (safetyError) return NextResponse.json({ error: safetyError }, { status: 400 });
+  const safetyReview = reviewListingSafety({ titleZh: input.titleZh, titleEn: input.titleEn, descriptionZh: input.descriptionZh, descriptionEn: input.descriptionEn });
+  if (safetyReview.blocking.length > 0) {
+    return NextResponse.json({ error: safetyReview.blocking[0].detailEn, code: "SAFETY_REVIEW_REQUIRED", safety: safetyReview }, { status: 400 });
+  }
 
   try {
     await ensureDatabaseSchema();
@@ -515,8 +522,29 @@ export async function POST(request: Request) {
         }
       }
     }
+    let instantSearchAlerts = 0;
+    try {
+      const alertResult = await notifyInstantSavedSearches({
+        id,
+        owner_id: ownerId,
+        title_zh: input.titleZh,
+        title_en: input.titleEn,
+        area_zh: input.areaZh,
+        area_en: input.areaEn,
+        price: input.price,
+        bedrooms: input.bedrooms,
+        bathrooms: input.bathrooms,
+        square_feet: input.squareFeet,
+        rental_type: input.rentalType,
+        move_in: input.moveIn,
+        features: input.features,
+      });
+      instantSearchAlerts = alertResult.notified;
+    } catch {
+      // Publishing must not fail because an optional saved-search alert could not be delivered.
+    }
     await recordAuditEventSafely({ request, eventType: "listing.publish", user, metadata: { listingId: id, posterRole: input.posterRole, agentService: input.agentService, mediaCount: input.media.length, demoMode } });
-    return NextResponse.json({ ...toClientListing(row), agentRequestStatus: agentRequestId ? "pending" : null, agentNotificationSent, demoMode }, { status: 201 });
+    return NextResponse.json({ ...toClientListing(row), agentRequestStatus: agentRequestId ? "pending" : null, agentNotificationSent, instantSearchAlerts, demoMode, safetyReview }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "The listing could not be saved to the database." }, { status: 502 });
   }
