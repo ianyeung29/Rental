@@ -145,6 +145,12 @@ export async function GET(request: Request) {
       WHERE l.status IN ('published', 'paused')
         AND l.expires_on BETWEEN CURRENT_DATE AND CURRENT_DATE + 7
         AND u.email_verified_at IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM rental_listing_notification_addons addon
+          WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
+            AND addon.status = 'active' AND addon.payment_status = 'paid'
+            AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
+        )
         AND NOT EXISTS (
           SELECT 1 FROM rental_listing_expiration_alerts sent_alert
           WHERE sent_alert.listing_id = l.id AND sent_alert.expires_on = l.expires_on
