@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { sendSavedSearchAlert, emailIsConfigured } from "./email";
 import { sql } from "./db";
+import { hasActiveSavedSearchExposure } from "./listing-notification-addon";
+import { savedSearchExposureIsActive } from "./listing-exposure-policy";
 import { sendPushToUser } from "./push";
 
 function list(value: unknown) {
@@ -55,6 +57,11 @@ export function matchesSavedSearch(search: Record<string, unknown>, listing: Rec
 
 export async function notifyInstantSavedSearches(listing: Record<string, unknown>) {
   if (!sql) return { matched: 0, notified: 0, emailSent: 0 };
+  const listingId = String(listing.id || "");
+  const ownerId = String(listing.owner_id || "");
+  if (!savedSearchExposureIsActive(listingId, ownerId, await hasActiveSavedSearchExposure(listingId, ownerId))) {
+    return { matched: 0, notified: 0, emailSent: 0 };
+  }
   const searches = await sql.query(`
     SELECT s.user_id, s.location, s.min_price, s.max_price, s.min_sqft, s.max_sqft, s.bedrooms, s.bathrooms,
            s.rental_type, s.move_in, s.features,
@@ -71,7 +78,6 @@ export async function notifyInstantSavedSearches(listing: Record<string, unknown
   let matched = 0;
   let notified = 0;
   let emailSent = 0;
-  const listingId = String(listing.id || "");
   const listingTitleZh = String(listing.title_zh || listing.title_en || "新房源");
   const listingTitleEn = String(listing.title_en || listing.title_zh || "New listing");
   for (const row of searches as Record<string, unknown>[]) {

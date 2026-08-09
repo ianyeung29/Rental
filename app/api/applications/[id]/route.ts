@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { emailIsConfigured, sendApplicationStatusUpdate } from "../../../lib/email";
-import { hasActiveListingNotificationAddon } from "../../../lib/listing-notification-addon";
 import { emailAlertsAllowed } from "../../../lib/notification-preferences";
 
 const OWNER_STATUSES = new Set(["reviewing", "approved", "declined"]);
@@ -41,12 +40,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       SELECT a.id, a.listing_id, a.requester_id, a.status, a.preferred_name,
              a.owner_note, a.requester_note, a.owner_read_at, a.requester_read_at,
              l.owner_id, l.title_zh, l.title_en,
-             EXISTS (
-               SELECT 1 FROM rental_listing_notification_addons addon
-               WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
-                 AND addon.status = 'active' AND addon.payment_status = 'paid'
-                 AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
-             ) AS owner_notification_addon_active,
              requester.display_name AS requester_name, requester.email AS requester_email,
              owner.display_name AS owner_name, owner.email AS owner_email
       FROM rental_applications a
@@ -87,9 +80,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       `, [eventId, id, user.id, isOwner ? "owner" : "renter", effectiveStatus, note]);
       event = { id: eventId, status: effectiveStatus, note, actorRole: isOwner ? "owner" : "renter", createdAt: eventCreatedAt };
     }
-    const ownerNotificationAddonActive = Boolean(application.owner_notification_addon_active) || await hasActiveListingNotificationAddon(String(application.listing_id || ""), String(application.owner_id || ""));
-    const recipientIsOwner = isRequester && String(application.owner_id || "") === recipientId;
-    if (requestedStatus && recipientId && (!recipientIsOwner || ownerNotificationAddonActive)) {
+    if (requestedStatus && recipientId) {
       const titleZh = effectiveStatus === "approved" ? "租赁申请已通过" : effectiveStatus === "declined" ? "租赁申请未通过" : effectiveStatus === "withdrawn" ? "租客撤回了申请" : "租赁申请正在审核";
       const titleEn = effectiveStatus === "approved" ? "Rental application approved" : effectiveStatus === "declined" ? "Rental application declined" : effectiveStatus === "withdrawn" ? "Renter withdrew an application" : "Rental application is under review";
       await sql.query(`
@@ -97,7 +88,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         VALUES ($1, $2, 'application', $3, $4, $5, $6, '/#messages')
       `, [`notification-${randomUUID()}`, recipientId, titleZh, titleEn, `「${listingTitleZh}」的租赁申请状态已更新。`, `The application for “${listingTitleEn}” was updated.`]);
     }
-    if (requestedStatus && emailIsConfigured() && (!recipientIsOwner || ownerNotificationAddonActive) && await emailAlertsAllowed(recipientId, "agent_response_alerts")) {
+    if (requestedStatus && emailIsConfigured() && await emailAlertsAllowed(recipientId, "agent_response_alerts")) {
       const recipientEmail = isOwner ? String(application.requester_email || "") : String(application.owner_email || "");
       if (recipientEmail && !recipientEmail.endsWith(".invalid")) {
         try {

@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Capacitor } from "@capacitor/core";
+import { PushNotifications } from "@capacitor/push-notifications";
+import { useEffect, useRef, useState } from "react";
 import { useDialogA11y } from "../lib/use-dialog-a11y";
 
 type Locale = "zh" | "en";
@@ -51,6 +53,8 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
   const [pushStatus, setPushStatus] = useState<PushStatus>("idle");
   const [pushLoading, setPushLoading] = useState(false);
   const [pushError, setPushError] = useState("");
+  const native = Capacitor.isNativePlatform();
+  const nativeRegistrationListener = useRef<Promise<{ remove: () => Promise<void> }> | null>(null);
   const dialogRef = useDialogA11y(open, () => setOpen(false));
 
   const load = async () => {
@@ -92,6 +96,22 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
     if (!open || !authenticated) return;
     let cancelled = false;
     const checkSubscription = async () => {
+      if (native) {
+        setPushStatus("checking");
+        try {
+          const permission = await PushNotifications.checkPermissions();
+          if (permission.receive === "denied") {
+            if (!cancelled) setPushStatus("denied");
+            return;
+          }
+          const response = await fetch("/api/push/native-token", { cache: "no-store" });
+          const result = await response.json().catch(() => ({})) as { enabled?: boolean };
+          if (!cancelled) setPushStatus(result.enabled ? "subscribed" : "idle");
+        } catch {
+          if (!cancelled) setPushStatus("error");
+        }
+        return;
+      }
       if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
         if (!cancelled) setPushStatus("unsupported");
         return;
@@ -111,7 +131,7 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
     };
     void checkSubscription();
     return () => { cancelled = true; };
-  }, [authenticated, open]);
+  }, [authenticated, native, open]);
 
   const markRead = async (id: string) => {
     setNotifications((current) => current.map((item) => item.id === id ? { ...item, readAt: new Date().toISOString() } : item));
@@ -152,7 +172,53 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
     setOpen(true);
   };
 
+  const saveNativeToken = async (token: string) => {
+    const response = await fetch("/api/push/native-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, platform: Capacitor.getPlatform(), userAgent: navigator.userAgent }),
+    });
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) throw new Error(result.error || (zh ? "设备通知注册失败。" : "Device notification registration failed."));
+  };
+
+  const enableNativePushNotifications = async () => {
+    setPushLoading(true);
+    setPushError("");
+    try {
+      const permission = await PushNotifications.checkPermissions();
+      const requested = permission.receive === "granted" ? permission : await PushNotifications.requestPermissions();
+      if (requested.receive !== "granted") {
+        setPushStatus("denied");
+        setPushError(zh ? "设备通知权限已关闭，请在系统设置中重新允许。" : "Device notification permission is blocked; re-enable it in system settings.");
+        return;
+      }
+      if (!nativeRegistrationListener.current) {
+        nativeRegistrationListener.current = PushNotifications.addListener("registration", ({ value }) => {
+          void saveNativeToken(value).catch((error) => setPushError(error instanceof Error ? error.message : (zh ? "设备通知注册失败。" : "Device notification registration failed.")));
+        });
+        await PushNotifications.addListener("registrationError", ({ error }) => {
+          setPushStatus("error");
+          setPushError(error || (zh ? "设备通知注册失败。" : "Native push registration failed."));
+        });
+      }
+      await PushNotifications.register();
+      setPreferences((current) => ({ ...current, pushEnabled: true }));
+      setPushStatus("subscribed");
+    } catch (pushEnableError) {
+      setPushStatus("error");
+      setPushError(pushEnableError instanceof Error ? pushEnableError.message : (zh ? "设备通知暂时无法启用。" : "Device notifications could not be enabled."));
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
   const enablePushNotifications = async () => {
+    if (native) {
+      if (!authenticated) { onRequireAuth(); return; }
+      await enableNativePushNotifications();
+      return;
+    }
     if (!authenticated) { onRequireAuth(); return; }
     if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
       setPushStatus("unsupported");
@@ -190,6 +256,24 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
   };
 
   const disablePushNotifications = async () => {
+    if (native) {
+      setPushLoading(true);
+      setPushError("");
+      try {
+        const response = await fetch("/api/push/native-token", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        if (!response.ok) throw new Error(result.error || (zh ? "设备通知暂时无法关闭。" : "Device notifications could not be disabled."));
+        await PushNotifications.unregister().catch(() => undefined);
+        setPreferences((current) => ({ ...current, pushEnabled: false }));
+        setPushStatus("idle");
+      } catch (pushDisableError) {
+        setPushStatus("error");
+        setPushError(pushDisableError instanceof Error ? pushDisableError.message : (zh ? "设备通知暂时无法关闭。" : "Device notifications could not be disabled."));
+      } finally {
+        setPushLoading(false);
+      }
+      return;
+    }
     setPushLoading(true);
     setPushError("");
     try {
@@ -238,7 +322,7 @@ export default function NotificationCenter({ locale, authenticated, onRequireAut
               <label className="notification-toggle"><span><strong>{zh ? "启用邮件提醒" : "Email alerts"}</strong><small>{zh ? "关闭后不会收到任何分类邮件。" : "Turn off all email alerts."}</small></span><input type="checkbox" checked={preferences.emailEnabled} disabled={preferencesSaving !== null} onChange={(event) => { void savePreference("emailEnabled", event.target.checked); }} /></label>
               <div className={`notification-preference-list ${preferences.emailEnabled ? "" : "is-disabled"}`}>{preferenceItems.map((item) => <label className="notification-toggle" key={item.key}><span>{zh ? item.zh : item.en}</span><input type="checkbox" checked={preferences[item.key]} disabled={!preferences.emailEnabled || preferencesSaving !== null} onChange={(event) => { void savePreference(item.key, event.target.checked); }} /></label>)}</div>
               <section className="push-notification-control" aria-labelledby="push-notification-title">
-                <div><span className="section-label">DEVICE SIGNAL</span><h4 id="push-notification-title">{zh ? "浏览器通知" : "Browser notifications"}</h4><p>{zh ? "在新咨询、保存搜索匹配或看房提醒出现时，在设备上收到即时通知。" : "Get an instant device notice for new inquiries, saved-search matches, and tour reminders."}</p>{pushError && <p className="push-notification-status" role="alert">{pushError}</p>}{pushStatus === "denied" && !pushError && <p className="push-notification-status">{zh ? "通知权限已关闭，请在浏览器设置中重新允许。" : "Notification permission is blocked; re-enable it in browser settings."}</p>}{pushStatus === "unsupported" && <p className="push-notification-status">{zh ? "此浏览器暂不支持浏览器通知。" : "This browser does not support push notifications."}</p>}</div>
+                <div><span className="section-label">DEVICE SIGNAL</span><h4 id="push-notification-title">{native ? (zh ? "手机通知" : "Device notifications") : (zh ? "浏览器通知" : "Browser notifications")}</h4><p>{zh ? "在新咨询、保存搜索匹配或看房提醒出现时，在设备上收到即时通知。" : "Get an instant device notice for new inquiries, saved-search matches, and tour reminders."}</p>{pushError && <p className="push-notification-status" role="alert">{pushError}</p>}{pushStatus === "denied" && !pushError && <p className="push-notification-status">{native ? (zh ? "通知权限已关闭，请在系统设置中重新允许。" : "Notification permission is blocked; re-enable it in system settings.") : (zh ? "通知权限已关闭，请在浏览器设置中重新允许。" : "Notification permission is blocked; re-enable it in browser settings.")}</p>}{pushStatus === "unsupported" && <p className="push-notification-status">{zh ? "此浏览器暂不支持浏览器通知。" : "This browser does not support push notifications."}</p>}</div>
                 {pushStatus === "subscribed" ? <button className="outline-button" type="button" disabled={pushLoading} onClick={() => { void disablePushNotifications(); }}>{pushLoading ? (zh ? "处理中…" : "Working…") : (zh ? "关闭通知" : "Turn off")}</button> : <button className="outline-button" type="button" disabled={pushLoading || pushStatus === "unsupported" || pushStatus === "denied" || pushStatus === "checking"} onClick={() => { void enablePushNotifications(); }}>{pushLoading || pushStatus === "checking" ? (zh ? "处理中…" : "Working…") : (zh ? "启用通知" : "Enable")}</button>}
               </section>
             </>}

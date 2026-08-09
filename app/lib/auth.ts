@@ -8,6 +8,7 @@ import { AccountType, AgentVerificationStatus, isVerifiedAgent, normalizeAccount
 const SESSION_COOKIE = "rental_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const PASSWORD_RESET_TTL_SECONDS = 60 * 60;
+const MOBILE_AUTH_HANDOFF_TTL_SECONDS = 180;
 const scryptAsync = promisify(scrypt);
 
 export type AuthUser = {
@@ -95,6 +96,35 @@ async function createVerificationToken(userId: string) {
     [randomUUID(), userId, tokenHash(token), expiresAt.toISOString()],
   );
   return token;
+}
+
+export async function createMobileAuthHandoff(userId: string) {
+  await ensureDatabaseSchema();
+  const db = database();
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + MOBILE_AUTH_HANDOFF_TTL_SECONDS * 1000);
+  await db.query("DELETE FROM rental_mobile_auth_handoffs WHERE user_id = $1 OR expires_at <= NOW()", [userId]);
+  await db.query(
+    "INSERT INTO rental_mobile_auth_handoffs (id, user_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)",
+    [randomUUID(), userId, tokenHash(token), expiresAt.toISOString()],
+  );
+  return token;
+}
+
+export async function consumeMobileAuthHandoff(tokenValue: string) {
+  await ensureDatabaseSchema();
+  const db = database();
+  const token = tokenValue.trim();
+  if (!token) throw new AuthError("The mobile sign-in handoff is missing.", 400);
+  const rows = await db.query(`
+    UPDATE rental_mobile_auth_handoffs
+    SET used_at = NOW()
+    WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+    RETURNING user_id
+  `, [tokenHash(token)]);
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (!row) throw new AuthError("The mobile sign-in handoff is invalid or expired.", 400);
+  return createSession(String(row.user_id));
 }
 
 async function createPasswordResetToken(userId: string) {

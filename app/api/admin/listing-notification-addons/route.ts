@@ -12,9 +12,9 @@ async function adminContext() {
   } catch {
     return { error: NextResponse.json({ error: "Account authentication is unavailable right now." }, { status: 502 }) };
   }
-  if (!user) return { error: NextResponse.json({ error: "Sign in to access notification add-ons." }, { status: 401 }) };
-  if (!user.emailVerified) return { error: NextResponse.json({ error: "Verify your email before accessing notification add-ons." }, { status: 403 }) };
-  if (user.role !== "admin") return { error: NextResponse.json({ error: "Notification add-on access is restricted." }, { status: 403 }) };
+  if (!user) return { error: NextResponse.json({ error: "Sign in to access saved-search exposure add-ons." }, { status: 401 }) };
+  if (!user.emailVerified) return { error: NextResponse.json({ error: "Verify your email before accessing saved-search exposure add-ons." }, { status: 403 }) };
+  if (user.role !== "admin") return { error: NextResponse.json({ error: "Saved-search exposure add-on access is restricted." }, { status: 403 }) };
   if (!sql) return { error: NextResponse.json({ error: "DATABASE_URL is not configured on the server yet." }, { status: 503 }) };
   return { user };
 }
@@ -79,7 +79,7 @@ export async function PATCH(request: Request) {
           RETURNING listing_id, owner_id, status, payment_status, price_cents, payment_reference, paid_at, activated_at, expires_at, created_at, updated_at
         `, [action === "refund" ? "expired" : "cancelled", action === "refund" ? "refunded" : "unpaid", listingId]);
     const addon = rows[0] as Record<string, unknown> | undefined;
-    if (!addon) return NextResponse.json({ error: "Notification add-on not found." }, { status: 404 });
+    if (!addon) return NextResponse.json({ error: "Saved-search exposure add-on not found." }, { status: 404 });
     const ownerId = String(addon.owner_id || "");
     const active = action === "confirm_paid";
     await sql!.query(`
@@ -88,15 +88,15 @@ export async function PATCH(request: Request) {
     `, [
       `notification-${randomUUID()}`,
       ownerId,
-      active ? "房源提醒已开通" : action === "refund" ? "房源提醒已停止" : "房源提醒申请已取消",
-      active ? "Listing alerts are active" : action === "refund" ? "Listing alerts were stopped" : "Listing alert request cancelled",
-      active ? "付款已确认，你的房源现在可以接收咨询、申请和到期提醒。" : action === "refund" ? "这项房源提醒已停止；如需重新开通，请再次申请。" : "这项房源提醒申请没有被开通。",
-      active ? "Payment was confirmed. This listing can now receive inquiry, application, and expiration alerts." : action === "refund" ? "These listing alerts were stopped. Request them again if needed." : "This listing alert request was not activated.",
+      active ? "保存搜索曝光已开通" : action === "refund" ? "保存搜索曝光已停止" : "保存搜索曝光申请已取消",
+      active ? "Saved-search exposure is active" : action === "refund" ? "Saved-search exposure was stopped" : "Saved-search exposure request cancelled",
+      active ? "付款已确认，匹配这套房源的保存搜索用户现在可以收到房源提醒。" : action === "refund" ? "这项保存搜索曝光已停止；如需重新开通，请再次申请。" : "这项保存搜索曝光申请没有被开通。",
+      active ? "Payment was confirmed. Matching saved-search users can now receive an alert for this listing." : action === "refund" ? "This saved-search exposure was stopped. Request it again if needed." : "This saved-search exposure request was not activated.",
     ]);
     await recordAuditEventSafely({ request, eventType: "listing_notification_addon.update", user: context.user, metadata: { listingId, action, paymentReference } });
     const joinedRows = await sql!.query(`${rowsQuery} WHERE a.listing_id = $1 LIMIT 1`, [listingId]);
     return NextResponse.json({ addon: joinedRows[0] ? responseFromRow(joinedRows[0] as Record<string, unknown>) : addon });
   } catch {
-    return NextResponse.json({ error: "Notification add-on status could not be updated right now." }, { status: 502 });
+    return NextResponse.json({ error: "Saved-search exposure status could not be updated right now." }, { status: 502 });
   }
 }

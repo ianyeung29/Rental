@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { getCurrentUser } from "../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { emailIsConfigured, sendApplicationNotification, sendApplicationStatusUpdate } from "../../lib/email";
-import { hasActiveListingNotificationAddon } from "../../lib/listing-notification-addon";
 import { emailAlertsAllowed } from "../../lib/notification-preferences";
 import { sendPushToUser } from "../../lib/push";
 import { isExactOccupantCount } from "../../lib/renter-options";
@@ -156,12 +155,6 @@ export async function POST(request: Request) {
     await ensureDatabaseSchema();
     const listingRows = await context.db.query(`
       SELECT l.id, l.owner_id, l.title_zh, l.title_en, l.area_zh, l.area_en,
-             EXISTS (
-               SELECT 1 FROM rental_listing_notification_addons addon
-               WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
-                 AND addon.status = 'active' AND addon.payment_status = 'paid'
-                 AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
-             ) AS owner_notification_addon_active,
              owner.display_name AS owner_name, owner.email AS owner_email,
              pd.contact_name, pd.contact_email
       FROM rental_listings l
@@ -231,8 +224,7 @@ export async function POST(request: Request) {
       INSERT INTO rental_application_events (id, application_id, actor_id, actor_role, status, note)
       VALUES ($1, $2, $3, 'renter', 'submitted', '')
     `, [`application-event-${randomUUID()}`, savedId, context.user.id]);
-    const ownerNotificationAddonActive = Boolean(listing.owner_notification_addon_active) || await hasActiveListingNotificationAddon(listingId, String(listing.owner_id || ""));
-    if (listing.owner_id && String(listing.owner_id) !== context.user.id && ownerNotificationAddonActive) {
+    if (listing.owner_id && String(listing.owner_id) !== context.user.id) {
       await context.db.query(`
         INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
         VALUES ($1, $2, 'application', '收到新的租赁申请', 'New rental application', $3, $4, '/#messages')
@@ -250,7 +242,7 @@ export async function POST(request: Request) {
     let confirmationSent = false;
     if (emailIsConfigured()) {
       const ownerEmail = String(listing.contact_email || listing.owner_email || "");
-      if (ownerNotificationAddonActive && await emailAlertsAllowed(String(listing.owner_id || ""), "inquiry_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
+      if (await emailAlertsAllowed(String(listing.owner_id || ""), "inquiry_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
         try {
           await sendApplicationNotification({
             recipientEmail: ownerEmail,

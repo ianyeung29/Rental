@@ -11,8 +11,8 @@ async function verifiedOwner() {
   } catch {
     return { error: NextResponse.json({ error: "Account authentication is unavailable right now." }, { status: 502 }) };
   }
-  if (!user) return { error: NextResponse.json({ error: "Sign in to manage listing alert add-ons." }, { status: 401 }) };
-  if (!user.emailVerified) return { error: NextResponse.json({ error: "Verify your email before managing listing alert add-ons." }, { status: 403 }) };
+  if (!user) return { error: NextResponse.json({ error: "Sign in to manage saved-search exposure add-ons." }, { status: 401 }) };
+  if (!user.emailVerified) return { error: NextResponse.json({ error: "Verify your email before managing saved-search exposure add-ons." }, { status: 403 }) };
   if (!sql) return { error: NextResponse.json({ error: "DATABASE_URL is not configured on the server yet." }, { status: 503 }) };
   return { user };
 }
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       LIMIT 1
     `, [listingId, context.user.id]);
     const listing = listingRows[0] as Record<string, unknown> | undefined;
-    if (!listing) return NextResponse.json({ error: "Only your published or paused listings can use owner alerts." }, { status: 404 });
+    if (!listing) return NextResponse.json({ error: "Only your published or paused listings can use saved-search exposure." }, { status: 404 });
 
     const existingRows = await sql!.query(`
       SELECT a.listing_id, a.owner_id, a.status, a.payment_status, a.price_cents, a.payment_reference,

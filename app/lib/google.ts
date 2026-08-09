@@ -4,6 +4,8 @@ import { AccountType, normalizeAccountType } from "./account-types";
 
 export const GOOGLE_STATE_COOKIE = "google_oauth_state";
 export const GOOGLE_ACCOUNT_TYPE_COOKIE = "google_account_type";
+export const GOOGLE_NATIVE_REDIRECT_COOKIE = "google_native_redirect";
+export const GOOGLE_NATIVE_REDIRECT_URI = "com.anjurentals.app://auth/callback";
 
 class GoogleConfigError extends Error {
   status = 503;
@@ -103,6 +105,33 @@ export function clearGoogleAccountTypeCookie(response: Response) {
   const mutableResponse = response as Response & { cookies?: { set: (options: Record<string, unknown>) => void } };
   mutableResponse.cookies?.set({
     name: GOOGLE_ACCOUNT_TYPE_COOKIE,
+    value: "",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+}
+
+export function setGoogleNativeRedirectCookie(response: Response, redirectUri: string) {
+  if (redirectUri !== GOOGLE_NATIVE_REDIRECT_URI) return;
+  const mutableResponse = response as Response & { cookies?: { set: (options: Record<string, unknown>) => void } };
+  mutableResponse.cookies?.set({
+    name: GOOGLE_NATIVE_REDIRECT_COOKIE,
+    value: redirectUri,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 600,
+  });
+}
+
+export function clearGoogleNativeRedirectCookie(response: Response) {
+  const mutableResponse = response as Response & { cookies?: { set: (options: Record<string, unknown>) => void } };
+  mutableResponse.cookies?.set({
+    name: GOOGLE_NATIVE_REDIRECT_COOKIE,
     value: "",
     httpOnly: true,
     sameSite: "lax",

@@ -6,8 +6,8 @@ import { getCurrentUser } from "../../lib/auth";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "房源提醒 · 安居",
-  description: "安居管理员确认房源提醒增值功能的付款状态。",
+  title: "保存搜索曝光 · 安居",
+  description: "安居管理员确认保存搜索曝光增值功能的付款状态。",
   robots: { index: false, follow: false },
 };
 

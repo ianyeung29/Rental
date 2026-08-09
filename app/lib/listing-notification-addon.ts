@@ -45,7 +45,7 @@ export function addonFromRow(row?: Record<string, unknown>): ListingNotification
   };
 }
 
-export async function hasActiveListingNotificationAddon(listingId: string, ownerId: string) {
+export async function hasActiveSavedSearchExposure(listingId: string, ownerId: string) {
   if (!sql || !listingId || !ownerId) return false;
   try {
     const rows = await sql.query(`

@@ -15,12 +15,6 @@ export async function GET(request: Request) {
     const rows = await sql.query(`
       SELECT i.id, i.tour_scheduled_at, i.tour_timezone, i.tour_note,
              l.title_zh, l.title_en,
-             EXISTS (
-               SELECT 1 FROM rental_listing_notification_addons addon
-               WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
-                 AND addon.status = 'active' AND addon.payment_status = 'paid'
-                 AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
-             ) AS owner_notification_addon_active,
              requester.id AS requester_id, requester.display_name AS requester_name, requester.email AS requester_email,
              owner.id AS owner_id, owner.display_name AS owner_name, owner.email AS owner_email
       FROM rental_inquiries i
@@ -48,7 +42,6 @@ export async function GET(request: Request) {
         { id: String(row.owner_id || ""), name: String(row.owner_name || "房源发布者"), email: String(row.owner_email || ""), title: listingTitleEn, isOwner: true },
       ].filter((recipient, index, list) => recipient.id && list.findIndex((item) => item.id === recipient.id) === index);
       for (const recipient of recipients) {
-        if (recipient.isOwner && !Boolean(row.owner_notification_addon_active)) continue;
         await sql.query(`
           INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
           VALUES ($1, $2, 'tourReminder', '看房提醒', 'Tour reminder', $3, $4, '/#messages')
