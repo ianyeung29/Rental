@@ -78,6 +78,13 @@ export function isChineseOrAsianMarket(place: LocationRulePlace) {
   return hasCjkMarketMarker || ASIAN_MARKET_NAME_MARKERS.some((marker) => name.includes(marker) || normalizedName.includes(placeNameKey(marker)));
 }
 
+export function selectSupermarketCandidate<T extends LocationRulePlace>(places: T[]) {
+  const preferred = places.find(isChineseOrAsianMarket);
+  if (preferred) return { place: preferred, classification: "asian" as const };
+  const fallback = places[0];
+  return fallback ? { place: fallback, classification: "regular" as const } : null;
+}
+
 export function uniqueNamedPlaces<T extends { name: string }>(places: T[]) {
   const seen = new Set<string>();
   return places.filter((place) => {

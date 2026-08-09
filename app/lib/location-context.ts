@@ -12,6 +12,7 @@ import {
   isChineseOrAsianMarket as ruleIsChineseOrAsianMarket,
   isLongIslandHighway as ruleIsLongIslandHighway,
   placeNameKey as rulePlaceNameKey,
+  selectSupermarketCandidate as ruleSelectSupermarketCandidate,
   selectUrbanTransitPlaces,
   transitLineTypes as ruleTransitLineTypes,
   transitRegion as ruleTransitRegion,
@@ -142,6 +143,14 @@ type NearbyDefinition = {
   categoryZh: string;
   categoryEn: string;
   includedType: string;
+};
+
+type NearbyLookupResult = {
+  option: Exclude<LocationLookupOption, "transit" | "community">;
+  place: PlaceResult | null;
+  attempted: boolean;
+  rejectedCandidates: number;
+  supermarketClassification?: "asian" | "regular";
 };
 
 type CommunityDefinition = {
@@ -540,7 +549,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   }
 
   const lookupSettings = await currentLocationLookupSettings();
-  const cacheKey = JSON.stringify({ version: 10, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, lookupSettings: { placesCallsPerLookup: lookupSettings.placesCallsPerLookup, routeCallsPerLookup: lookupSettings.routeCallsPerLookup }, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
+  const cacheKey = JSON.stringify({ version: 11, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, lookupSettings: { placesCallsPerLookup: lookupSettings.placesCallsPerLookup, routeCallsPerLookup: lookupSettings.routeCallsPerLookup }, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
   const cached = contextCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     reportUsage({ placesCalls: 0, routeCalls: 0, cacheHit: true });
@@ -624,28 +633,40 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     }
   }
   const nearbyOptions = lookupOptions.filter((option): option is Exclude<LocationLookupOption, "transit" | "community"> => option !== "transit" && option !== "community");
-  const nearbyResults = await Promise.all(nearbyOptions.map(async (option) => {
+  const nearbyResults: NearbyLookupResult[] = await Promise.all(nearbyOptions.map(async (option) => {
     const definition = nearbyDefinitions[option];
     const placesBeforeLookup = budget.placesCalls;
     let places = await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery(definition.query, routeOriginQuery), pageSize: option === "grocery" ? 10 : 1, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget);
     let rejectedCandidates = 0;
     if (option === "grocery") {
-      let place = places.find(isChineseOrAsianMarket) || null;
+      const firstSelection = ruleSelectSupermarketCandidate(places);
+      let place = firstSelection?.place || null;
+      let supermarketClassification: NearbyLookupResult["supermarketClassification"] = firstSelection?.classification;
       rejectedCandidates += place ? 0 : places.length;
       if (!place) {
-        places = await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery("Asian grocery store", routeOriginQuery), pageSize: 10, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget);
-        place = places.find(isChineseOrAsianMarket) || null;
-        rejectedCandidates += place ? 0 : places.length;
+        // If Google cannot verify that a result is Chinese or Asian, keep the
+        // nearest candidate as an explicitly labeled regular supermarket.
+        place = places[0] || null;
+        supermarketClassification = place ? "regular" : undefined;
+      }
+      if (!place && budget.placesCalls < budget.placesLimit) {
+        places = await searchPlacesWithinBudget(apiKey, { textQuery: nearbyQuery("supermarket grocery store", routeOriginQuery), pageSize: 10, includedType: definition.includedType, strictTypeFiltering: true, rankPreference: "DISTANCE" }, languageCode, budget);
+        const fallbackSelection = ruleSelectSupermarketCandidate(places);
+        place = fallbackSelection?.place || null;
+        supermarketClassification = fallbackSelection?.classification;
       }
       const attempted = budget.placesCalls > placesBeforeLookup;
       if (!place && attempted) placesQualityIssues += 1;
-      if (rejectedCandidates > 0) {
+      if (supermarketClassification === "regular") {
+        placesQualityIssues += 1;
+        addRejectionReason("generic-supermarket-fallback");
+      } else if (rejectedCandidates > 0) {
         placesQualityIssues += Math.min(2, rejectedCandidates);
         addRejectionReason("non-matching-supermarket-candidate");
       } else if (!place) {
         addRejectionReason(attempted ? "grocery-place-not-found" : "grocery-place-budget-exhausted");
       }
-      return { option, place, attempted, rejectedCandidates };
+      return { option, place, attempted, rejectedCandidates, supermarketClassification };
     }
     const place = places[0] || null;
     const attempted = budget.placesCalls > placesBeforeLookup;
@@ -689,10 +710,13 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
       });
     })()
     : Promise.resolve(null);
-  const nearbyCandidates = nearbyResults.flatMap(({ option, place }) => {
+  const nearbyCandidates = nearbyResults.flatMap(({ option, place, supermarketClassification }) => {
     if (!place) return [];
     const definition = nearbyDefinitions[option];
-    return [{ name: place.name, category: locale === "zh" ? definition.categoryZh : definition.categoryEn }];
+    const category = option === "grocery" && supermarketClassification === "regular"
+      ? (locale === "zh" ? "\u666e\u901a\u8d85\u5e02" : "Regular supermarket")
+      : (locale === "zh" ? definition.categoryZh : definition.categoryEn);
+    return [{ name: place.name, category }];
   });
 
   const highwayPlacesBeforeLookup = budget.placesCalls;
@@ -705,7 +729,12 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     placesQualityIssues += 1;
     addRejectionReason(highwayAttempted ? "highway-place-not-found" : "highway-place-budget-exhausted");
   }
-  const groceryPlace = nearbyResults.find((result) => result.option === "grocery")?.place;
+  const groceryLookup = nearbyResults.find((result) => result.option === "grocery");
+  const groceryPlace = groceryLookup?.place;
+  const groceryIsGenericFallback = groceryLookup?.supermarketClassification === "regular";
+  const groceryCategory = groceryIsGenericFallback
+    ? (locale === "zh" ? "\u666e\u901a\u8d85\u5e02" : "Regular supermarket")
+    : (locale === "zh" ? nearbyDefinitions.grocery.categoryZh : nearbyDefinitions.grocery.categoryEn);
   const groceryRoutePlanned = Boolean(groceryPlace?.coordinates && (region !== "longIsland" || !lookupOptions.includes("transit") || !highwayPlace));
   const routeJobs: Array<{ place: PlaceResult; name: string; category: string; mode: "drive" | "walk" | "transit"; travelMode: "DRIVE" | "WALK" | "TRANSIT" }> = [];
   if (region === "longIsland" && highwayPlace?.coordinates) {
@@ -715,7 +744,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   // Places text endpoint can return a well-known market that matches the
   // query but is not actually close to the private listing address.
   if (groceryRoutePlanned && groceryPlace) {
-    routeJobs.push({ place: groceryPlace, name: groceryPlace.name, category: locale === "zh" ? nearbyDefinitions.grocery.categoryZh : nearbyDefinitions.grocery.categoryEn, mode: "walk", travelMode: "WALK" });
+    routeJobs.push({ place: groceryPlace, name: groceryPlace.name, category: groceryCategory, mode: "walk", travelMode: "WALK" });
   }
   if (region !== "longIsland" && community && communityPlace?.coordinates) {
     routeJobs.push({ place: communityPlace, name: communityPlace.name, category: locale === "zh" ? community.categoryZh : community.categoryEn, mode: "transit", travelMode: "TRANSIT" });
@@ -767,15 +796,25 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   const transitResults = [transitResult, await secondaryTransitResult].filter((result): result is LocationContextTransit => Boolean(result));
   const hasFacts = nearby.length > 0 || transitResults.length > 0 || destinations.length > 0;
   const groceryFound = Boolean(groceryDestination);
-  const groceryAttempted = nearbyResults.find((result) => result.option === "grocery")?.attempted ?? false;
-  const groceryNote = lookupOptions.includes("grocery") && !groceryFound
-    ? !groceryAttempted
-      ? (locale === "zh" ? "中文 / 亚洲超市查询达到本次地图调用上限；普通超市不会被标注为中文超市。" : "The Chinese / Asian supermarket lookup reached this map lookup's call limit; generic supermarkets are not labeled as Chinese supermarkets.")
-      : groceryPlace && !groceryRoutePlanned
-        ? (locale === "zh" ? "找到了候选中文 / 亚洲超市，但本次路线预算无法确认它距房源足够近；因此没有把它显示为附近超市。" : "A candidate Chinese / Asian supermarket was found, but the route budget could not confirm that it is near the listing, so it was not shown as a nearby supermarket.")
-        : groceryPlace
-          ? (locale === "zh" ? "没有找到距房源约 45 分钟步行以内的可验证中文 / 亚洲超市；普通超市不会被标注为中文超市。" : "No verifiable Chinese or Asian supermarket was found within about a 45-minute walk of the listing; generic supermarkets are not labeled as Chinese supermarkets.")
-      : (locale === "zh" ? "未找到可验证的中文 / 亚洲超市；普通超市不会被标注为中文超市。" : "No verifiable Chinese or Asian supermarket was found; generic supermarkets are not labeled as Chinese supermarkets.")
+  const groceryAttempted = groceryLookup?.attempted ?? false;
+  const groceryNote = lookupOptions.includes("grocery")
+    ? groceryIsGenericFallback
+      ? groceryFound
+        ? (locale === "zh" ? "地图无法验证该地点为中文 / 亚洲超市，已按普通超市显示；发布前请自行核实店铺类型。" : "The map result could not be verified as Chinese or Asian, so it is shown as a regular supermarket; verify the store type before publishing.")
+        : groceryPlace && !groceryRoutePlanned
+          ? (locale === "zh" ? "已找到普通超市候选，但本次路线预算未确认到房源的步行时间；发布前请自行核实。" : "A regular supermarket candidate was found, but the route budget could not verify its walking time from the listing; verify it before publishing.")
+          : groceryPlace
+            ? (locale === "zh" ? "未能验证为中文 / 亚洲超市，普通超市候选也未能在约 45 分钟步行内确认。" : "The candidate could not be verified as Chinese or Asian, and the regular supermarket fallback could not be confirmed within about a 45-minute walk.")
+            : (locale === "zh" ? "未找到可验证的中文 / 亚洲超市或普通超市。" : "No verifiable Chinese, Asian, or regular supermarket was found.")
+      : !groceryFound
+        ? !groceryAttempted
+          ? (locale === "zh" ? "中文 / 亚洲超市查询达到本次地图调用上限；普通超市备选也没有返回可验证结果。" : "The supermarket lookup reached this map lookup's call limit before a verifiable result was returned.")
+          : groceryPlace && !groceryRoutePlanned
+            ? (locale === "zh" ? "找到了超市候选，但本次路线预算无法确认它距房源足够近；因此没有把它显示为附近超市。" : "A supermarket candidate was found, but the route budget could not confirm that it is near the listing, so it was not shown as nearby.")
+            : groceryPlace
+              ? (locale === "zh" ? "没有找到距房源约 45 分钟步行以内的可验证中文 / 亚洲超市；已尝试普通超市备选。" : "No verifiable Chinese or Asian supermarket was found within about a 45-minute walk; a regular supermarket fallback was also attempted.")
+              : (locale === "zh" ? "未找到可验证的中文 / 亚洲超市或普通超市。" : "No verifiable Chinese, Asian, or regular supermarket was found.")
+        : ""
     : "";
   const transitNote = lookupOptions.includes("transit") && !transitResults.length
     ? region === "urban"

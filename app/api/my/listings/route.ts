@@ -71,6 +71,7 @@ function ownerListing(row: Record<string, unknown>) {
     status: String(row.status || "published"),
     expiresOn: dateOnly(row.expires_on),
     publishedAt: row.published_at instanceof Date ? row.published_at.toISOString() : row.published_at ? String(row.published_at) : null,
+    availabilityConfirmedAt: row.availability_confirmed_at instanceof Date ? row.availability_confirmed_at.toISOString() : row.availability_confirmed_at ? String(row.availability_confirmed_at) : null,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at || ""),
   };
 }
@@ -90,7 +91,7 @@ export async function GET() {
       SELECT
         l.id, l.title_zh, l.title_en, l.area_zh, l.area_en, l.rental_type, l.price,
         l.bedrooms, l.bathrooms, l.square_feet, l.move_in, l.lease, l.features, l.tags_zh, l.tags_en,
-        l.description_zh, l.description_en, l.poster_role, l.status, l.moderation_status, l.moderation_note, l.expires_on, l.published_at, l.created_at,
+        l.description_zh, l.description_en, l.poster_role, l.status, l.moderation_status, l.moderation_note, l.expires_on, l.published_at, l.availability_confirmed_at, l.created_at,
         p.private_address, p.contact_name, p.contact_email, p.tour_preference,
         p.agent_service, p.agent_fee_plan, p.agent_fee_amount, p.agent_profile_id,
         a.display_name_zh AS agent_profile_name_zh, a.display_name_en AS agent_profile_name_en,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { getCurrentUser } from "../../../lib/auth";
 import { emailIsConfigured, sendAgentRequestResponse } from "../../../lib/email";
+import { hasActiveListingNotificationAddon } from "../../../lib/listing-notification-addon";
 import { emailAlertsAllowed } from "../../../lib/notification-preferences";
 
 const MAX_BODY_LENGTH = 2_000;
@@ -46,6 +47,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const requestRows = await sql.query(`
       SELECT ar.id, ar.listing_id, ar.owner_id, ar.fee_plan, ar.fee_amount, ar.status,
              l.title_zh, l.title_en, l.area_zh, l.area_en,
+             EXISTS (
+               SELECT 1 FROM rental_listing_notification_addons addon
+               WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
+                 AND addon.status = 'active' AND addon.payment_status = 'paid'
+                 AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
+             ) AS owner_notification_addon_active,
              owner.display_name AS owner_name, owner.email AS owner_email,
              ap.display_name_zh AS agent_profile_name_zh, ap.display_name_en AS agent_profile_name_en
       FROM rental_agent_requests ar
@@ -68,7 +75,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     let notificationSent = false;
     const ownerEmail = String(agentRequest.owner_email || "");
-    if (emailIsConfigured() && await emailAlertsAllowed(String(agentRequest.owner_id || ""), "agent_response_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
+    const ownerNotificationAddonActive = Boolean(agentRequest.owner_notification_addon_active) || await hasActiveListingNotificationAddon(String(agentRequest.listing_id || ""), String(agentRequest.owner_id || ""));
+    if (emailIsConfigured() && ownerNotificationAddonActive && await emailAlertsAllowed(String(agentRequest.owner_id || ""), "agent_response_alerts") && ownerEmail && !ownerEmail.endsWith(".invalid")) {
       try {
         await sendAgentRequestResponse({
           recipientEmail: ownerEmail,

@@ -13,6 +13,7 @@ This is a browser-first MVP slice of the Chinese-first North American rental mar
 - Save listings, searches, and posting drafts with browser persistence plus Neon sync for verified signed-in users.
 - Anonymous or unverified users keep a browser-local fallback; verified accounts can carry saved listings, searches, drafts, and inquiries across devices.
 - Compare up to two listings in a side-by-side view with bedrooms, bathrooms, feature tags, and a balanced AI conclusion; a labeled local comparison remains available when AI is not configured.
+- Verified renters can save a reusable application profile, choose which optional details to share for each application, and track application status history. This phase does not collect identity, credit, or income documents.
 - Listing detail drawer, structured inquiry flow, and a Messages view that combines local preview records with Neon-backed inquiries.
 - Phase 2 renter assistance includes a grounded bilingual inquiry-writing helper and a cached commute estimator for drive, public-transit, and walking routes from the public approximate area. Public-transit results show returned bus/subway/rail line numbers when available.
 - Five-step poster workflow with autosaved and explicitly savable drafts, private exact-address input, rental terms, photo compression, cover-photo ordering, preview, validation, and cloud publish.
@@ -52,7 +53,7 @@ npm run db:seed
 
 The seed creates four clearly labeled sample listings, their private demo details, and local demo-image metadata. It is safe to run again; it does not create user accounts or real rental inventory.
 
-The database bootstrap applies the listing lifecycle, Phase 1 security/usage tables, PWA notification tables, address-reveal tables, and audit-log tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql`, `db/migrations/017_phase_one_security_usage.sql`, `db/migrations/018_pwa_retention.sql`, `db/migrations/019_address_reveal.sql`, and `db/migrations/020_audit_logs.sql` after the earlier migration files.
+The database bootstrap applies the listing lifecycle, Phase 1 security/usage tables, PWA notification tables, address-reveal tables, audit-log tables, renter application privacy/history tables, and owner operations tables automatically. If you run migrations manually, apply `db/migrations/005_listing_lifecycle.sql`, `db/migrations/017_phase_one_security_usage.sql`, `db/migrations/018_pwa_retention.sql`, `db/migrations/019_address_reveal.sql`, `db/migrations/020_audit_logs.sql`, `db/migrations/025_renter_application_privacy.sql`, and `db/migrations/026_owner_operations.sql` after the earlier migration files.
 
 To load synthetic agent profiles for testing the owner’s agent-selection flow:
 

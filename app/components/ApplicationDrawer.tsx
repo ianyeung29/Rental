@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { exactOccupantOrDefault, OCCUPANT_OPTIONS } from "../lib/renter-options";
+import { DEFAULT_RENTER_PROFILE_SHARING, normalizeRenterProfileSharing, type RenterProfileShareOptions } from "../lib/renter-application";
 import { useDialogA11y } from "../lib/use-dialog-a11y";
 
 type Locale = "zh" | "en";
@@ -17,7 +18,7 @@ export type ApplicationFormValues = {
   employmentStatus: string;
   incomeRange: string;
   message: string;
-};
+} & RenterProfileShareOptions;
 
 type ApplicationDrawerProps = {
   locale: Locale;
@@ -41,6 +42,7 @@ const defaultValues = (profileDefaults: ApplicationDrawerProps["profileDefaults"
   employmentStatus: "employed",
   incomeRange: "preferNotToSay",
   message: "",
+  ...DEFAULT_RENTER_PROFILE_SHARING,
 });
 
 function CloseIcon() {
@@ -68,7 +70,7 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
         const result = await response.json() as { profile?: Partial<ApplicationFormValues> & { householdSize?: string } };
         if (!cancelled && result.profile) {
           const savedOccupants = result.profile.occupants ?? result.profile.householdSize;
-          setValues((current) => ({ ...current, ...result.profile, occupants: exactOccupantOrDefault(savedOccupants ?? current.occupants) }));
+          setValues((current) => ({ ...current, ...result.profile, ...normalizeRenterProfileSharing(result.profile), occupants: exactOccupantOrDefault(savedOccupants ?? current.occupants) }));
         }
       })
       .catch(() => undefined)
@@ -100,6 +102,9 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
           pets: values.pets,
           moveIn: values.moveIn,
           leaseLength: values.leaseLength,
+          shareCurrentCity: values.shareCurrentCity,
+          shareEmployment: values.shareEmployment,
+          shareIncome: values.shareIncome,
         }),
       });
       const result = await response.json().catch(() => ({})) as { error?: string };
@@ -138,6 +143,13 @@ export default function ApplicationDrawer({ locale, listingTitle, listingArea, p
             <div className="application-form-intro"><strong>{zh ? "基本资料" : "Your details"}</strong>{profileLoading ? <span>{zh ? "正在读取已保存资料…" : "Loading saved profile…"}</span> : <span>{zh ? "下次申请可直接复用" : "Reusable for your next application"}</span>}</div>
             <div className="application-profile-save-row"><span>{zh ? "想稍后再申请？可以先保存这些资料。" : "Applying later? Save these details now."}</span><button className="outline-button" type="button" onClick={() => { void saveProfileForReuse(); }} disabled={profileSaving || loading}>{profileSaving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存申请资料" : "Save profile")}</button></div>
             {profileSaveMessage && <p className="verification-success application-profile-save-message" role="status">{profileSaveMessage}</p>}
+            <fieldset className="application-sharing-controls application-sharing-controls-drawer">
+              <legend>{zh ? "这次申请发送哪些可选资料？" : "What optional details should this application share?"}</legend>
+              <p>{zh ? "姓名、电话和入住安排用于本次申请。下面的选项由你决定，未勾选的资料不会发送给房主或经纪。" : "Your name, phone, and rental plans are used for this application. You choose the optional details below; unchecked fields are not sent to the owner or agent."}</p>
+              <label className="application-share-option"><input type="checkbox" checked={values.shareCurrentCity} onChange={(event) => setValue("shareCurrentCity", event.target.checked)} /><span><strong>{zh ? "目前所在城市" : "Current city"}</strong><small>{values.currentCity.trim() ? (zh ? "只分享城市或行政区。" : "Shares only the city or borough.") : (zh ? "填写城市后才会发送；空白时自动不发送。" : "It is sent only when a city is entered; blank stays private.")}</small></span></label>
+              <label className="application-share-option"><input type="checkbox" checked={values.shareEmployment} onChange={(event) => setValue("shareEmployment", event.target.checked)} /><span><strong>{zh ? "工作情况" : "Employment status"}</strong><small>{zh ? "可帮助房主了解基本申请背景。" : "Can help the owner understand basic application context."}</small></span></label>
+              <label className="application-share-option"><input type="checkbox" checked={values.shareIncome} onChange={(event) => setValue("shareIncome", event.target.checked)} /><span><strong>{zh ? "月收入范围" : "Monthly income range"}</strong><small>{zh ? "只分享范围，不上传收入证明。" : "Shares only a range; no income documents are uploaded."}</small></span></label>
+            </fieldset>
             <div className="form-row"><label className="field-label"><span>{zh ? "称呼" : "Preferred name"}</span><input value={values.preferredName} onChange={(event) => setValue("preferredName", event.target.value)} maxLength={100} required /></label><label className="field-label"><span>{zh ? "联系电话" : "Phone"}</span><input value={values.phone} onChange={(event) => setValue("phone", event.target.value)} maxLength={40} required /></label></div>
             <label className="field-label"><span>{zh ? "目前所在城市（可选）" : "Current city (optional)"}</span><input value={values.currentCity} onChange={(event) => setValue("currentCity", event.target.value)} maxLength={100} placeholder={zh ? "例如：皇后区" : "Example: Queens"} /></label>
             <div className="form-row"><label className="field-label"><span>{zh ? "预计入住" : "Move-in"}</span><select value={values.moveIn} onChange={(event) => setValue("moveIn", event.target.value)}><option value="immediate">{zh ? "立即入住" : "Move in immediately"}</option><option value="august">{zh ? "2026年8月" : "Aug 2026"}</option><option value="september">{zh ? "2026年9月" : "Sep 2026"}</option><option value="october">{zh ? "2026年10月" : "Oct 2026"}</option></select></label><label className="field-label"><span>{zh ? "预计租期" : "Lease length"}</span><select value={values.leaseLength} onChange={(event) => setValue("leaseLength", event.target.value)}><option value="6">{zh ? "6个月" : "6 months"}</option><option value="12">{zh ? "12个月" : "12 months"}</option><option value="24">{zh ? "24个月以上" : "24+ months"}</option><option value="undefined">{zh ? "未确定" : "Undefined"}</option></select></label></div>

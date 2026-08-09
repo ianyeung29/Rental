@@ -4,9 +4,11 @@ import { getCurrentUser } from "../../lib/auth";
 import { recordAuditEventSafely } from "../../lib/audit";
 import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { emailIsConfigured, sendInquiryConfirmation, sendInquiryNotification } from "../../lib/email";
+import { hasActiveListingNotificationAddon } from "../../lib/listing-notification-addon";
 import { emailAlertsAllowed } from "../../lib/notification-preferences";
 import { sendPushToUser } from "../../lib/push";
 import { isExactOccupantCount } from "../../lib/renter-options";
+import { isTourRequestWindow } from "../../lib/inquiry-options";
 
 const MAX_BODY_LENGTH = 4_000;
 
@@ -20,6 +22,11 @@ function dateTime(value: unknown) {
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
 }
 
+function dateOnly(value: unknown) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return typeof value === "string" && value ? value.slice(0, 10) : null;
+}
+
 function inquiryFromRow(row: Record<string, unknown>, received: boolean) {
   return {
     id: String(row.id),
@@ -31,6 +38,8 @@ function inquiryFromRow(row: Record<string, unknown>, received: boolean) {
     occupants: String(row.occupants || ""),
     pets: String(row.pets || ""),
     tourPreference: String(row.tour_preference || ""),
+    tourRequestedDate: dateOnly(row.tour_requested_date),
+    tourRequestedWindow: String(row.tour_requested_window || "any"),
     tourScheduledAt: dateTime(row.tour_scheduled_at),
     tourTimeZone: String(row.tour_timezone || "UTC"),
     tourNote: String(row.tour_note || ""),
@@ -62,7 +71,7 @@ export async function GET(request: Request) {
     const rows = received
       ? await sql.query(`
           SELECT i.id, i.listing_id, i.move_in, i.lease_length, i.occupants, i.pets,
-                 i.tour_preference, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.address_reveal_status, i.address_revealed_at, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at,
+                 i.tour_preference, i.tour_requested_date, i.tour_requested_window, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.address_reveal_status, i.address_revealed_at, i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at,
                  l.title_zh, l.title_en, u.display_name AS requester_name, u.email AS requester_email
           FROM rental_inquiries i
           JOIN rental_listings l ON l.id = i.listing_id
@@ -72,7 +81,7 @@ export async function GET(request: Request) {
         `, [user.id])
       : await sql.query(`
           SELECT i.id, i.listing_id, i.move_in, i.lease_length, i.occupants, i.pets,
-                 i.tour_preference, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.address_reveal_status, i.address_revealed_at,
+                 i.tour_preference, i.tour_requested_date, i.tour_requested_window, i.tour_scheduled_at, i.tour_timezone, i.tour_note, i.address_reveal_status, i.address_revealed_at,
                  CASE WHEN i.address_reveal_status = 'revealed' THEN pd.private_address ELSE '' END AS revealed_address,
                  i.message, i.status, i.owner_read_at, i.requester_read_at, i.created_at, l.title_zh, l.title_en
           FROM rental_inquiries i
@@ -107,12 +116,21 @@ export async function POST(request: Request) {
     const occupants = text(body.occupants, 20);
     const pets = text(body.pets, 40);
     const tourPreference = text(body.tourPreference, 40);
+    const tourRequestedDate = text(body.tourRequestedDate, 10);
+    const tourRequestedWindow = isTourRequestWindow(body.tourRequestedWindow) ? body.tourRequestedWindow : "any";
     const message = text(body.message, 1_000);
     if (!listingId || !moveIn || !leaseLength || !occupants || !pets || !tourPreference) return NextResponse.json({ error: "Complete the inquiry details first." }, { status: 400 });
     if (!isExactOccupantCount(occupants)) return NextResponse.json({ error: "Choose the exact number of occupants." }, { status: 400 });
+    if (tourRequestedDate && (!/^\d{4}-\d{2}-\d{2}$/.test(tourRequestedDate) || tourRequestedDate < new Date().toISOString().slice(0, 10))) return NextResponse.json({ error: "Choose today or a future preferred tour date." }, { status: 400 });
     await ensureDatabaseSchema();
     const listingRows = await sql.query(`
-      SELECT l.id, l.owner_id, l.title_zh, l.title_en, pd.contact_name, pd.contact_email
+      SELECT l.id, l.owner_id, l.title_zh, l.title_en, pd.contact_name, pd.contact_email,
+             EXISTS (
+               SELECT 1 FROM rental_listing_notification_addons addon
+               WHERE addon.listing_id = l.id AND addon.owner_id = l.owner_id
+                 AND addon.status = 'active' AND addon.payment_status = 'paid'
+                 AND (addon.expires_at IS NULL OR addon.expires_at >= CURRENT_DATE)
+             ) AS owner_notification_addon_active
       FROM rental_listings l
       LEFT JOIN rental_listing_private_details pd ON pd.listing_id = l.id
       WHERE l.id = $1 AND l.status = 'published' AND l.moderation_status = 'approved' AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
@@ -123,11 +141,12 @@ export async function POST(request: Request) {
     if (String(listing.owner_id || "") === user.id) return NextResponse.json({ error: "You cannot inquire about your own listing." }, { status: 400 });
     const id = `inquiry-${randomUUID()}`;
     await sql.query(`
-      INSERT INTO rental_inquiries (id, listing_id, requester_id, move_in, lease_length, occupants, pets, tour_preference, message)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-    `, [id, listingId, user.id, moveIn, leaseLength, occupants, pets, tourPreference, message]);
+      INSERT INTO rental_inquiries (id, listing_id, requester_id, move_in, lease_length, occupants, pets, tour_preference, tour_requested_date, tour_requested_window, message)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::date, $10, $11)
+    `, [id, listingId, user.id, moveIn, leaseLength, occupants, pets, tourPreference, tourRequestedDate, tourRequestedWindow, message]);
     await recordAuditEventSafely({ request, eventType: "inquiry.create", user, metadata: { inquiryId: id, listingId, tourPreference } });
-    if (listing.owner_id && String(listing.owner_id) !== user.id) {
+    const ownerNotificationAddonActive = Boolean(listing.owner_notification_addon_active) || await hasActiveListingNotificationAddon(listingId, String(listing.owner_id || ""));
+    if (listing.owner_id && String(listing.owner_id) !== user.id && ownerNotificationAddonActive) {
       await sql.query(`
         INSERT INTO rental_notifications (id, user_id, type, title_zh, title_en, body_zh, body_en, link)
         VALUES ($1, $2, 'inquiry', '收到新的房源咨询', 'New listing inquiry', $3, $4, '/#messages')
@@ -148,17 +167,19 @@ export async function POST(request: Request) {
       moveIn,
       leaseLength,
       occupants,
-       pets,
-       tourPreference,
-       tourScheduledAt: null,
-       tourTimeZone: "UTC",
-       tourNote: "",
-       message,
+      pets,
+      tourPreference,
+      tourRequestedDate: tourRequestedDate || null,
+      tourRequestedWindow,
+      tourScheduledAt: null,
+      tourTimeZone: "UTC",
+      tourNote: "",
+      message,
     };
     let notificationSent = false;
     let confirmationSent = false;
     if (emailIsConfigured()) {
-      if (listing.owner_id && await emailAlertsAllowed(String(listing.owner_id), "inquiry_alerts") && emailInput.recipientEmail && !emailInput.recipientEmail.endsWith(".invalid")) {
+      if (listing.owner_id && ownerNotificationAddonActive && await emailAlertsAllowed(String(listing.owner_id), "inquiry_alerts") && emailInput.recipientEmail && !emailInput.recipientEmail.endsWith(".invalid")) {
         try {
           await sendInquiryNotification(emailInput);
           notificationSent = true;
@@ -183,6 +204,8 @@ export async function POST(request: Request) {
       occupants,
       pets,
       tourPreference,
+      tourRequestedDate: tourRequestedDate || null,
+      tourRequestedWindow,
       tourScheduledAt: null,
       tourTimeZone: "UTC",
       tourNote: "",

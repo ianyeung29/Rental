@@ -78,8 +78,20 @@ type InquiryEmailInput = {
   occupants: string;
   pets: string;
   tourPreference: string;
+  tourRequestedDate?: string | null;
+  tourRequestedWindow?: string;
   message: string;
 };
+
+function tourWindowLabel(value?: string) {
+  const labels: Record<string, string> = {
+    weekdayDay: "工作日白天",
+    weekdayEvening: "工作日晚上",
+    weekendDay: "周末白天",
+    weekendEvening: "周末晚上",
+  };
+  return labels[value || ""] || "时间不限";
+}
 
 function inquiryText(input: InquiryEmailInput) {
   return [
@@ -90,6 +102,8 @@ function inquiryText(input: InquiryEmailInput) {
     `居住人数：${input.occupants}`,
     `宠物：${input.pets}`,
     `看房偏好：${input.tourPreference}`,
+    input.tourRequestedDate ? `希望看房日期：${input.tourRequestedDate}` : "希望看房日期：未指定",
+    `希望看房时段：${tourWindowLabel(input.tourRequestedWindow)}`,
     input.message ? `补充信息：${input.message}` : "补充信息：无",
   ].join("\n");
 }
@@ -193,6 +207,7 @@ type ApplicationNotificationInput = {
   applicantName: string;
   applicantEmail: string;
   phone: string;
+  currentCity?: string;
   moveIn: string;
   leaseLength: string;
   occupants: string;
@@ -204,6 +219,7 @@ type ApplicationNotificationInput = {
 
 function applicationDetails(input: ApplicationNotificationInput) {
   return [
+    ...(input.currentCity ? [`Current city: ${input.currentCity}`] : []),
     `房源：${input.listingTitle}`,
     `区域：${input.listingArea || "未提供"}`,
     `申请人：${input.applicantName} <${input.applicantEmail}>`,

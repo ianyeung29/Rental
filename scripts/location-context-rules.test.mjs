@@ -8,6 +8,7 @@ import {
 import {
   isAcceptableNearbyWalkMinutes,
   isChineseOrAsianMarket,
+  selectSupermarketCandidate,
   selectUrbanTransitPlaces,
   transitRegion,
   uniqueNamedPlaces,
@@ -73,6 +74,14 @@ test("Chinese supermarket matching recognizes WalFood and removes duplicate plac
     { name: "WalFood Market", category: "Chinese / Asian supermarket" },
   ]);
   assert.deepEqual(unique.map((item) => item.name), ["Foodtown of Bayside", "WalFood Market"]);
+});
+
+test("supermarket lookup prefers Asian matches and labels a generic fallback honestly", () => {
+  const generic = place({ id: "generic", name: "Foodtown of Bayside", types: ["supermarket"] });
+  const asian = place({ id: "asian", name: "H Mart", types: ["supermarket"] });
+  assert.equal(selectSupermarketCandidate([generic])?.classification, "regular");
+  assert.equal(selectSupermarketCandidate([generic, asian])?.place.name, "H Mart");
+  assert.equal(selectSupermarketCandidate([generic, asian])?.classification, "asian");
 });
 
 test("Long Island aliases select the Long Island transit policy", () => {
