@@ -1066,7 +1066,8 @@ function photoUploadMessage(error: unknown, locale: Locale) {
   return "The image upload failed. Check your network connection and try again.";
 }
 
-const LISTINGS: Listing[] = [
+// The production UI starts empty and waits for live listings from the API.
+const LISTINGS: Listing[] = []; /*
   {
     id: "elmwood-light",
     titleZh: "树影公园旁的两居",
@@ -1175,7 +1176,7 @@ const LISTINGS: Listing[] = [
     privacyZh: "看房流程中透露地址",
     privacyEn: "Address revealed in the tour flow",
   },
-];
+] : []; */
 
 const copy = {
   zh: {
@@ -1906,7 +1907,7 @@ export default function HomePage() {
   const [customListings, setCustomListings] = useState<Listing[]>([]);
   const [remoteListings, setRemoteListings] = useState<Listing[]>([]);
   const [remoteHasMore, setRemoteHasMore] = useState(false);
-  const [remoteListingsLoading, setRemoteListingsLoading] = useState(false);
+  const [remoteListingsLoading, setRemoteListingsLoading] = useState(true);
   const [remoteListingsError, setRemoteListingsError] = useState("");
   const [remoteListingsRetry, setRemoteListingsRetry] = useState(0);
   const [remoteLoadingMore, setRemoteLoadingMore] = useState(false);
@@ -4057,7 +4058,7 @@ export default function HomePage() {
       title: title || (locale === "zh" ? "房源推荐" : "Rental listing"),
       description,
       link: origin ? `${origin}/?listing=${encodeURIComponent(listing.id)}` : "",
-      imageUrl: toAbsoluteUrl(listingPhotos(listing)[0] || "/listings/elmwood-light.png"),
+      imageUrl: toAbsoluteUrl(listingPhotos(listing)[0] || "/icons/anjurentals-512.png"),
     };
   }, [locale, selectedListing, shareListing]);
   const wechatShareKey = wechatShareDetails ? `${wechatShareDetails.link}|${wechatShareDetails.title}|${wechatShareDetails.imageUrl}` : "";
@@ -4596,7 +4597,9 @@ export default function HomePage() {
             </div>}
 
             <div className="listing-list" aria-busy={remoteListingsLoading}>
-              {filteredListings.length === 0 ? (
+              {remoteListingsLoading && allListings.length === 0 ? (
+                <div className="listing-loading-state" role="status" aria-live="polite"><span aria-hidden="true" />{locale === "zh" ? "正在加载实时房源…" : "Loading live listings…"}</div>
+              ) : filteredListings.length === 0 ? (
                 <StatusPanel
                   icon={<SearchIcon size={22} />}
                   title={t.noResults}
@@ -5082,7 +5085,7 @@ export default function HomePage() {
           <aside ref={detailDialogRef} className="drawer detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title" tabIndex={-1}>
             <ListingGallery
               title={listingTitle(selectedListing)}
-              photos={selectedPhotos.length > 0 ? selectedPhotos : ["/listings/elmwood-light.png"]}
+              photos={selectedPhotos}
               selectedIndex={selectedPhotoIndex}
               approximateLabel={t.approximate}
               photoLabel={locale === "zh" ? "房源照片" : "Listing photos"}
