@@ -1,6 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
-  <title id="title">安居 Anjurentals</title>
-  <desc id="desc">Blue square with three visibility-lime bars</desc>
-  <rect width="64" height="64" fill="#2768F0" />
-  <path d="M11 39h9v14h-9zM27.5 29h9v24h-9zM44 35h9v18h-9z" fill="#D7E85D" />
+  <title id="title">Anjurentals</title>
+  <desc id="desc">Warm gold layered roof over a navy home</desc>
+  <rect width="64" height="64" fill="#FBF9F4" />
+  <path fill="#E3B14F" d="M14.5 23.6 32 11.8l17.5 11.8v7.8L32 19.6 14.5 31.4z" />
+  <path fill="#E3B14F" d="m19.8 32.9 12.2-8.3 12.2 8.3-4.2 2.9L32 30.4l-8 5.4z" />
+  <path fill="#102F5B" d="m14.5 35.4 9.5-6.4 8 5.4v18.2H14.5z" />
+  <path fill="#102F5B" d="m32 34.4 8-5.4 9.5 6.4v17.2H32z" />
+  <path fill="#FBF9F4" d="m24 34.4 8-5.4 8 5.4v18.2H24z" />
+  <path fill="#102F5B" d="M29.5 44.3h5v8.3h-5z" />
 </svg>

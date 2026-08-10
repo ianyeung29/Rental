@@ -281,6 +281,8 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .notice-mark i:last-child { height: 11px; }
 .notice-action { padding: 2px 0; border: 0; color: var(--blue-dark); background: transparent; font-size: 11px; font-weight: 700; text-decoration: underline; }
 .listing-list { display: flex; flex-direction: column; gap: 18px; }
+.listing-loading-state { display: flex; align-items: center; gap: 10px; min-height: 160px; padding: 34px; border: 1px solid var(--line); color: var(--muted); background: rgba(255,255,255,.58); font-size: 12px; }
+.listing-loading-state span { width: 9px; height: 9px; border-radius: 50%; background: var(--blue); animation: draft-save-pulse 1s ease-in-out infinite; }
 .listing-card { display: grid; grid-template-columns: minmax(280px, 37%) 1fr; min-height: 300px; overflow: hidden; border: 1px solid var(--line); background: var(--panel); transition: border-color 220ms ease, transform 220ms ease, background-color 220ms ease, box-shadow 220ms ease; }
 .listing-card-featured { border-color: var(--ink); border-top: 3px solid var(--blue); }
 .listing-card:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: 0 14px 30px rgba(20, 42, 68, .08); }
