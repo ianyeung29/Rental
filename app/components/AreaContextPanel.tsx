@@ -9,15 +9,15 @@ export default function AreaContextPanel({ locale, areaZh, areaEn }: { locale: L
 
   if (!areaLabel) return null;
 
-  return <section className={`area-context-panel ${guide ? "" : "is-empty"}`} aria-labelledby="area-context-title">
-    <div className="area-context-heading">
+  return <details className={`area-context-panel ${guide ? "" : "is-empty"}`}>
+    <summary className="area-context-heading">
       <div>
         <span className="section-label">{zh ? "区域参考" : "NEIGHBORHOOD NOTES"}</span>
         <h3 id="area-context-title">{guide ? (zh ? guide.titleZh : guide.titleEn) : (zh ? "区域信息正在整理" : "Area information is being built")}</h3>
         <p>{zh ? `公开大致区域：${areaLabel}` : `Public approximate area: ${areaLabel}`}</p>
       </div>
       {guide && <span className="area-context-region">{zh ? guide.regionZh : guide.regionEn}</span>}
-    </div>
+    </summary>
 
     {guide ? <>
       <p className="area-context-summary">{zh ? guide.summaryZh : guide.summaryEn}</p>
@@ -39,5 +39,5 @@ export default function AreaContextPanel({ locale, areaZh, areaEn }: { locale: L
       </div>
       <p className="area-context-disclaimer">{zh ? "学校参考不代表学区分配、学校质量或入读资格。请以官方信息和精确地址核实。" : "This school reference does not represent school assignment, school quality, or enrollment eligibility. Verify with the official source and exact address."}</p>
     </> : <p className="area-context-empty-copy">{zh ? "我们暂时没有这个区域的策划内容。你仍可以使用下方路线估算，按自己的目的地核实交通、超市或学校信息。" : "We do not have a curated snapshot for this area yet. You can still use the route estimator below to check a destination such as transit, a supermarket, or a school."}</p>}
-  </section>;
+  </details>;
 }
