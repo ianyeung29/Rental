@@ -178,6 +178,7 @@ type AccountDrawerProps = {
   resendError: string;
   onResendVerification: () => void;
   onUpdateProfile: (input: { displayName: string; phone: string }) => Promise<void>;
+  onAgentAccountActivated: (input: { accountType: "agent"; agentVerificationStatus: AccountUser["agentVerificationStatus"]; agentVerified: boolean }) => void;
   onAgentVerificationStatusChange: (status: AccountUser["agentVerificationStatus"]) => void;
   onViewListing: (id: string) => void;
   onEditListing: (id: string) => void;
@@ -219,7 +220,7 @@ function CloseIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, blockedPublishers, blockLoadingId, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onRevealInquiryAddress, onApplicationStatusChange, onUnblockPublisher, onListingOperationalChange, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentVerificationStatusChange }: AccountDrawerProps) {
+export default function AccountDrawer({ locale, user, tab, listings, inquiries, applications, receivedApplications, agentRequests, blockedPublishers, blockLoadingId, canManageAgentRequests, agentRequestLoadingId, applicationActionLoadingId, loading, error, onClose, onTabChange, onLogout, onViewListing, onEditListing, onSetListingStatus, onRenewListing, onAgentRequestDecision, onInquiryStatusChange, onScheduleInquiry, onRevealInquiryAddress, onApplicationStatusChange, onUnblockPublisher, onListingOperationalChange, resendLoading, resendError, onResendVerification, onUpdateProfile, onAgentAccountActivated, onAgentVerificationStatusChange }: AccountDrawerProps) {
   const zh = locale === "zh";
   const dialogRef = useDialogA11y(true, onClose);
   const initial = user.displayName.trim().slice(0, 1).toUpperCase() || "U";
@@ -255,6 +256,8 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   const [verificationSaving, setVerificationSaving] = useState(false);
   const [verificationError, setVerificationError] = useState("");
   const [verificationSuccess, setVerificationSuccess] = useState(false);
+  const [agentApplicationLoading, setAgentApplicationLoading] = useState(false);
+  const [agentApplicationError, setAgentApplicationError] = useState("");
   const [portraitFile, setPortraitFile] = useState<File | null>(null);
   const [portraitPreviewUrl, setPortraitPreviewUrl] = useState("");
   const [portraitUploadStatus, setPortraitUploadStatus] = useState<"idle" | "uploading" | "uploaded">("idle");
@@ -538,6 +541,20 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
       setVerificationSaving(false);
     }
   };
+  const handleAgentApplication = async () => {
+    setAgentApplicationLoading(true);
+    setAgentApplicationError("");
+    try {
+      const response = await fetch("/api/agent-application", { method: "POST" });
+      const result = await response.json().catch(() => ({})) as { error?: string; user?: { accountType?: string; agentVerificationStatus?: AccountUser["agentVerificationStatus"]; agentVerified?: boolean } };
+      if (!response.ok || !result.user || result.user.accountType !== "agent") throw new Error(result.error || (zh ? "经纪申请暂时无法开始。" : "The agent application could not be started."));
+      onAgentAccountActivated({ accountType: "agent", agentVerificationStatus: result.user.agentVerificationStatus || "unsubmitted", agentVerified: result.user.agentVerified === true });
+    } catch (error) {
+      setAgentApplicationError(error instanceof Error ? error.message : (zh ? "经纪申请暂时无法开始。" : "The agent application could not be started."));
+    } finally {
+      setAgentApplicationLoading(false);
+    }
+  };
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside ref={dialogRef} className="drawer account-drawer" role="dialog" aria-modal="true" aria-labelledby="account-title" tabIndex={-1}>
@@ -624,6 +641,13 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
               <div className="profile-form-actions"><button className="outline-button" type="button" onClick={() => { setRenterProfileDraft(renterProfile); setRenterProfileError(""); setRenterProfileEditing(false); }} disabled={renterProfileSaving}>{zh ? "取消" : "Cancel"}</button><button className="primary-button" type="submit" disabled={renterProfileSaving}>{renterProfileSaving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存申请资料" : "Save application profile")}</button></div>
             </form>}
           </section>
+          {user.accountType === "user" && <section className="agent-verification-panel" aria-labelledby="agent-application-title">
+            <div className="account-profile-heading"><div><span className="section-label">AGENT PATH</span><h3 id="agent-application-title">{zh ? "申请成为房产经纪" : "Apply as a real-estate agent"}</h3><p>{zh ? "你仍然可以继续以房主身份发布自己的房源。开始申请后，提交执照资料，管理员核验通过后才会开放经纪身份和更高发布额度。" : "You can keep posting your own rentals as an owner. Start the application, submit your license details, and receive higher capacity only after admin approval."}</p></div><span className="status-chip unpublished">{zh ? "尚未申请" : "Not started"}</span></div>
+            {!user.emailVerified ? <p className="profile-privacy-note"><strong>{zh ? "请先验证邮箱" : "Verify your email first"}</strong><span>{zh ? "验证邮箱后即可开始经纪身份申请。" : "Agent applications open after your email is verified."}</span></p> : <>
+              {agentApplicationError && <p className="form-error" role="alert">{agentApplicationError}</p>}
+              <button className="outline-button" type="button" onClick={() => { void handleAgentApplication(); }} disabled={agentApplicationLoading}>{agentApplicationLoading ? (zh ? "准备中…" : "Starting…") : (zh ? "开始经纪申请" : "Start agent application")}</button>
+            </>}
+          </section>}
           <section className="account-quota-panel" aria-label={zh ? "房源发布额度" : "Listing publishing capacity"}>
             <div><span className="section-label">{zh ? "发布额度" : "POSTING CAPACITY"}</span><strong>{user.agentVerified ? (zh ? "已核验经纪额度" : "Verified agent capacity") : (zh ? "普通账户额度" : "Regular account capacity")}</strong><p>{user.agentVerified ? (zh ? "执照核验通过后，可发布更多房源。" : "Your approved license gives this account a higher listing limit.") : (zh ? "经纪账户完成执照核验后，额度会自动提高。" : "Agent accounts receive the higher limit after license verification.")}</p></div><span className="quota-count">{activeListingCount} / {listingLimit}</span>
           </section>
