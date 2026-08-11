@@ -58,6 +58,7 @@ type ListingCardProps = {
   poster: string;
   privacy: string;
   moveInValue: string;
+  leaseValue: string;
   price: string;
   tags: string[];
   photos: string[];
@@ -101,6 +102,7 @@ export default function ListingCard({
   poster,
   privacy,
   moveInValue,
+  leaseValue,
   price,
   tags,
   photos,
@@ -191,7 +193,7 @@ export default function ListingCard({
           <span><b>{listing.bathrooms}</b> {labels.bath}</span>
           {typeof listing.squareFeet === "number" && Number.isFinite(listing.squareFeet) && listing.squareFeet > 0 && <span><b>{listing.squareFeet.toLocaleString("en-US")}</b> {labels.squareFeet}</span>}
           <span><b>{moveInValue}</b> {labels.moveIn}</span>
-          <span><b>{listing.lease}</b> {labels.lease}</span>
+          <span><b>{leaseValue}</b> {labels.lease}</span>
         </div>
         <div className="tag-row listing-card-tags" aria-label={locale === "zh" ? "房源特点" : "Listing features"}>
           {tags.slice(0, 3).map((tag, index) => <span className={`listing-tag listing-tag-${index === 0 ? "primary" : "supporting"}`} key={tag}>{tag}</span>)}

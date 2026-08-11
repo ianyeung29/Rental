@@ -1673,6 +1673,14 @@ function formatMoveIn(value: string, locale: Locale) {
     : date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function formatLease(value: string, locale: Locale) {
+  if (locale !== "zh") return value;
+  const months = value.match(/\d+/)?.[0];
+  if (months) return `${months} 月`;
+  if (value.trim().toLowerCase() === "undefined") return "未确定";
+  return value;
+}
+
 function loadSharePosterImage(source: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new window.Image();
@@ -3904,6 +3912,7 @@ export default function HomePage() {
   const listingPrivacy = (listing: Listing) => (locale === "zh" ? listing.privacyZh : listing.privacyEn);
   const listingDescription = (listing: Listing) => (locale === "zh" ? listing.descriptionZh : listing.descriptionEn) || "";
   const listingMoveIn = (listing: Listing) => formatMoveIn(listing.moveIn, locale);
+  const listingLease = (listing: Listing) => formatLease(listing.lease, locale);
   const featureLabel = (feature: string) => {
     const value = t[feature as keyof typeof t];
     return typeof value === "string" ? value : feature;
@@ -4360,6 +4369,7 @@ export default function HomePage() {
             <a className="active" href="#rentals">{t.findRentals}</a>
             <a href="#saved" onClick={(event) => { event.preventDefault(); setSavedOpen(true); }}>{t.saved}{savedIds.size > 0 ? ` ${savedIds.size}` : ""}</a>
             <a href="#messages" onClick={(event) => { event.preventDefault(); setMessagesOpen(true); }}>{t.messages}{messageInquiries.length > 0 ? ` ${messageInquiries.length}` : ""}</a>
+            {currentUser && <button className="mobile-desk-link" type="button" onClick={() => setAnalyticsOpen(true)}>{locale === "zh" ? "房源表现" : "Performance"}</button>}
           </nav>
           <div className="topbar-actions">
             <button className="language-switch" type="button" onClick={() => { setCompareSummary(null); setCompareSummaryError(""); setLocale((current) => { const next = current === "zh" ? "en" : "zh"; window.dispatchEvent(new CustomEvent("rental-locale-change", { detail: next })); return next; }); }} aria-label={locale === "zh" ? "Switch to English" : "切换到中文"}>
@@ -4648,9 +4658,10 @@ export default function HomePage() {
                     type={listingType(listing)}
                     freshness={listingFreshness(listing)}
                     poster={listing.source === "local" ? (locale === "zh" ? "你的本地房源" : "Your local listing") : listing.source === "demo" ? (locale === "zh" ? "演示房源" : "Demo listing") : listingPoster(listing)}
-                    privacy={listingPrivacy(listing)}
-                    moveInValue={listingMoveIn(listing)}
-                    price={formatPrice(listing)}
+                     privacy={listingPrivacy(listing)}
+                     moveInValue={listingMoveIn(listing)}
+                     leaseValue={listingLease(listing)}
+                     price={formatPrice(listing)}
                     tags={tags}
                     photos={listingPhotos(listing)}
                     thumbnailPhotos={listingPhotoThumbnails(listing)}
@@ -4799,7 +4810,7 @@ export default function HomePage() {
                       <div><dt>{locale === "zh" ? "卫生间" : "Bathrooms"}</dt><dd>{listing.bathrooms}</dd></div>
                       <div><dt>{locale === "zh" ? "面积" : "Size"}</dt><dd>{typeof listing.squareFeet === "number" && Number.isFinite(listing.squareFeet) && listing.squareFeet > 0 ? `${listing.squareFeet.toLocaleString("en-US")} ${locale === "zh" ? "平方英尺" : "sq ft"}` : (locale === "zh" ? "未提供" : "Not listed")}</dd></div>
                       <div><dt>{t.detailMoveIn}</dt><dd>{listingMoveIn(listing)}</dd></div>
-                      <div><dt>{t.detailLease}</dt><dd>{listing.lease}</dd></div>
+                      <div><dt>{t.detailLease}</dt><dd>{listingLease(listing)}</dd></div>
                       <div className="compare-feature-row"><dt>{locale === "zh" ? "房源特点" : "Features"}</dt><dd className="compare-feature-list">{listingCompareFeatures(listing).slice(0, 8).map((tag, index) => <span className="compare-feature-tag" key={`${tag}-${index}`}>{tag}</span>)}{listingCompareFeatures(listing).length === 0 && <span>—</span>}</dd></div>
                       <div><dt>{t.detailPoster}</dt><dd>{listing.source === "local" ? (locale === "zh" ? "本地账号" : "Local account") : listing.source === "demo" ? (locale === "zh" ? "演示发布" : "Demo post") : listingPoster(listing)}</dd></div>
                     </dl>
@@ -5119,7 +5130,7 @@ export default function HomePage() {
                 <div><small>{t.detailArea}</small><strong>{listingArea(selectedListing)}</strong></div>
                 <div><small>{locale === "zh" ? "建筑面积" : "Square footage"}</small><strong>{typeof selectedListing.squareFeet === "number" && Number.isFinite(selectedListing.squareFeet) && selectedListing.squareFeet > 0 ? `${selectedListing.squareFeet.toLocaleString("en-US")} ${locale === "zh" ? "平方英尺" : "sq ft"}` : (locale === "zh" ? "未提供" : "Not listed")}</strong></div>
                 <div><small>{t.detailMoveIn}</small><strong>{listingMoveIn(selectedListing)}</strong></div>
-                <div><small>{t.detailLease}</small><strong>{selectedListing.lease}</strong></div>
+                <div><small>{t.detailLease}</small><strong>{listingLease(selectedListing)}</strong></div>
                 <div><small>{t.detailPoster}</small><strong>{listingPoster(selectedListing)}</strong></div>
               </div>
               {listingDescription(selectedListing) && <section className="detail-description">
@@ -5129,7 +5140,6 @@ export default function HomePage() {
               <h3 className="drawer-section-heading">{t.detailAmenities}</h3>
               <div className="tag-row drawer-tags">{listingTags(selectedListing).map((tag) => <span className="listing-tag" key={tag}>{tag}</span>)}</div>
               <div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>{listingPrivacy(selectedListing)}</p></div></div>
-              <AreaContextPanel locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
               <CommuteEstimator locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
               <SafetyNotice
                 locale={locale}
@@ -5139,6 +5149,7 @@ export default function HomePage() {
                 onReport={openReportForListing}
                 onBlock={() => { void blockSelectedPublisher(); }}
               />
+              <AreaContextPanel locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
               <DetailActionDock
                 contactLabel={t.requestTour}
                 applyLabel={locale === "zh" ? "提交租赁申请" : "Submit rental application"}
