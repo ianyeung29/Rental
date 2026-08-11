@@ -1676,7 +1676,7 @@ function formatMoveIn(value: string, locale: Locale) {
 function formatLease(value: string, locale: Locale) {
   if (locale !== "zh") return value;
   const months = value.match(/\d+/)?.[0];
-  if (months) return `${months} 月`;
+  if (months) return `${months}\u4e2a\u6708`;
   if (value.trim().toLowerCase() === "undefined") return "未确定";
   return value;
 }
