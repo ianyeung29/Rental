@@ -1,7 +1,7 @@
 export type ListingQualitySeverity = "required" | "recommended" | "review";
 
 export type ListingQualityTarget = {
-  step: 1 | 2 | 3 | 4 | 5;
+  step: 1 | 2 | 3;
   id: string;
 };
 
@@ -173,7 +173,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: "Add a valid monthly USD rent so renters can compare listings.",
     actionZh: "补充租金",
     actionEn: "Add rent",
-    target: { step: 2, id: "post-price" },
+    target: { step: 1, id: "post-price" },
   });
   add({
     key: "moveIn",
@@ -186,7 +186,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: "Choose immediate move-in or provide a specific date.",
     actionZh: "补充入住时间",
     actionEn: "Add move-in timing",
-    target: { step: 2, id: "post-move-in-mode" },
+    target: { step: 1, id: "post-move-in-mode" },
   });
   add({
     key: "contact",
@@ -199,7 +199,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: "Add a contact name and valid email so renters can send an inquiry.",
     actionZh: "补充联系人",
     actionEn: "Add contact",
-    target: { step: 4, id: "post-contact-name" },
+    target: { step: 3, id: "post-contact-name" },
   });
   add({
     key: "photos",
@@ -212,7 +212,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: media.length === 0 ? "At least one photo is needed to publish; two or more help renters judge the space." : "Add a second photo so renters can better understand the space and light.",
     actionZh: "管理照片",
     actionEn: "Manage photos",
-    target: { step: 3, id: "post-photos" },
+    target: { step: 2, id: "post-photos" },
   });
   add({
     key: "features",
@@ -225,7 +225,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: "Add real features such as furnishing, laundry, parking, or pet rules for faster filtering.",
     actionZh: "选择特点",
     actionEn: "Choose features",
-    target: { step: 3, id: "post-features" },
+    target: { step: 2, id: "post-features" },
   });
   add({
     key: "description",
@@ -238,7 +238,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: descriptionLength === 0 ? "Describe light, layout, transport, included costs, and other factual details." : "The description is short or still looks like placeholder copy; add facts and fee details.",
     actionZh: "编辑介绍",
     actionEn: "Edit description",
-    target: { step: 3, id: "post-description-zh" },
+    target: { step: 2, id: "post-description-zh" },
   });
   add({
     key: "descriptionClarity",
@@ -251,7 +251,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: hasRepeatedPhrase(description) ? "A repeated phrase was detected. Keep the clearest, most accurate version once." : "Use complete sentences and add concrete details that can be checked.",
     actionZh: "优化介绍",
     actionEn: "Improve description",
-    target: { step: 3, id: "post-description-zh" },
+    target: { step: 2, id: "post-description-zh" },
   });
   add({
     key: "size",
@@ -264,7 +264,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: "Square footage is optional, but it gives renters a clearer sense of space.",
     actionZh: "补充面积",
     actionEn: "Add square footage",
-    target: { step: 2, id: "post-square-feet" },
+    target: { step: 1, id: "post-square-feet" },
   });
   add({
     key: "duplicatePhotos",
@@ -277,7 +277,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
     detailEn: duplicatePhotoCount > 0 ? `${duplicatePhotoCount} duplicate photo(s) were detected. Remove them or use another angle.` : "Each photo has a different upload identity or URL.",
     actionZh: "检查照片",
     actionEn: "Check photos",
-    target: { step: 3, id: "post-photos" },
+    target: { step: 2, id: "post-photos" },
   });
   add({
     key: "priceReview",
@@ -298,7 +298,7 @@ export function analyzeListingQuality(input: ListingQualityInput): ListingQualit
         : "There are not enough local comparisons; only the entered rent was checked. Review it manually.",
     actionZh: "复核租金",
     actionEn: "Review rent",
-    target: { step: 2, id: "post-price" },
+    target: { step: 1, id: "post-price" },
   });
 
   const totalWeight = checks.reduce((total, check) => total + check.weight, 0);
