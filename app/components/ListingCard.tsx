@@ -39,6 +39,8 @@ export type ListingCardLabels = {
   compare: string;
   comparing: string;
   contact: string;
+  more: string;
+  moreActions: string;
   save: string;
   removeSaved: string;
   listingBasics: string;
@@ -116,6 +118,7 @@ export default function ListingCard({
 }: ListingCardProps) {
   const photoCount = photos.length;
   const [photoIndex, setPhotoIndex] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
   const touchStartX = useRef<number | null>(null);
   const ignoreNextClick = useRef(false);
   const safePhotoIndex = photoCount > 0 ? Math.min(photoIndex, photoCount - 1) : 0;
@@ -196,8 +199,8 @@ export default function ListingCard({
           <span><b>{leaseValue}</b> {labels.lease}</span>
         </div>
         <div className="tag-row listing-card-tags" aria-label={locale === "zh" ? "房源特点" : "Listing features"}>
-          {tags.slice(0, 3).map((tag, index) => <span className={`listing-tag listing-tag-${index === 0 ? "primary" : "supporting"}`} key={tag}>{tag}</span>)}
-          {tags.length > 3 && <span className="listing-tag listing-tag-more">+{tags.length - 3}</span>}
+          {tags.slice(0, 2).map((tag, index) => <span className={`listing-tag listing-tag-${index === 0 ? "primary" : "supporting"}`} key={tag}>{tag}</span>)}
+          {tags.length > 2 && <span className="listing-tag listing-tag-more">+{tags.length - 2}</span>}
         </div>
         <div className="trust-row">
           <span><span className="trust-icon blue">{icons.pin({ size: 12 })}</span>{labels.locationChecked}</span>
@@ -209,9 +212,16 @@ export default function ListingCard({
         <div className="listing-actions">
           <button className="link-button" type="button" onClick={onOpen}>{labels.view}{icons.arrow({ size: 15 })}</button>
           <div className="action-group">
-            <button className="share-button" type="button" onClick={onShare}>{icons.share({ size: 14 })}{labels.share}</button>
-            <button className={`compare-button ${comparing ? "active" : ""}`} type="button" onClick={onCompare} aria-pressed={comparing}>{comparing ? icons.check({ size: 13 }) : null}{comparing ? labels.comparing : labels.compare}</button>
+            <div className="listing-secondary-actions">
+              <button className="share-button" type="button" onClick={onShare}>{icons.share({ size: 14 })}{labels.share}</button>
+              <button className={`compare-button ${comparing ? "active" : ""}`} type="button" onClick={onCompare} aria-pressed={comparing}>{comparing ? icons.check({ size: 13 }) : null}{comparing ? labels.comparing : labels.compare}</button>
+            </div>
             <button className="contact-button" type="button" onClick={onContact}>{icons.chat({ size: 15 })}{labels.contact}</button>
+            <button className="listing-more-button" type="button" onClick={() => setMoreOpen((current) => !current)} aria-expanded={moreOpen} aria-haspopup="menu">{labels.more}<span aria-hidden="true">+</span></button>
+            {moreOpen && <div className="listing-more-menu" role="menu" aria-label={labels.moreActions}>
+              <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onShare(); }}>{icons.share({ size: 14 })}{labels.share}</button>
+              <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); onCompare(); }}>{comparing ? icons.check({ size: 13 }) : null}{comparing ? labels.comparing : labels.compare}</button>
+            </div>}
           </div>
         </div>
       </div>

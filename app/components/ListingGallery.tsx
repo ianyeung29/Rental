@@ -54,6 +54,7 @@ export default function ListingGallery({
   onClose,
 }: ListingGalleryProps) {
   const [fullscreen, setFullscreen] = useState(false);
+  const [thumbnailsOpen, setThumbnailsOpen] = useState(false);
   const fullscreenRef = useDialogA11y<HTMLDivElement>(fullscreen, () => setFullscreen(false));
   const selectedPhoto = photos[selectedIndex] || photos[0] || "";
 
@@ -97,7 +98,10 @@ export default function ListingGallery({
         {gallery(false)}
         <button className="drawer-close image-close" type="button" onClick={onClose} aria-label={closeLabel}>{closeIcon({ size: 18 })}</button>
       </div>
-      {photos.length > 1 && <div className="gallery-thumbnails" aria-label={photoLabel}>{photos.map((photo, index) => <button className={`gallery-thumbnail ${index === selectedIndex ? "active" : ""}`} type="button" key={`${photo}-${index}`} onClick={() => onSelect(index)} aria-label={`${photoLabel} ${index + 1}`} aria-pressed={index === selectedIndex}><Image src={photo} alt="" fill sizes="86px" loading="lazy" /></button>)}</div>}
+      {photos.length > 1 && <>
+        <button className="gallery-thumbnails-toggle" type="button" onClick={() => setThumbnailsOpen((current) => !current)} aria-expanded={thumbnailsOpen} aria-controls="listing-gallery-thumbnails">{photoLabel}<span>{selectedIndex + 1} / {photos.length}</span><span aria-hidden="true">{thumbnailsOpen ? "−" : "+"}</span></button>
+        <div className={`gallery-thumbnails ${thumbnailsOpen ? "is-open" : ""}`} id="listing-gallery-thumbnails" aria-label={photoLabel}>{photos.map((photo, index) => <button className={`gallery-thumbnail ${index === selectedIndex ? "active" : ""}`} type="button" key={`${photo}-${index}`} onClick={() => { onSelect(index); setThumbnailsOpen(false); }} aria-label={`${photoLabel} ${index + 1}`} aria-pressed={index === selectedIndex}><Image src={photo} alt="" fill sizes="86px" loading="lazy" /></button>)}</div>
+      </>}
       {fullscreen && <div ref={fullscreenRef} className="gallery-fullscreen" role="dialog" aria-modal="true" aria-label={photoLabel} tabIndex={-1} onMouseDown={(event) => { if (event.target === event.currentTarget) setFullscreen(false); }}>
         {gallery(true)}
       </div>}
