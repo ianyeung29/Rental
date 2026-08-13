@@ -71,6 +71,10 @@ export function placeNameKey(value: string) {
   return normalizedText(value).normalize("NFKC").replace(/[\s\-_.\,/()'&]+/g, "");
 }
 
+export function locationSearchOrigin(privateAddress: string, queryArea: string) {
+  return [privateAddress.trim(), queryArea.trim()].filter(Boolean).join(", ");
+}
+
 export function isChineseOrAsianMarket(place: LocationRulePlace) {
   const name = normalizedText(place.name);
   const normalizedName = placeNameKey(place.name);
@@ -121,7 +125,8 @@ export function transitLineTypes(place: LocationRulePlace) {
 
 export function hasUrbanTransitLine(place: LocationRulePlace) {
   const lineTypes = transitLineTypes(place);
-  return lineTypes.has("SUBWAY") || lineTypes.has("METRO_RAIL") || lineTypes.has("BUS") || lineTypes.has("INTERCITY_BUS") || lineTypes.has("TROLLEYBUS") || (place.types || []).includes("bus_station") || (place.types || []).includes("subway_station");
+  const placeTypes = new Set([...(place.types || []), place.primaryType || ""].map((value) => value.toLocaleLowerCase()));
+  return lineTypes.has("SUBWAY") || lineTypes.has("METRO_RAIL") || lineTypes.has("BUS") || lineTypes.has("INTERCITY_BUS") || lineTypes.has("TROLLEYBUS") || placeTypes.has("bus_station") || placeTypes.has("bus_stop") || placeTypes.has("transit_stop") || placeTypes.has("subway_station");
 }
 
 export function hasRailTransitLine(place: LocationRulePlace) {
@@ -131,8 +136,9 @@ export function hasRailTransitLine(place: LocationRulePlace) {
 
 export function urbanTransitKind(place: LocationRulePlace): UrbanTransitKind {
   const lineTypes = transitLineTypes(place);
-  const hasSubway = lineTypes.has("SUBWAY") || lineTypes.has("METRO_RAIL") || (place.types || []).includes("subway_station");
-  const hasBus = lineTypes.has("BUS") || lineTypes.has("INTERCITY_BUS") || lineTypes.has("TROLLEYBUS") || (place.types || []).includes("bus_station");
+  const placeTypes = new Set([...(place.types || []), place.primaryType || ""].map((value) => value.toLocaleLowerCase()));
+  const hasSubway = lineTypes.has("SUBWAY") || lineTypes.has("METRO_RAIL") || placeTypes.has("subway_station");
+  const hasBus = lineTypes.has("BUS") || lineTypes.has("INTERCITY_BUS") || lineTypes.has("TROLLEYBUS") || placeTypes.has("bus_station") || placeTypes.has("bus_stop") || placeTypes.has("transit_stop");
   return hasSubway && hasBus ? "both" : hasSubway ? "subway" : hasBus ? "bus" : null;
 }
 
