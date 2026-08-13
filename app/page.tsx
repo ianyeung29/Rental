@@ -15,6 +15,7 @@ import DetailActionDock from "./components/DetailActionDock";
 import ListingCard from "./components/ListingCard";
 import ListingGallery from "./components/ListingGallery";
 import ListingAnalyticsPanel from "./components/ListingAnalyticsPanel";
+import MobileBottomNav from "./components/MobileBottomNav";
 import NotificationCenter from "./components/NotificationCenter";
 import NativeMediaActions from "./components/NativeMediaActions";
 import ReportDrawer from "./components/ReportDrawer";
@@ -2041,7 +2042,9 @@ export default function HomePage() {
   const [savedOpen, setSavedOpen] = useState(false);
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [postStep, setPostStep] = useState<PostStep>(1);
+  const [postMoreOpen, setPostMoreOpen] = useState(false);
   const [postError, setPostError] = useState("");
   const [aiPolishLoading, setAiPolishLoading] = useState(false);
   const [aiPolishError, setAiPolishError] = useState("");
@@ -2075,6 +2078,7 @@ export default function HomePage() {
   const selectedPopularArea = POPULAR_AREA_GROUPS.find((group) => group.id === selectedPopularAreaId) || null;
   const selectedPostAreaGroup = POPULAR_AREA_GROUPS.find((group) => group.id === draft.areaGroupId) || null;
   const selectedAgentProfile = agentProfiles.find((profile) => profile.id === draft.agentProfileId) || null;
+  const mobileNavigationHidden = mobileFiltersOpen || authOpen || accountOpen || savedOpen || messagesOpen || analyticsOpen || compareOpen || postOpen || Boolean(shareListing) || Boolean(selectedListing) || Boolean(contactListing) || Boolean(applicationListing) || reportOpen;
   const searchSnapshot = useMemo<SearchSnapshot>(() => ({
     location: appliedLocation,
     minPrice,
@@ -2824,6 +2828,7 @@ export default function HomePage() {
       return;
     }
     setPostOpen(true);
+    setPostMoreOpen(false);
     setEditingListingId(null);
     setPostStep(1);
     setDraft((current) => ({ ...current, posterRole: canPostAsAgent ? current.posterRole : "owner", contactName: current.contactName || currentUser?.displayName || "", contactEmail: current.contactEmail || currentUser?.email || "" }));
@@ -4503,7 +4508,7 @@ export default function HomePage() {
               <div className="filter-header-actions"><button className="text-button" type="button" onClick={resetFilters}>{t.reset}</button><button className="mobile-filter-close" type="button" onClick={() => setMobileFiltersOpen(false)}>{locale === "zh" ? "完成" : "Done"}</button></div>
             </div>
 
-            <form className="filter-form" onSubmit={submitSearch}>
+            <form id="rental-filter-form" className={`filter-form ${showMore ? "is-more-open" : ""}`} onSubmit={submitSearch}>
               <section className="assistant-search" aria-labelledby="assistant-search-title">
                 <div className="assistant-search-heading"><span className="anju-assistant-mark" aria-hidden="true"><SearchIcon /></span><div><strong id="assistant-search-title">{locale === "zh" ? "告诉安居助手你想找什么" : "Tell Anju Assistant what you need"}</strong><small>{locale === "zh" ? "例如：法拉盛两房，$3,000以内，允许宠物" : "Example: Two bedrooms in Flushing, under $3,000, pet friendly"}</small></div></div>
                 <textarea rows={2} value={assistantSearchInput} onChange={(event) => setAssistantSearchInput(event.target.value)} placeholder={locale === "zh" ? "输入区域、预算、卧室和需要的特点" : "Enter an area, budget, bedrooms, and features"} />
@@ -4577,7 +4582,7 @@ export default function HomePage() {
                 </label>
               </div>
 
-              <div className="price-range-fields size-range-fields" aria-label={locale === "zh" ? "房源面积范围" : "Square footage range"}>
+              <div className="price-range-fields size-range-fields mobile-more-filter" aria-label={locale === "zh" ? "房源面积范围" : "Square footage range"}>
                 <label className="field-label" htmlFor="min-sqft">{t.minSqft}
                   <input className="price-input" id="min-sqft" type="number" min="1" step="10" inputMode="numeric" value={minSqft} onChange={(event) => setMinSqft(event.target.value)} placeholder="600" />
                 </label>
@@ -4598,7 +4603,7 @@ export default function HomePage() {
                 </select>
               </div>
 
-              <div className="filter-field">
+              <div className="filter-field mobile-more-filter">
                 <label className="field-label" htmlFor="bathrooms">{t.bathrooms}</label>
                 <select id="bathrooms" value={bathrooms} onChange={(event) => setBathrooms(event.target.value)}>
                   <option value="">{t.anyBathrooms}</option>
@@ -4606,7 +4611,7 @@ export default function HomePage() {
                 </select>
               </div>
 
-              <div className="filter-field">
+              <div className="filter-field mobile-more-filter">
                 <label className="field-label" htmlFor="type">{t.type}</label>
                 <select id="type" value={rentalType} onChange={(event) => setRentalType(event.target.value as RentalType)}>
                   <option value="all">{t.allTypes}</option>
@@ -4626,14 +4631,14 @@ export default function HomePage() {
                 </select>
               </div>
 
-              <button className="more-filters" type="button" onClick={() => setShowMore((current) => !current)}>
+              <button className="more-filters" type="button" onClick={() => setShowMore((current) => !current)} aria-expanded={showMore}>
                 <SlidersIcon />
                 {showMore ? t.less : t.more}
                 <span aria-hidden="true">{showMore ? "−" : "+"}</span>
               </button>
 
               {showMore && (
-                <div className="feature-filters">
+                <div className="feature-filters mobile-more-filter">
                   {POST_FEATURE_KEYS.map((key) => (
                     <button className={`feature-chip ${activeFeatures.includes(key) ? "active" : ""}`} key={key} type="button" onClick={() => toggleFeature(key)} aria-pressed={activeFeatures.includes(key)}>
                       <span className="chip-mark" aria-hidden="true">{activeFeatures.includes(key) ? <CheckIcon size={12} /> : ""}</span>
@@ -4655,6 +4660,7 @@ export default function HomePage() {
               {activeFilterLabels.length > 0 && <strong>{activeFilterLabels.length}</strong>}
               <span className="mobile-filter-toggle-state">{mobileFiltersOpen ? (locale === "zh" ? "收起" : "Hide") : (locale === "zh" ? "打开" : "Open")}</span>
             </button>
+            {!mobileFiltersOpen && <button className="mobile-result-cta" type="button" onClick={() => (document.getElementById("rental-filter-form") as HTMLFormElement | null)?.requestSubmit()}><SearchIcon size={16} />{locale === "zh" ? `查看 ${filteredListings.length} 套房源` : `View ${filteredListings.length} listings`}</button>}
             {activeFilterLabels.length > 0 && <div className="filter-summary" aria-label={locale === "zh" ? "已应用的筛选条件" : "Applied filters"}>
               <span className="filter-summary-label">{locale === "zh" ? "已选条件" : "Applied"}</span>
               <div className="filter-summary-list">
@@ -4747,6 +4753,8 @@ export default function HomePage() {
                       compare: t.compare,
                       comparing: t.comparing,
                       contact: t.contact,
+                      more: locale === "zh" ? "更多" : "More",
+                      moreActions: locale === "zh" ? "更多房源操作" : "More listing actions",
                       save: locale === "zh" ? "收藏房源" : "Save listing",
                       removeSaved: locale === "zh" ? "取消收藏" : "Remove from saved",
                       listingBasics: locale === "zh" ? "房源基本信息" : "Listing basics",
@@ -4800,7 +4808,9 @@ export default function HomePage() {
           </section>
         </section>
 
-        <section className="guide-rail" aria-label={locale === "zh" ? "产品原则" : "Product principles"}>
+        <details className="guide-rail" open={!isMobileViewport || guideOpen} onToggle={(event) => setGuideOpen(event.currentTarget.open)} aria-label={locale === "zh" ? "产品原则" : "Product principles"}>
+          <summary className="guide-rail-summary"><span>{locale === "zh" ? "为什么安居这样设计" : "Why Anju works this way"}</span><span aria-hidden="true">+</span></summary>
+          <div className="guide-rail-content">
           <div className="guide-block privacy-block">
             <span className="guide-icon"><LockIcon /></span>
             <div><h2>{t.privacyGuideTitle}</h2><p>{t.privacyGuideBody}</p></div>
@@ -4813,7 +4823,8 @@ export default function HomePage() {
             <span className="guide-icon lime-icon"><ChatIcon /></span>
             <div><h2>{t.conversationTitle}</h2><p>{t.conversationBody}</p></div>
           </div>
-        </section>
+          </div>
+        </details>
       </div>
 
       {analyticsOpen && currentUser && (
@@ -4944,6 +4955,11 @@ export default function HomePage() {
               <div className="drawer-heading"><span className="section-label">POSTER WORKFLOW</span><button className="drawer-close" type="button" onClick={() => setPostOpen(false)} aria-label={t.close}><CloseIcon /></button></div>
               <h2 id="post-title">{editingListingId ? (locale === "zh" ? "编辑房源" : "Edit listing") : t.postTitle}</h2>
               <p className="drawer-intro">{locale === "zh" ? "填写房源信息并发布。" : "Add your listing details and publish."}</p>
+              <div className="post-mobile-progress" aria-label={locale === "zh" ? "发布进度" : "Posting progress"}>
+                <span className="post-mobile-progress-count">{postStep} / 3</span>
+                <div><strong>{postStep === 1 ? (locale === "zh" ? "房源与角色" : "Listing and role") : postStep === 2 ? (locale === "zh" ? "照片与介绍" : "Photos and description") : (locale === "zh" ? "核验与发布" : "Review and publish")}</strong><small>{locale === "zh" ? "已自动保存" : "Autosaved as you go"}</small></div>
+                <span className="post-mobile-progress-state">{draftSaveState === "saving" ? (locale === "zh" ? "保存中" : "Saving") : (locale === "zh" ? "已保存" : "Saved")}</span>
+              </div>
               {draftRecoveryNotice && <div className="draft-recovery-notice" role="status"><div><strong>{draftRecoveryNotice === "local" ? (locale === "zh" ? "已恢复本机草稿" : "Draft restored from this device") : draftRecoveryNotice === "account" ? (locale === "zh" ? "已恢复账号草稿" : "Draft restored from your account") : (locale === "zh" ? "网络暂时不可用，草稿已保留" : "You’re offline; your draft is safe")}</strong><span>{draftRecoveryNotice === "local" ? (locale === "zh" ? "你可以继续编辑，网络恢复后会自动尝试同步。" : "Continue editing; we’ll retry account sync when the connection returns.") : draftRecoveryNotice === "account" ? (locale === "zh" ? "上次保存的内容已加载，可以继续发布。" : "Your last saved version is loaded and ready to continue.") : (locale === "zh" ? "草稿保存在此设备上，不会因为离线而丢失。" : "This draft is stored on this device and won’t be lost while offline.")}</span></div><button className="text-button" type="button" onClick={() => setDraftRecoveryNotice(null)}>{locale === "zh" ? "知道了" : "Got it"}</button></div>}
                 {demoMode && !currentUser && <div className="demo-mode-notice" role="note"><strong>{locale === "zh" ? "演示模式" : "Demo mode"}</strong><span>{locale === "zh" ? "无需登录即可发布；请填写联系人信息。" : "No sign-in is needed for this demonstration; enter contact details below."}</span></div>}
               {postStep === 1 && (
@@ -5096,8 +5112,17 @@ export default function HomePage() {
               {postError && <p className="form-error" role="alert">{postError}</p>}
               <div className="post-footer-actions">
                 <button className="outline-button" type="button" onClick={() => { if (postStep === 1) setPostOpen(false); else setPostStep((current) => (current - 1) as PostStep); }}>{postStep === 1 ? t.close : (locale === "zh" ? "上一步" : "Back")}</button>
-                <button className="text-button" type="button" onClick={saveDraftAndClose}>{locale === "zh" ? "保存草稿" : "Save draft"}</button>
-                <button className="text-button" type="button" onClick={() => { void clearDraft(); }}>{locale === "zh" ? "清除草稿" : "Clear draft"}</button>
+                <div className="post-footer-desktop-actions">
+                  <button className="text-button post-save-action" type="button" onClick={saveDraftAndClose}>{locale === "zh" ? "保存草稿" : "Save draft"}</button>
+                  <button className="text-button post-clear-action" type="button" onClick={() => { void clearDraft(); }}>{locale === "zh" ? "清除草稿" : "Clear draft"}</button>
+                </div>
+                <div className="post-footer-more">
+                  <button className="outline-button post-footer-more-toggle" type="button" onClick={() => setPostMoreOpen((current) => !current)} aria-expanded={postMoreOpen} aria-haspopup="menu">{locale === "zh" ? "更多" : "More"}<span aria-hidden="true">+</span></button>
+                  {postMoreOpen && <div className="post-footer-more-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => { setPostMoreOpen(false); saveDraftAndClose(); }}>{locale === "zh" ? "保存草稿" : "Save draft"}</button>
+                    <button type="button" role="menuitem" onClick={() => { if (window.confirm(locale === "zh" ? "确定清除当前草稿吗？此操作无法撤销。" : "Clear this draft? This cannot be undone.")) { setPostMoreOpen(false); void clearDraft(); } }}>{locale === "zh" ? "清除草稿" : "Clear draft"}</button>
+                  </div>}
+                </div>
                 {postStep < 3 ? <button className="primary-button" type="button" onClick={handlePostNext}>{locale === "zh" ? "下一步" : "Next"}<ArrowIcon /></button> : <button className="primary-button" type="button" disabled={publishLoading || mediaUploading} onClick={publishLocalListing}>{publishLoading ? (locale === "zh" ? "保存中…" : "Saving…") : (editingListingId ? (locale === "zh" ? "保存房源修改" : "Save listing changes") : (locale === "zh" ? "发布房源" : "Publish listing"))}<CheckIcon /></button>}
               </div>
             </div>
@@ -5198,17 +5223,17 @@ export default function HomePage() {
               <p className="drawer-intro">{t.detailsIntro}</p>
               <div className="detail-price"><strong>{formatPrice(selectedListing)}</strong><span>{t.month}</span></div>
               <p className="cost-note"><CheckIcon size={13} />{t.costNote}</p>
-              <div className="detail-assurance" aria-label={locale === "zh" ? "房源信号" : "Listing signals"}>
-                <span className="assurance-item"><span className="assurance-icon verified"><CheckIcon size={12} /></span>{selectedListing.posterVerificationScope === "agent_license" ? t.verifiedAgent : selectedListing.posterVerificationScope === "email" ? t.verifiedEmail : selectedListing.source === "sample" ? t.sampleSignal : t.localSignal}</span>
-                <span className="assurance-item"><span className="assurance-icon photo"><GalleryIcon size={12} /></span>{selectedPhotos.length} {t.photoCount}</span>
-                <span className="assurance-item"><span className="assurance-icon privacy"><LockIcon size={12} /></span>{t.approximate}</span>
-              </div>
               <div className="detail-grid">
                 <div><small>{t.detailArea}</small><strong>{listingArea(selectedListing)}</strong></div>
                 <div><small>{locale === "zh" ? "建筑面积" : "Square footage"}</small><strong>{typeof selectedListing.squareFeet === "number" && Number.isFinite(selectedListing.squareFeet) && selectedListing.squareFeet > 0 ? `${selectedListing.squareFeet.toLocaleString("en-US")} ${locale === "zh" ? "平方英尺" : "sq ft"}` : (locale === "zh" ? "未提供" : "Not listed")}</strong></div>
                 <div><small>{t.detailMoveIn}</small><strong>{listingMoveIn(selectedListing)}</strong></div>
                 <div><small>{t.detailLease}</small><strong>{listingLease(selectedListing)}</strong></div>
                 <div><small>{t.detailPoster}</small><strong>{listingPoster(selectedListing)}</strong></div>
+              </div>
+              <div className="detail-assurance" aria-label={locale === "zh" ? "房源信号" : "Listing signals"}>
+                <span className="assurance-item"><span className="assurance-icon verified"><CheckIcon size={12} /></span>{selectedListing.posterVerificationScope === "agent_license" ? t.verifiedAgent : selectedListing.posterVerificationScope === "email" ? t.verifiedEmail : selectedListing.source === "sample" ? t.sampleSignal : t.localSignal}</span>
+                <span className="assurance-item"><span className="assurance-icon photo"><GalleryIcon size={12} /></span>{selectedPhotos.length} {t.photoCount}</span>
+                <span className="assurance-item"><span className="assurance-icon privacy"><LockIcon size={12} /></span>{t.approximate}</span>
               </div>
               {listingDescription(selectedListing) && <section className="detail-description">
                 <h3 className="drawer-section-heading">{t.detailDescription}</h3>
@@ -5232,16 +5257,23 @@ export default function HomePage() {
                 applyLabel={locale === "zh" ? "提交租赁申请" : "Submit rental application"}
                 compareLabel={t.compare}
                 shareLabel={locale === "zh" ? "分享到朋友圈" : "Share to Moments"}
+                saveLabel={locale === "zh" ? "收藏" : "Save"}
+                removeSavedLabel={locale === "zh" ? "已收藏" : "Saved"}
+                moreLabel={locale === "zh" ? "更多" : "More"}
+                moreActionsLabel={locale === "zh" ? "更多房源操作" : "More listing actions"}
+                saved={savedIds.has(selectedListing.id)}
                 comparing={compareIds.includes(selectedListing.id)}
                 icons={{
                   chat: (options) => <ChatIcon size={options?.size} />,
                   compare: (options) => <CompareIcon size={options?.size} />,
                   share: (options) => <ShareIcon size={options?.size} />,
+                  heart: (options) => <HeartIcon size={options?.size} filled={options?.filled} />,
                 }}
                 onContact={() => { setSelectedListing(null); openContact(selectedListing); }}
                 onApply={() => openApplication(selectedListing)}
                 onCompare={() => toggleCompare(selectedListing.id)}
                 onShare={() => openShare(selectedListing)}
+                onSave={() => { void toggleSaved(selectedListing.id); }}
               />
               <button className="text-button detail-report-button" type="button" onClick={openReportForListing}>{locale === "zh" ? "举报此房源" : "Report this listing"}</button>
             </div>
@@ -5310,6 +5342,23 @@ export default function HomePage() {
       {accountOpen && currentUser && <AccountDrawer locale={locale} user={currentUser} tab={dashboardTab} listings={dashboardListings} inquiries={receivedInquiries} applications={renterApplications} receivedApplications={receivedApplications} agentRequests={agentRequests} blockedPublishers={blockedPublishers} blockLoadingId={blockLoadingId} canManageAgentRequests={canManageAgentRequests} agentRequestLoadingId={agentRequestLoadingId} applicationActionLoadingId={applicationActionLoadingId} loading={dashboardLoading} error={dashboardError} resendLoading={resendLoading} resendError={resendError} onClose={() => setAccountOpen(false)} onTabChange={setDashboardTab} onLogout={handleLogout} onResendVerification={handleResendVerification} onUpdateProfile={handleProfileUpdate} onAgentAccountActivated={handleAgentAccountActivated} onAgentVerificationStatusChange={handleAgentVerificationStatusChange} onViewListing={viewDashboardListing} onEditListing={editDashboardListing} onSetListingStatus={handleDashboardStatus} onRenewListing={handleRenewListing} onAgentRequestDecision={handleAgentRequestDecision} onInquiryStatusChange={(id, status) => updateInquiryStatus(id, status)} onScheduleInquiry={scheduleInquiry} onRevealInquiryAddress={revealInquiryAddress} onApplicationStatusChange={updateApplicationStatus} onUnblockPublisher={unblockPublisher} onListingOperationalChange={(id, updates) => setDashboardListings((current) => current.map((listing) => listing.id === id ? { ...listing, ...updates } : listing))} />}
 
       {(toast || verificationNotice) && <div className="toast" role="status"><span className="toast-mark"><CheckIcon size={13} /></span>{toast || verificationNotice}</div>}
+
+      <MobileBottomNav
+        locale={locale}
+        savedCount={savedIds.size}
+        messageCount={messageInquiries.length}
+        hidden={mobileNavigationHidden}
+        icons={{
+          find: <SearchIcon size={18} />,
+          saved: <HeartIcon size={18} />,
+          post: <span className="mobile-bottom-nav-post-icon" aria-hidden="true">+</span>,
+          messages: <ChatIcon size={18} />,
+        }}
+        onFind={() => document.getElementById("rentals")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        onSaved={() => setSavedOpen(true)}
+        onPost={openPostFlow}
+        onMessages={() => setMessagesOpen(true)}
+      />
 
       <SiteFooter />
     </div>

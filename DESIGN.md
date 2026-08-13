@@ -237,8 +237,11 @@ Buttons, cards, fields, chips, panels, drawers, and form controls use square cor
 ### Navigation
 
 - **Desktop:** Sticky warm-panel header, brand mark at left, compact utility links, language switch, lime publish action, and circular account avatar. The active page uses a 3px blue underline.
-- **Mobile:** Brand and utility actions remain in the top row; primary navigation moves to a horizontally scrollable second row so Chinese and English labels stay readable.
-- **Posting flow on mobile:** The five-step drawer keeps its stage rail horizontally scrollable, uses two-column footer actions so Back / Save / Clear / Next never collapse into narrow text strips, and gives location presets, feature choices, fee options, and validation links the same 44px touch target as the main controls.
+- **Mobile:** The compact top bar keeps the brand and essential utilities visible; Find, Saved, Post, and Messages use a fixed safe-area-aware bottom navigation with locale-aware labels and count badges.
+- **Posting flow on mobile:** The existing three-stage drawer uses a compact progress state and a sticky Back / Next or Publish footer. Save draft and Clear draft live in a More menu, and Clear draft requires confirmation. Autosave, recovery, validation, AI polish, and uploads remain unchanged.
+- **Mobile listing hierarchy:** Listing cards use a 200–220px image, a two-line title, the core rent / bed / bath / move-in / lease facts, two primary tags, and Contact as the dominant action. Share and Compare are grouped under More. Detail drawers use a 220–240px gallery, collapsed thumbnails, key facts before secondary trust context, and a sticky Contact / Save / More dock.
+- **Mobile search:** Location, the assistant, min/max price, bedrooms, and move-in remain visible. Bathrooms, square footage, property type, and feature chips are grouped under More filters. The result count is always available through a sticky View N listings action.
+- **Product principles:** The privacy, trust, and conversation principles sit after the primary browsing content inside a collapsible “Why Anju works this way” section.
 
 ### Listing Gallery
 
