@@ -8,6 +8,8 @@ import {
 import {
   isAcceptableNearbyWalkMinutes,
   isChineseOrAsianMarket,
+  locationSearchOrigin,
+  hasUrbanTransitLine,
   selectSupermarketCandidate,
   selectUrbanTransitPlaces,
   transitRegion,
@@ -55,6 +57,17 @@ test("urban transit selection puts the nearby bus result before subway and rejec
   assert.equal(urbanTransitKind(lirrOnly), null);
   assert.equal(urbanTransitKind(subway), "subway");
   assert.equal(urbanTransitKind(bus), "bus");
+});
+
+test("urban transit recognizes neighborhood bus-stop types", () => {
+  const busStop = place({ id: "bus-stop", name: "213th Street Bus Stop", types: ["bus_stop"], transitLines: [] });
+  assert.equal(hasUrbanTransitLine(busStop), true);
+  assert.equal(urbanTransitKind(busStop), "bus");
+});
+
+test("private address lookups stay anchored to the selected public area", () => {
+  assert.equal(locationSearchOrigin("5607 213th street", "Flushing, Queens, New York"), "5607 213th street, Flushing, Queens, New York");
+  assert.equal(locationSearchOrigin("", "Flushing, Queens, New York"), "Flushing, Queens, New York");
 });
 
 test("nearby walking guard rejects implausibly distant route results", () => {

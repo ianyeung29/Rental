@@ -19,6 +19,7 @@ import {
   uniqueNamedPlaces,
   uniquePlaces as ruleUniquePlaces,
   urbanTransitKind,
+  locationSearchOrigin,
   type TransitRegion as RuleTransitRegion,
 } from "./location-context-rules";
 
@@ -549,7 +550,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
   }
 
   const lookupSettings = await currentLocationLookupSettings();
-  const cacheKey = JSON.stringify({ version: 11, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, lookupSettings: { placesCallsPerLookup: lookupSettings.placesCallsPerLookup, routeCallsPerLookup: lookupSettings.routeCallsPerLookup }, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
+  const cacheKey = JSON.stringify({ version: 12, areaEn, areaZh, boroughEn, boroughZh, locale, lookupOptions, lookupSettings: { placesCallsPerLookup: lookupSettings.placesCallsPerLookup, routeCallsPerLookup: lookupSettings.routeCallsPerLookup }, privateAddressHash: privateAddress ? privateAddressCacheHash(privateAddress) : "" });
   const cached = contextCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     reportUsage({ placesCalls: 0, routeCalls: 0, cacheHit: true });
@@ -574,8 +575,11 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
     routeLimit: lookupSettings.routeCallsPerLookup,
   };
   const routeOrigin = privateAddress ? "privateAddress" : "approximateArea";
-  const routeOriginQuery = privateAddress || queryArea;
-  const routeOriginValue: RouteWaypoint = privateAddress || queryArea;
+  // A street-only private address is ambiguous to Google. Keep the exact
+  // address server-side, but add the selected public area to every Places and
+  // Routes origin so the lookup stays anchored to the intended neighborhood.
+  const routeOriginQuery = locationSearchOrigin(privateAddress, queryArea);
+  const routeOriginValue: RouteWaypoint = routeOriginQuery;
   const region = transitRegion(areaEn, areaZh, boroughEn, boroughZh);
   let placesQualityIssues = 0;
   let routesQualityIssues = 0;
@@ -610,7 +614,7 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
       transitPlaces = await searchPlacesWithinBudget(apiKey, {
         textQuery: nearbyQuery("bus stop", routeOriginQuery),
         pageSize: 10,
-        includedType: "bus_station",
+        includedType: "bus_stop",
         strictTypeFiltering: true,
         rankPreference: "DISTANCE",
       }, languageCode, budget, true);
@@ -619,6 +623,19 @@ export async function buildLocationContext(request: LocationContextRequest): Pro
         return kind === "bus" || kind === "both";
       });
       if (!hasBusResult && budget.placesCalls < budget.placesLimit) {
+        transitPlaces = await searchPlacesWithinBudget(apiKey, {
+          textQuery: nearbyQuery("bus station", routeOriginQuery),
+          pageSize: 8,
+          includedType: "bus_station",
+          strictTypeFiltering: true,
+          rankPreference: "DISTANCE",
+        }, languageCode, budget, true);
+      }
+      const hasBusStationResult = transitPlaces.some((place) => {
+        const kind = urbanTransitKind(place);
+        return kind === "bus" || kind === "both";
+      });
+      if (!hasBusStationResult && budget.placesCalls < budget.placesLimit) {
         transitPlaces = await searchPlacesWithinBudget(apiKey, {
           textQuery: nearbyQuery("subway station", routeOriginQuery),
           pageSize: 8,
