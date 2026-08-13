@@ -224,9 +224,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Please send a valid listing draft." }, { status: 400 });
   }
 
-  if (!input.titleEn && !input.titleZh && !input.descriptionEn && !input.descriptionZh) {
-    return NextResponse.json({ error: "Add a title or description before polishing." }, { status: 400 });
-  }
+  if (!input.areaEn && !input.areaZh) return NextResponse.json({ error: "Choose a public area before creating the listing copy." }, { status: 400 });
+  if (!input.price) return NextResponse.json({ error: "Add the monthly rent before creating the listing copy." }, { status: 400 });
 
   let mapUsage: LocationContextUsage = { placesCalls: 0, routeCalls: 0, cacheHit: false };
   try {

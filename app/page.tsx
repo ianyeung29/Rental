@@ -310,7 +310,7 @@ type ListingDraft = {
   expiresOn: string;
 };
 
-type PostStep = 1 | 2 | 3 | 4 | 5;
+type PostStep = 1 | 2 | 3;
 type DraftSaveState = "idle" | "saving" | "savedLocal" | "savedAccount" | "offline";
 
 const EMPTY_DRAFT: ListingDraft = {
@@ -606,6 +606,13 @@ const LOCATION_LOOKUP_OPTION_COPY: Record<LocationLookupOption, { zh: string; en
   transit: { zh: "地铁 / 火车 / 公交", en: "Subway / train / bus" },
 };
 
+function locationLookupPreset(areaGroupId: string): LocationLookupOption[] {
+  if (areaGroupId === "queens" || areaGroupId === "brooklyn") return ["transit", "grocery", "community"];
+  if (areaGroupId === "long-island") return ["transit", "grocery"];
+  if (areaGroupId === "upstate-new-york") return ["transit", "grocery"];
+  return ["transit", "grocery"];
+}
+
 function transitLineLabel(line: LocationContextTransitLine, locale: Locale) {
   const vehicleType = line.vehicleType?.toLocaleUpperCase();
   const vehicle = vehicleType === "BUS" || vehicleType === "INTERCITY_BUS" || vehicleType === "TROLLEYBUS" ? (locale === "zh" ? "公交" : "Bus") : vehicleType === "SUBWAY" || vehicleType === "METRO_RAIL" ? (locale === "zh" ? "地铁" : "Subway") : vehicleType === "TRAIN" || vehicleType === "RAIL" || vehicleType === "HEAVY_RAIL" || vehicleType === "COMMUTER_TRAIN" ? (locale === "zh" ? "铁路" : "Rail") : "";
@@ -659,6 +666,53 @@ const INQUIRY_COMMENT_OPTIONS = [
   { value: "utilities", zh: "想确认水电网等费用是否包含", en: "I'd like to confirm whether utilities are included" },
   { value: "requirements", zh: "想了解申请条件和所需材料", en: "I'd like to learn about the application requirements" },
 ] as const;
+
+type AssistantSearchUpdate = {
+  location?: string;
+  minPrice?: string;
+  maxPrice?: string;
+  minSqft?: string;
+  maxSqft?: string;
+  bedrooms?: string;
+  bathrooms?: string;
+  rentalType?: RentalType;
+  moveIn?: string;
+  features: string[];
+};
+
+function parseAssistantSearch(value: string): AssistantSearchUpdate {
+  const normalized = value.trim().toLocaleLowerCase().replace(/，/g, ",");
+  const result: AssistantSearchUpdate = { features: [] };
+  const locations = POPULAR_AREA_GROUPS.flatMap((group) => [group, ...group.locations]);
+  const location = locations.find((item) => [item.zh, item.en, item.value].some((label) => normalized.includes(label.toLocaleLowerCase())));
+  if (location) result.location = location.value;
+  const maxPriceMatch = normalized.match(/(?:不超过|以内|以下|最多|预算|under|below|max(?:imum)?(?: budget)?)[^\d$]{0,8}\$?\s*([\d,]{3,})/i)
+    || normalized.match(/\$\s*([\d,]{3,})\s*(?:以内|以下|or less|max|under)/i);
+  const minPriceMatch = normalized.match(/(?:至少|以上|最低|from|min(?:imum)?)[^\d$]{0,8}\$?\s*([\d,]{3,})/i);
+  if (maxPriceMatch) result.maxPrice = maxPriceMatch[1].replace(/,/g, "");
+  if (minPriceMatch) result.minPrice = minPriceMatch[1].replace(/,/g, "");
+  const bedroomMatch = normalized.match(/([0-4])\s*(?:房|卧|bed(?:room)?s?)/i);
+  const chineseBedroom = normalized.match(/([一二两三四])\s*(?:房|卧)/);
+  const chineseNumber: Record<string, string> = { 一: "1", 二: "2", 两: "2", 三: "3", 四: "4" };
+  if (bedroomMatch) result.bedrooms = bedroomMatch[1];
+  else if (chineseBedroom) result.bedrooms = chineseNumber[chineseBedroom[1]];
+  const bathroomMatch = normalized.match(/([1-4](?:\.5)?)\s*(?:卫|卫生间|bath(?:room)?s?)/i);
+  if (bathroomMatch) result.bathrooms = bathroomMatch[1];
+  const sqftMatch = normalized.match(/([\d,]{3,})\s*(?:平方英尺|平方尺|sq\.?\s*ft|square feet)/i);
+  if (sqftMatch) result.minSqft = sqftMatch[1].replace(/,/g, "");
+  if (/(独立房间|单间|private room)/i.test(normalized)) result.rentalType = "privateRoom";
+  else if (/(转租|sublet)/i.test(normalized)) result.rentalType = "sublet";
+  else if (/(整租|整套|entire (?:home|place|apartment))/i.test(normalized)) result.rentalType = "entire";
+  if (/(立即入住|马上入住|immediate|move in now)/i.test(normalized)) result.moveIn = "immediate";
+  const featureTerms: Array<[string, RegExp]> = [
+    ["furnished", /家具|furnished/i], ["utilities", /包水电|utilities included/i], ["parking", /停车|parking/i],
+    ["pets", /宠物|pet friendly|pets allowed/i], ["laundry", /洗衣|laundry/i], ["inUnitLaundry", /室内洗衣|in[- ]unit laundry/i],
+    ["airConditioning", /空调|air conditioning|\bac\b/i], ["dishwasher", /洗碗机|dishwasher/i], ["balcony", /阳台|露台|balcony|terrace/i],
+    ["elevator", /电梯|elevator/i], ["nearTransit", /近地铁|近公交|near transit|near subway/i], ["shortTerm", /短租|short term/i],
+  ];
+  result.features = featureTerms.filter(([, pattern]) => pattern.test(normalized)).map(([key]) => key);
+  return result;
+}
 
 // Common NYC and Long Island search aliases. Exact listing text remains searchable too.
 const LOCATION_ALIAS_GROUPS = [
@@ -1891,6 +1945,8 @@ export default function HomePage() {
   const [locale, setLocale] = useState<Locale>("zh");
   const [locationInput, setLocationInput] = useState("");
   const [appliedLocation, setAppliedLocation] = useState("");
+  const [assistantSearchInput, setAssistantSearchInput] = useState("");
+  const [assistantSearchSummary, setAssistantSearchSummary] = useState("");
   const [selectedPopularAreaId, setSelectedPopularAreaId] = useState("");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
@@ -1993,6 +2049,8 @@ export default function HomePage() {
   const [aiPolishNotes, setAiPolishNotes] = useState<string[]>([]);
   const [locationContext, setLocationContext] = useState<LocationContext | null>(null);
   const [locationContextLoading, setLocationContextLoading] = useState(false);
+  const [locationSuggestLoading, setLocationSuggestLoading] = useState(false);
+  const [locationSuggestMessage, setLocationSuggestMessage] = useState("");
   const [mediaUploading, setMediaUploading] = useState(false);
   const [publishLoading, setPublishLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -2884,6 +2942,32 @@ export default function HomePage() {
     setCurrentUser((current) => current ? { ...current, agentVerificationStatus: status, agentVerified: status === "verified" } : current);
   };
 
+  const suggestLocationFromAddress = async () => {
+    if (draft.privateAddress.trim().length < 8 || locationSuggestLoading) return;
+    setLocationSuggestLoading(true);
+    setLocationSuggestMessage("");
+    try {
+      const response = await fetch("/api/location-suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: draft.privateAddress.trim() }) });
+      const payload = await response.json() as { boroughId?: string; borough?: string; area?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || (locale === "zh" ? "暂时无法识别区域。" : "The area could not be detected."));
+      const group = POPULAR_AREA_GROUPS.find((item) => item.id === payload.boroughId);
+      const normalizedArea = (payload.area || "").toLowerCase();
+      const knownArea = group?.locations.find((item) => item.en.toLowerCase() === normalizedArea || item.en.toLowerCase().includes(normalizedArea) || normalizedArea.includes(item.en.toLowerCase()));
+      updateDraft({
+        areaGroupId: group?.id || draft.areaGroupId,
+        areaLocationId: knownArea?.id || (group ? "custom" : draft.areaLocationId),
+        areaEn: knownArea?.en || payload.area || group?.en || draft.areaEn,
+        areaZh: knownArea?.zh || payload.area || group?.zh || draft.areaZh,
+        locationLookupOptions: locationLookupPreset(group?.id || draft.areaGroupId),
+      });
+      setLocationSuggestMessage(locale === "zh" ? `已建议公开区域：${knownArea?.zh || payload.area || group?.zh || "请人工确认"}` : `Suggested public area: ${knownArea?.en || payload.area || group?.en || "please review"}`);
+    } catch (error) {
+      setLocationSuggestMessage(error instanceof Error ? error.message : (locale === "zh" ? "暂时无法识别区域。" : "The area could not be detected."));
+    } finally {
+      setLocationSuggestLoading(false);
+    }
+  };
+
   const handleAgentAccountActivated = (input: { accountType: "agent"; agentVerificationStatus: AuthUser["agentVerificationStatus"]; agentVerified: boolean }) => {
     setCurrentUser((current) => current ? { ...current, ...input } : current);
     showToast(locale === "zh" ? "经纪申请已开始，请提交执照核验资料" : "Agent application started; submit your license details for review");
@@ -3155,6 +3239,27 @@ export default function HomePage() {
     setAppliedLocation(value);
   };
 
+  const applyAssistantSearch = () => {
+    const parsed = parseAssistantSearch(assistantSearchInput);
+    if (parsed.location) { setLocationInput(parsed.location); setAppliedLocation(parsed.location); }
+    if (parsed.minPrice) setMinPrice(parsed.minPrice);
+    if (parsed.maxPrice) setMaxPrice(parsed.maxPrice);
+    if (parsed.minSqft) setMinSqft(parsed.minSqft);
+    if (parsed.maxSqft) setMaxSqft(parsed.maxSqft);
+    if (parsed.bedrooms) setBedrooms(parsed.bedrooms);
+    if (parsed.bathrooms) setBathrooms(parsed.bathrooms);
+    if (parsed.rentalType) setRentalType(parsed.rentalType);
+    if (parsed.moveIn) setMoveIn(parsed.moveIn);
+    if (parsed.features.length) setActiveFeatures((current) => Array.from(new Set([...current, ...parsed.features])));
+    const recognized = [parsed.location, parsed.maxPrice ? `${locale === "zh" ? "最高" : "Max"} $${Number(parsed.maxPrice).toLocaleString("en-US")}` : "", parsed.bedrooms ? `${parsed.bedrooms} ${locale === "zh" ? "卧室" : "bed"}` : "", ...parsed.features.slice(0, 2).map((feature) => t[feature as keyof typeof t])].filter(Boolean);
+    if (!recognized.length) {
+      setAssistantSearchSummary(locale === "zh" ? "暂时没有识别到筛选条件，请尝试写明区域、预算或卧室数。" : "No filters were recognized yet. Try including an area, budget, or bedroom count.");
+      return;
+    }
+    setAssistantSearchSummary((locale === "zh" ? "已应用：" : "Applied: ") + recognized.join(" · "));
+    setMobileFiltersOpen(false);
+  };
+
   const resetFilters = () => {
     setLocationInput("");
     setAppliedLocation("");
@@ -3168,6 +3273,8 @@ export default function HomePage() {
     setRentalType("all");
     setMoveIn("");
     setActiveFeatures([]);
+    setAssistantSearchInput("");
+    setAssistantSearchSummary("");
     setMobileFiltersOpen(false);
     showToast(locale === "zh" ? "筛选条件已重置" : "Filters reset");
   };
@@ -3522,14 +3629,15 @@ export default function HomePage() {
 
   const validatePostStep = (step: PostStep) => {
     const required = locale === "zh" ? "请补充此步骤的必填信息。" : "Please complete the required fields in this step.";
-    if (step === 1 && (!draft.titleZh.trim() || !draft.areaZh.trim() || !draft.privateAddress.trim())) return required;
+    if (step === 1 && (!draft.areaZh.trim() || !draft.privateAddress.trim())) return required;
     if (step === 1 && draft.areaGroupId && !draft.areaLocationId) return locale === "zh" ? "请选择区域 / 城市，或选择手动输入后填写公开区域名称。" : "Choose an area or city, or select manual entry and add a public area label.";
-    if (step === 2 && (!draft.price || Number(draft.price) <= 0 || !draft.lease || (draft.moveInMode === "date" && !draft.moveInDate))) return locale === "zh" ? "请填写有效租金、入住方式和租期。" : "Add a valid rent, move-in option, and lease term.";
-    if (step === 2 && draft.squareFeet && (!Number.isInteger(Number(draft.squareFeet)) || Number(draft.squareFeet) < 50 || Number(draft.squareFeet) > 100000)) return locale === "zh" ? "请输入 50 至 100,000 之间的建筑面积。" : "Use a square footage value between 50 and 100,000.";
-    if (step === 3 && draft.photos.length === 0) return locale === "zh" ? "至少上传一张房源照片。" : "Upload at least one listing photo.";
-    if (step === 4 && (!draft.contactName.trim() || !draft.contactEmail.trim() || !draft.contactEmail.includes("@"))) return locale === "zh" ? "请填写姓名和有效邮箱。" : "Add your name and a valid email address.";
-    if (step === 4 && draft.agentService === "agentMatch" && draft.agentFeePlan === "flatFee" && (!draft.agentFeeAmount || Number(draft.agentFeeAmount) <= 0)) return locale === "zh" ? "请填写有效的经纪固定费用，或改选其他费用意向。" : "Add a valid agent flat fee or choose another fee preference.";
-    if (step === 5 && draft.expiresOn && (!isDateOnly(draft.expiresOn) || draft.expiresOn < todayDateOnly())) return locale === "zh" ? "请选择今天或之后的公开截止日期。" : "Choose today or a future listing expiration date.";
+    if (step === 1 && (!draft.price || Number(draft.price) <= 0 || !draft.lease || (draft.moveInMode === "date" && !draft.moveInDate))) return locale === "zh" ? "请填写有效租金、入住方式和租期。" : "Add a valid rent, move-in option, and lease term.";
+    if (step === 1 && draft.squareFeet && (!Number.isInteger(Number(draft.squareFeet)) || Number(draft.squareFeet) < 50 || Number(draft.squareFeet) > 100000)) return locale === "zh" ? "请输入 50 至 100,000 之间的建筑面积。" : "Use a square footage value between 50 and 100,000.";
+    if (step === 2 && draft.photos.length === 0) return locale === "zh" ? "至少上传一张房源照片。" : "Upload at least one listing photo.";
+    if (step === 2 && !draft.titleZh.trim()) return locale === "zh" ? "请让安居助手生成标题，或自行填写房源标题。" : "Create a title with Anju Assistant or enter one yourself.";
+    if (step === 3 && (!draft.contactName.trim() || !draft.contactEmail.trim() || !draft.contactEmail.includes("@"))) return locale === "zh" ? "请填写姓名和有效邮箱。" : "Add your name and a valid email address.";
+    if (step === 3 && draft.agentService === "agentMatch" && draft.agentFeePlan === "flatFee" && (!draft.agentFeeAmount || Number(draft.agentFeeAmount) <= 0)) return locale === "zh" ? "请填写有效的经纪固定费用，或改选其他费用意向。" : "Add a valid agent flat fee or choose another fee preference.";
+    if (step === 3 && draft.expiresOn && (!isDateOnly(draft.expiresOn) || draft.expiresOn < todayDateOnly())) return locale === "zh" ? "请选择今天或之后的公开截止日期。" : "Choose today or a future listing expiration date.";
     return "";
   };
 
@@ -3540,7 +3648,7 @@ export default function HomePage() {
       return;
     }
     setPostError("");
-    if (postStep < 5) setPostStep((current) => (current + 1) as PostStep);
+    if (postStep < 3) setPostStep((current) => (current + 1) as PostStep);
   };
 
   const focusQualityTarget = (target?: ListingQualityTarget) => {
@@ -3666,22 +3774,22 @@ export default function HomePage() {
   };
 
   const publishLocalListing = async () => {
-    const firstError = ([1, 2, 3, 4, 5] as PostStep[]).map(validatePostStep).find(Boolean);
+    const firstError = ([1, 2, 3] as PostStep[]).map(validatePostStep).find(Boolean);
     if (firstError) {
       setPostError(firstError);
-      setPostStep(([1, 2, 3, 4, 5] as PostStep[]).find((step) => Boolean(validatePostStep(step))) || 1);
+      setPostStep(([1, 2, 3] as PostStep[]).find((step) => Boolean(validatePostStep(step))) || 1);
       return;
     }
     if (postSafetyReview.blocking.length > 0) {
       const issue = postSafetyReview.blocking[0];
       setPostError(locale === "zh" ? issue.detailZh : issue.detailEn);
-      setPostStep(5);
+      setPostStep(3);
       return;
     }
     const draftMedia = mediaFromDraft(draft);
     if (draftMedia.length !== draft.photos.length || draftMedia.some((media) => !media.key || !media.url)) {
       setPostError("Please re-upload the listing photos so they can be saved to cloud storage.");
-      setPostStep(3);
+      setPostStep(2);
       return;
     }
     if (publishLoading) return;
@@ -3981,7 +4089,10 @@ export default function HomePage() {
     features: listingCompareFeatures(listing).slice(0, 8),
     poster: listing.source === "local" ? (locale === "zh" ? "本地账号" : "Local account") : listing.source === "demo" ? (locale === "zh" ? "演示发布" : "Demo post") : listingPoster(listing),
   }));
-  const activeCompareSummary = compareSummary && compareSummary.key === compareKey && compareSummary.locale === locale ? compareSummary : null;
+  const immediateCompareSummary = compareFacts.length === 2 ? buildLocalCompareSummary(compareFacts, locale) : null;
+  const activeCompareSummary = compareSummary && compareSummary.key === compareKey && compareSummary.locale === locale
+    ? compareSummary
+    : immediateCompareSummary ? { ...immediateCompareSummary, key: compareKey, locale, source: "local" as const } : null;
   const selectedPhotos = selectedListing ? listingPhotos(selectedListing) : [];
   const handleCompareSummary = async () => {
     if (compareFacts.length !== 2) {
@@ -4331,25 +4442,6 @@ export default function HomePage() {
     }
   };
 
-  const postStageLabels = [
-    { step: 1 as PostStep, label: t.stageProperty },
-    { step: 2 as PostStep, label: t.stageTerms },
-    { step: 3 as PostStep, label: t.stageStory },
-    { step: 4 as PostStep, label: t.stageContact },
-    { step: 5 as PostStep, label: t.stagePublish },
-  ];
-  const completedPostStageCount = ([1, 2, 3, 4] as PostStep[]).filter((step) => postStep > step && !validatePostStep(step)).length;
-  const postProgressPercent = Math.round((postStep / postStageLabels.length) * 100);
-  const draftSaveLabel = draftSaveState === "saving"
-    ? (locale === "zh" ? "正在保存…" : "Saving…")
-    : draftSaveState === "savedAccount"
-      ? (locale === "zh" ? "已同步到账号" : "Synced to account")
-      : draftSaveState === "savedLocal"
-        ? (locale === "zh" ? "已保存在此设备" : "Saved on this device")
-        : draftSaveState === "offline"
-          ? (locale === "zh" ? "已保存本地 · 等待同步" : "Saved locally · sync pending")
-          : (locale === "zh" ? "尚未保存" : "Not saved yet");
-
   return (
     <div className="app-shell">
       <a className="skip-link" href="#rentals">
@@ -4412,6 +4504,12 @@ export default function HomePage() {
             </div>
 
             <form className="filter-form" onSubmit={submitSearch}>
+              <section className="assistant-search" aria-labelledby="assistant-search-title">
+                <div className="assistant-search-heading"><span className="anju-assistant-mark" aria-hidden="true"><SearchIcon /></span><div><strong id="assistant-search-title">{locale === "zh" ? "告诉安居助手你想找什么" : "Tell Anju Assistant what you need"}</strong><small>{locale === "zh" ? "例如：法拉盛两房，$3,000以内，允许宠物" : "Example: Two bedrooms in Flushing, under $3,000, pet friendly"}</small></div></div>
+                <textarea rows={2} value={assistantSearchInput} onChange={(event) => setAssistantSearchInput(event.target.value)} placeholder={locale === "zh" ? "输入区域、预算、卧室和需要的特点" : "Enter an area, budget, bedrooms, and features"} />
+                <button className="outline-button" type="button" onClick={applyAssistantSearch} disabled={!assistantSearchInput.trim()}>{locale === "zh" ? "转换成筛选条件" : "Apply as filters"}<ArrowIcon size={13} /></button>
+                {assistantSearchSummary && <p role="status">{assistantSearchSummary}</p>}
+              </section>
               <label className="field-label" htmlFor="location">{t.location}</label>
               <div className="input-shell search-input-shell">
                 <SearchIcon />
@@ -4820,7 +4918,7 @@ export default function HomePage() {
               </div>
               <section className="compare-summary" aria-labelledby="compare-summary-title">
                 <div className="compare-summary-heading">
-                  <div><span className="section-label">AI CONCLUSION</span><h3 id="compare-summary-title">{locale === "zh" ? "这两套房源怎么选？" : "Which listing fits better?"}</h3></div>
+                  <div><h3 id="compare-summary-title">{locale === "zh" ? "安居助手建议" : "Anju Assistant guidance"}</h3></div>
                   {activeCompareSummary && <span className={`compare-summary-source ${activeCompareSummary.source}`}>{activeCompareSummary.source === "openai" ? "AI" : (locale === "zh" ? "本地摘要" : "Local summary")}</span>}
                 </div>
                 {compareFacts.length < 2 ? (
@@ -4828,9 +4926,9 @@ export default function HomePage() {
                 ) : (
                   <>
                     {activeCompareSummary && <div className="compare-summary-body"><strong>{activeCompareSummary.headline}</strong><p>{activeCompareSummary.summary}</p><div className="compare-summary-best"><span>{locale === "zh" ? "适合谁" : "Best for"}</span>{activeCompareSummary.bestFor}</div>{activeCompareSummary.tradeoffs.length > 0 && <ul>{activeCompareSummary.tradeoffs.map((tradeoff, index) => <li key={`${tradeoff}-${index}`}>{tradeoff}</li>)}</ul>}</div>}
-                    <button className="primary-button compare-summary-button" type="button" onClick={() => { void handleCompareSummary(); }} disabled={compareSummaryLoading}>{compareSummaryLoading ? (locale === "zh" ? "正在生成总结…" : "Generating summary…") : activeCompareSummary ? (locale === "zh" ? "重新生成 AI 总结" : "Regenerate AI summary") : (locale === "zh" ? "用 AI 总结比较" : "Summarize with AI")}<ArrowIcon size={15} /></button>
+                    <button className="outline-button compare-summary-button" type="button" onClick={() => { void handleCompareSummary(); }} disabled={compareSummaryLoading}>{compareSummaryLoading ? (locale === "zh" ? "正在深入比较…" : "Comparing in depth…") : (locale === "zh" ? "生成更深入的 AI 分析" : "Generate deeper AI analysis")}<ArrowIcon size={15} /></button>
                     {compareSummaryError && <p className="compare-summary-note" role="status">{compareSummaryError}</p>}
-                    {activeCompareSummary?.source === "local" && !compareSummaryError && <p className="compare-summary-note">{locale === "zh" ? "当前显示本地规则摘要；配置 OPENAI_API_KEY 并验证邮箱后，可生成 AI 结论。" : "This is a local rules-based summary. Configure OPENAI_API_KEY and verify your email to generate an AI conclusion."}</p>}
+                    {activeCompareSummary?.source === "local" && !compareSummaryError && <p className="compare-summary-note">{locale === "zh" ? "基础建议已即时生成；登录并验证邮箱后可获得更深入的 AI 分析。" : "The instant guidance uses listing facts; sign in and verify your email for deeper AI analysis."}</p>}
                   </>
                 )}
               </section>
@@ -4848,35 +4946,17 @@ export default function HomePage() {
               <p className="drawer-intro">{locale === "zh" ? "填写房源信息并发布。" : "Add your listing details and publish."}</p>
               {draftRecoveryNotice && <div className="draft-recovery-notice" role="status"><div><strong>{draftRecoveryNotice === "local" ? (locale === "zh" ? "已恢复本机草稿" : "Draft restored from this device") : draftRecoveryNotice === "account" ? (locale === "zh" ? "已恢复账号草稿" : "Draft restored from your account") : (locale === "zh" ? "网络暂时不可用，草稿已保留" : "You’re offline; your draft is safe")}</strong><span>{draftRecoveryNotice === "local" ? (locale === "zh" ? "你可以继续编辑，网络恢复后会自动尝试同步。" : "Continue editing; we’ll retry account sync when the connection returns.") : draftRecoveryNotice === "account" ? (locale === "zh" ? "上次保存的内容已加载，可以继续发布。" : "Your last saved version is loaded and ready to continue.") : (locale === "zh" ? "草稿保存在此设备上，不会因为离线而丢失。" : "This draft is stored on this device and won’t be lost while offline.")}</span></div><button className="text-button" type="button" onClick={() => setDraftRecoveryNotice(null)}>{locale === "zh" ? "知道了" : "Got it"}</button></div>}
                 {demoMode && !currentUser && <div className="demo-mode-notice" role="note"><strong>{locale === "zh" ? "演示模式" : "Demo mode"}</strong><span>{locale === "zh" ? "无需登录即可发布；请填写联系人信息。" : "No sign-in is needed for this demonstration; enter contact details below."}</span></div>}
-                <div className="post-progress"><span>{locale === "zh" ? `第 ${postStep} 步，共 5 步` : `Step ${postStep} of 5`}</span><span>{editingListingId ? (locale === "zh" ? "编辑模式" : "Editing") : draftSavedAt ? (locale === "zh" ? (currentUser?.emailVerified ? "草稿已同步" : "草稿已自动保存") : (currentUser?.emailVerified ? "Draft synced" : "Draft autosaved")) : (currentUser?.emailVerified ? (locale === "zh" ? "账号草稿" : "Account draft") : (locale === "zh" ? "本地草稿" : "Local draft"))}</span></div>
-              <div className="post-flow-summary">
-                <div className="post-flow-summary-top">
-                  <div><span className="section-label">{locale === "zh" ? "发布进度" : "POSTING PROGRESS"}</span><strong>{locale === "zh" ? `已完成 ${completedPostStageCount} / 5 步` : `${completedPostStageCount} of 5 steps complete`}</strong></div>
-                  <span className={`draft-save-status ${draftSaveState}`}><span className="draft-save-dot" aria-hidden="true" />{draftSaveLabel}</span>
-                </div>
-                <div className="post-progress-track" aria-hidden="true"><span style={{ transform: `scaleX(${postProgressPercent / 100})` }} /></div>
-                <div className="post-stage-health" role="status">
-                  <span>{locale === "zh" ? "可以使用“上一步”返回修改；带“需补充”的步骤还需要信息。" : "Use Back to revise earlier steps; flagged steps still need details."}</span>
-                  {postStageLabels.filter(({ step }) => step < postStep && Boolean(validatePostStep(step))).map(({ step, label }) => <button className="post-stage-health-action" type="button" key={step} onClick={() => { setPostStep(step); setPostError(""); }}>{label} · {locale === "zh" ? "需补充" : "Needs details"}</button>)}
-                </div>
-              </div>
-              <div className="stage-list">
-                {[t.stageProperty, t.stageTerms, t.stageStory, t.stageContact, t.stagePublish].map((stage, index) => <div className={`stage-row ${index + 1 === postStep ? "is-current" : ""} ${index + 1 < postStep ? "is-complete" : ""}`} key={stage} aria-current={index + 1 === postStep ? "step" : undefined}><span className={`stage-index ${index + 1 <= postStep ? "current" : ""}`}>{index + 1}</span><span>{stage}</span><span className="stage-state">{index + 1 < postStep ? (locale === "zh" ? "完成" : "Done") : index + 1 === postStep ? (locale === "zh" ? "当前" : "Current") : (locale === "zh" ? "待开始" : "Next")}</span></div>)}
-              </div>
-
               {postStep === 1 && (
                 <div className="post-form-grid">
-                  <div className="post-quick-start field-span-2" role="note"><strong>{locale === "zh" ? "先选一个常用区域，再填写 3 项核心信息" : "Start with a popular area, then add the 3 core details"}</strong><p>{locale === "zh" ? "标题、公开区域和精确地址是第一步必填项；精确地址只用于看房沟通和服务器端附近路线估算。" : "Title, public area, and exact address are required here; the exact address stays private and is used for tour communication and server-side nearby route estimates."}</p></div>
-                  <label className="field-label" htmlFor="post-title-zh">{locale === "zh" ? "中文房源标题" : "Listing title"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-title-zh" value={draft.titleZh} onChange={(event) => updateDraft({ titleZh: event.target.value })} placeholder={locale === "zh" ? "近地铁的明亮两居" : "Bright two-bedroom near transit"} /></label>
-                  <div className="post-location-picker field-span-2" role="group" aria-labelledby="post-location-heading"><div className="post-helper-heading"><span id="post-location-heading">{locale === "zh" ? "公开区域" : "Public area"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span></span><small>{locale === "zh" ? "先选行政区 / 地区，再选区域 / 城市" : "Choose a borough or region, then an area or city"}</small></div><p className="field-help">{locale === "zh" ? "公开页面只显示大致区域；精确地址不会放在公开房源中。" : "Public pages show only an approximate area; the exact address stays private."}</p><div className="post-location-grid"><label className="field-label" htmlFor="post-area-group">{locale === "zh" ? "行政区 / 地区" : "Borough / region"}<select id="post-area-group" value={draft.areaGroupId} onChange={(event) => { const group = POPULAR_AREA_GROUPS.find((item) => item.id === event.target.value); updateDraft({ areaGroupId: event.target.value, areaLocationId: "", areaZh: group?.zh || "", areaEn: group?.en || "" }); }}><option value="">{locale === "zh" ? "请选择行政区或地区" : "Choose a borough or region"}</option>{POPULAR_AREA_GROUPS.map((group) => <option value={group.id} key={group.id}>{group.zh} / {group.en}</option>)}</select></label><label className="field-label" htmlFor="post-area-location">{locale === "zh" ? "区域 / 城市" : "Area / city"}<select id="post-area-location" value={draft.areaLocationId} disabled={!selectedPostAreaGroup} onChange={(event) => { const location = selectedPostAreaGroup?.locations.find((item) => item.id === event.target.value); updateDraft({ areaLocationId: event.target.value, areaZh: location?.zh || draft.areaZh, areaEn: location?.en || draft.areaEn }); }}><option value="">{selectedPostAreaGroup ? (locale === "zh" ? "请选择区域或城市" : "Choose an area or city") : (locale === "zh" ? "请先选择行政区 / 地区" : "Choose a borough or region first")}</option>{selectedPostAreaGroup?.locations.map((location) => <option value={location.id} key={location.id}>{location.zh} / {location.en}</option>)}{selectedPostAreaGroup && <option value="custom">{locale === "zh" ? "其他区域 / 手动输入" : "Other area / enter manually"}</option>}</select></label></div></div>
-                  <label className="field-label field-span-2" htmlFor="post-area-zh">{locale === "zh" ? "公开区域名称" : "Public area label"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-area-zh" value={draft.areaZh} onChange={(event) => updateDraft({ areaZh: event.target.value, areaEn: "", areaLocationId: draft.areaGroupId ? "custom" : "" })} placeholder={locale === "zh" ? "例如：皇后区 · 森林小丘一带" : "Example: Queens · around Forest Hills"} /><span className="field-help">{locale === "zh" ? "选择区域后可继续修改公开名称；建议使用中文，方便本地租客搜索。" : "You can edit the public label after selecting an area; Chinese helps local renters search."}</span></label>
-                  <label className="field-label" htmlFor="post-private-address">{locale === "zh" ? "精确地址（私密）" : "Exact address (private)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-private-address" value={draft.privateAddress} onChange={(event) => updateDraft({ privateAddress: event.target.value })} placeholder={locale === "zh" ? "请输入完整街道地址" : "Enter the full street address"} /><span className="field-help">{locale === "zh" ? "只在服务器端用于路线估算和看房沟通；不会发送给 AI 或放在公开房源。" : "Used on the server for route estimates and tour communication; never sent to AI or shown on the public listing."}</span></label>
-                  <div className="post-privacy-note"><LockIcon /><div><strong>{t.addressPrivate}</strong><p>不会出现在公开房源卡片；使用 AI 附近参考时，只在服务器端用于 Google 路线估算。</p></div></div>
+                  <div className="post-location-picker field-span-2" role="group" aria-labelledby="post-location-heading"><div className="post-helper-heading"><span id="post-location-heading">{locale === "zh" ? "房源位置" : "Property location"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span></span><small>{locale === "zh" ? "公开页面只显示大致区域" : "Only the approximate area is public"}</small></div><div className="post-location-grid"><label className="field-label" htmlFor="post-area-group">{locale === "zh" ? "行政区 / 地区" : "Borough / region"}<select id="post-area-group" value={draft.areaGroupId} onChange={(event) => { const group = POPULAR_AREA_GROUPS.find((item) => item.id === event.target.value); updateDraft({ areaGroupId: event.target.value, areaLocationId: "", areaZh: group?.zh || "", areaEn: group?.en || "", locationLookupOptions: locationLookupPreset(event.target.value) }); }}><option value="">{locale === "zh" ? "请选择行政区或地区" : "Choose a borough or region"}</option>{POPULAR_AREA_GROUPS.map((group) => <option value={group.id} key={group.id}>{group.zh} / {group.en}</option>)}</select></label><label className="field-label" htmlFor="post-area-location">{locale === "zh" ? "区域 / 城市" : "Area / city"}<select id="post-area-location" value={draft.areaLocationId} disabled={!selectedPostAreaGroup} onChange={(event) => { const location = selectedPostAreaGroup?.locations.find((item) => item.id === event.target.value); updateDraft({ areaLocationId: event.target.value, areaZh: location?.zh || draft.areaZh, areaEn: location?.en || draft.areaEn }); }}><option value="">{selectedPostAreaGroup ? (locale === "zh" ? "请选择区域或城市" : "Choose an area or city") : (locale === "zh" ? "请先选择行政区 / 地区" : "Choose a borough or region first")}</option>{selectedPostAreaGroup?.locations.map((location) => <option value={location.id} key={location.id}>{location.zh} / {location.en}</option>)}{selectedPostAreaGroup && <option value="custom">{locale === "zh" ? "其他区域 / 手动输入" : "Other area / enter manually"}</option>}</select></label></div></div>
+                  <details className="post-advanced field-span-2"><summary>{locale === "zh" ? `修改公开名称${draft.areaZh ? ` · ${draft.areaZh}` : ""}` : `Edit public label${draft.areaEn ? ` · ${draft.areaEn}` : ""}`}</summary><label className="field-label" htmlFor="post-area-zh">{locale === "zh" ? "公开区域名称" : "Public area label"}<input id="post-area-zh" value={draft.areaZh} onChange={(event) => updateDraft({ areaZh: event.target.value, areaEn: "", areaLocationId: draft.areaGroupId ? "custom" : "" })} placeholder={locale === "zh" ? "例如：皇后区 · 森林小丘一带" : "Example: Queens · around Forest Hills"} /></label></details>
+                  <label className="field-label" htmlFor="post-private-address">{locale === "zh" ? "精确地址（私密）" : "Exact address (private)"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-private-address" value={draft.privateAddress} onChange={(event) => { updateDraft({ privateAddress: event.target.value }); setLocationSuggestMessage(""); }} placeholder={locale === "zh" ? "请输入完整街道地址" : "Enter the full street address"} /><span className="field-help">{locale === "zh" ? "只在服务器端用于路线估算和看房沟通；不会发送给 AI 或放在公开房源。" : "Used on the server for route estimates and tour communication; never sent to AI or shown on the public listing."}</span><button className="text-button location-suggest-button" type="button" onClick={() => { void suggestLocationFromAddress(); }} disabled={locationSuggestLoading || draft.privateAddress.trim().length < 8}>{locationSuggestLoading ? (locale === "zh" ? "正在识别区域…" : "Detecting area…") : (locale === "zh" ? "从地址建议公开区域" : "Suggest public area from address")}</button>{locationSuggestMessage && <span className="location-suggest-message" role="status">{locationSuggestMessage}</span>}</label>
+                  <div className="post-privacy-note"><LockIcon /><div><strong>{t.addressPrivate}</strong><p>{locale === "zh" ? "只用于看房沟通和服务器端路线计算。" : "Used only for tours and server-side route estimates."}</p></div></div>
                   <label className="field-label" htmlFor="post-role">发布者角色<select id="post-role" value={draft.posterRole} onChange={(event) => updateDraft({ posterRole: event.target.value as ListingDraft["posterRole"] })} disabled={Boolean(currentUser) && !canPostAsAgent}><option value="owner">房主</option>{canPostAsAgent && <option value="agent">房产经纪</option>}</select>{currentUser?.accountType === "agent" && !currentUser.agentVerified && <small className="field-help">完成经纪执照核验后，才可使用经纪身份并获得更高发布额度。</small>}{currentUser && currentUser.accountType === "user" && <small className="field-help">普通用户账户按个人房源额度发布。</small>}</label>
                 </div>
               )}
 
-              {postStep === 2 && (
+              {postStep === 1 && (
                 <div className="post-form-grid">
                   <label className="field-label" htmlFor="post-type">{t.type}<select id="post-type" value={draft.rentalType} onChange={(event) => updateDraft({ rentalType: event.target.value as ListingDraft["rentalType"] })}><option value="entire">{t.entire}</option><option value="privateRoom">{t.privateRoom}</option><option value="sublet">{t.sublet}</option></select></label>
                   <label className="field-label" htmlFor="post-price">{locale === "zh" ? "月租" : "Monthly rent"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-price" type="number" min="1" value={draft.price} onChange={(event) => updateDraft({ price: event.target.value })} placeholder="2400" /></label>
@@ -4887,17 +4967,21 @@ export default function HomePage() {
                   {draft.moveInMode === "date" && <label className="field-label" htmlFor="post-move-in-date">入住日期<input id="post-move-in-date" type="date" value={draft.moveInDate} onInput={(event) => updateDraft({ moveInDate: event.currentTarget.value })} onChange={(event) => updateDraft({ moveInDate: event.target.value })} /></label>}
                   <label className="field-label" htmlFor="post-lease">{locale === "zh" ? "最短租期（月）" : "Minimum lease (months)"}<input id="post-lease" type="number" min="1" value={draft.lease} onChange={(event) => updateDraft({ lease: event.target.value })} /></label>
                   <div className="post-quick-presets field-span-2"><div className="post-quick-presets-group"><span>{locale === "zh" ? "常用月租" : "Common rents"}</span><div className="post-quick-preset-list">{["1500", "2000", "2400", "3000"].map((value) => <button className={`post-quick-preset ${draft.price === value ? "active" : ""}`} key={value} type="button" onClick={() => updateDraft({ price: value })} aria-pressed={draft.price === value}>${Number(value).toLocaleString("en-US")}</button>)}</div></div><div className="post-quick-presets-group"><span>{locale === "zh" ? "常用租期" : "Common terms"}</span><div className="post-quick-preset-list">{["3", "6", "12", "24"].map((value) => <button className={`post-quick-preset ${draft.lease === value ? "active" : ""}`} key={value} type="button" onClick={() => updateDraft({ lease: value })} aria-pressed={draft.lease === value}>{value} {locale === "zh" ? "个月" : "mo"}</button>)}</div></div></div>
-                  <div id="post-features" className="field-label feature-field-label" tabIndex={-1}>房源特点（可多选）<div className="feature-filters post-features">{POST_FEATURE_KEYS.map((key) => <button className={`feature-chip ${draft.features.includes(key) ? "active" : ""}`} key={key} type="button" onClick={() => updateDraft({ features: draft.features.includes(key) ? draft.features.filter((item) => item !== key) : [...draft.features, key] })} aria-pressed={draft.features.includes(key)}><span className="chip-mark" aria-hidden="true">{draft.features.includes(key) ? <CheckIcon size={12} /> : ""}</span>{t[key]}</button>)}</div></div>
                 </div>
               )}
 
-              {postStep === 3 && (
+              {postStep === 2 && (
                 <div className="post-form-grid">
                   <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 4 张，当前 ${draft.photos.length} 张。支持 JPG、PNG、WebP，照片会上传到云端。` : `Up to 4 photos, ${draft.photos.length} selected. JPG, PNG, and WebP upload to cloud storage.`}</span></label><NativeMediaActions locale={locale} remaining={Math.max(0, 4 - draft.photos.length)} disabled={mediaUploading} onFiles={(files) => processPhotoFiles(files)} />
                   {draft.photos.length > 0 && <div className="photo-preview field-span-2">{draft.photos.map((photo, index) => <div className="photo-preview-item" key={`${photo.slice(0, 24)}-${index}`}><Image src={photo} alt={`${locale === "zh" ? "房源照片" : "Listing photo"} ${index + 1}`} width={112} height={82} /><span className="photo-order">{index === 0 ? (locale === "zh" ? "首图" : "Cover") : index + 1}</span><div className="photo-preview-actions"><button className="photo-action" type="button" onClick={() => movePhoto(index, "up")} disabled={index === 0} aria-label={locale === "zh" ? "设为首图" : "Move photo up"}><ChevronIcon direction="up" /></button><button className="photo-action" type="button" onClick={() => movePhoto(index, "down")} disabled={index === draft.photos.length - 1} aria-label={locale === "zh" ? "照片后移" : "Move photo down"}><ChevronIcon direction="down" /></button><button className="photo-action photo-remove" type="button" onClick={() => updateDraft(draftArraysFromMedia(mediaFromDraft(draft).filter((_, photoIndex) => photoIndex !== index)))} aria-label={locale === "zh" ? `删除照片 ${index + 1}` : `Remove photo ${index + 1}`}><CloseIcon size={14} /></button></div></div>)}</div>}
-                  <fieldset className="location-lookup-panel field-span-2">
-                    <legend>{t.lookupTitle}</legend>
-                    <p className="field-help">{t.lookupHelp}</p>
+                  <div id="post-features" className="field-label feature-field-label" tabIndex={-1}>{locale === "zh" ? "房源特点（可多选）" : "Features (choose all that apply)"}<div className="feature-filters post-features">{POST_FEATURE_KEYS.map((key) => <button className={`feature-chip ${draft.features.includes(key) ? "active" : ""}`} key={key} type="button" onClick={() => updateDraft({ features: draft.features.includes(key) ? draft.features.filter((item) => item !== key) : [...draft.features, key] })} aria-pressed={draft.features.includes(key)}><span className="chip-mark" aria-hidden="true">{draft.features.includes(key) ? <CheckIcon size={12} /> : ""}</span>{t[key]}</button>)}</div></div>
+                  <div className="anju-assistant field-span-2">
+                    <div className="anju-assistant-heading"><span className="anju-assistant-mark" aria-hidden="true"><ShieldIcon size={16} /></span><div><strong>{locale === "zh" ? "安居助手" : "Anju Assistant"}</strong><p>{locale === "zh" ? "根据房源事实生成标题和介绍，并加入经过地图服务验证的附近参考。" : "Creates a title and description from your facts, with map-verified nearby context."}</p></div></div>
+                    <button className="primary-button ai-polish-button" type="button" onClick={polishListingWithAi} disabled={aiPolishLoading || !draft.areaZh.trim() || !draft.price}>{aiPolishLoading ? (locale === "zh" ? "正在整理房源…" : "Creating listing…") : (draft.titleZh || draft.descriptionZh ? (locale === "zh" ? "重新整理" : "Refresh draft") : (locale === "zh" ? "帮我生成房源文案" : "Create my listing"))}<ArrowIcon size={14} /></button>
+                  </div>
+                  <details className="location-lookup-panel field-span-2">
+                    <summary>{locale === "zh" ? "调整附近信息" : "Customize nearby information"}<span>{draft.locationLookupOptions.map((option) => LOCATION_LOOKUP_OPTION_COPY[option][locale]).join(" · ")}</span></summary>
+                    <p className="field-help">{locale === "zh" ? "已根据所选区域自动设置。只在需要时修改。" : "Preset for the selected region. Change it only if needed."}</p>
                     <div className="location-lookup-options">
                       {LOCATION_LOOKUP_OPTIONS.map((option) => {
                         const checked = draft.locationLookupOptions.includes(option);
@@ -4909,7 +4993,7 @@ export default function HomePage() {
                       })}
                     </div>
                     <p className="location-lookup-note">{draft.locationLookupOptions.length === 0 ? t.lookupNone : `${draft.locationLookupOptions.length} ${t.lookupSelected}`}</p>
-                  </fieldset>
+                  </details>
                   {locationContextLoading && <p className="ai-location-status field-span-2" role="status">{locale === "zh" ? "正在整理所选区域的附近设施和交通参考…" : "Collecting nearby and transit context for the selected area…"}</p>}
                   {!locationContextLoading && locationContext && <p className={`ai-location-status field-span-2 ${locationContext.source === "google" ? "ready" : ""}`} role="status">{locationContext.source === "google" ? (locationContext.routeOrigin === "privateAddress" ? (locale === "zh" ? "已使用私密精确地址加入附近设施和出行时间；地址不会发送给 AI 或公开，发布前请复核。" : "Nearby places and travel times used the private address on the server; the address is not sent to AI or shown publicly. Review before publishing.") : (locale === "zh" ? "已加入大致区域的周边、华人生活圈和出行时间；发布前请复核。" : "Approximate-area nearby places, community destinations, and travel times were added; review before publishing.")) : locationContext.notes[0] || (locale === "zh" ? "没有加入未经验证的周边或交通说法。" : "No unverified nearby or transit claims were added.")}</p>}
                   {!locationContextLoading && locationContext?.source === "google" && (locationContext.destinations.length > 0 || locationContext.nearby.length > 0 || locationContext.transit.length > 0) && <div className="location-context-results field-span-2" role="note">
@@ -4931,26 +5015,23 @@ export default function HomePage() {
                     <small className="google-attribution">Powered by Google, © 2026 Google</small>
                   </div>}
                   {!locationContextLoading && locationContext?.source === "google" && locationContext.cached && <p className="location-lookup-cache-note" role="status">{t.lookupCached}</p>}
-                  <div className="ai-polish-panel field-span-2" role="note">
-                    <div className="ai-polish-copy"><span className="ai-polish-mark" aria-hidden="true"><ShieldIcon size={16} /></span><div><strong>{t.polishTitle}</strong><p>{t.polishIntro}</p></div></div>
-                    <button className="outline-button ai-polish-button" type="button" onClick={polishListingWithAi} disabled={aiPolishLoading || (!draft.titleZh.trim() && !draft.descriptionZh.trim())}>{aiPolishLoading ? t.polishLoading : t.polishAction}<ArrowIcon size={14} /></button>
-                  </div>
                   {aiPolishSource && <p className="ai-polish-status field-span-2" role="status">{aiPolishSource === "openai" ? t.polishApplied : t.polishLocal}</p>}
                   {aiPolishNotes.length > 0 && <div className="ai-polish-notes field-span-2" role="note"><strong>{locale === "zh" ? "发布前请复核" : "Review before publishing"}</strong><ul>{aiPolishNotes.map((note) => <li key={note}>{note}</li>)}</ul></div>}
                   {aiPolishError && <p className="form-error field-span-2" role="alert">{aiPolishError}</p>}
-                  <label className="field-label field-span-2" htmlFor="post-description-zh">房源介绍<textarea id="post-description-zh" rows={6} value={draft.descriptionZh} onChange={(event) => updateDraft({ descriptionZh: event.target.value })} placeholder="介绍采光、布局、交通、费用包含内容和其他真实情况。" /></label>
+                  <label className="field-label field-span-2" htmlFor="post-title-zh">{locale === "zh" ? "房源标题" : "Listing title"} <span className="field-required">{locale === "zh" ? "必填" : "Required"}</span><input id="post-title-zh" value={draft.titleZh} onChange={(event) => updateDraft({ titleZh: event.target.value })} placeholder={locale === "zh" ? "安居助手会根据房源资料生成" : "Anju Assistant can create this from your facts"} /></label>
+                  <label className="field-label field-span-2" htmlFor="post-description-zh">{locale === "zh" ? "房源介绍" : "Listing description"}<textarea id="post-description-zh" rows={6} value={draft.descriptionZh} onChange={(event) => updateDraft({ descriptionZh: event.target.value })} placeholder={locale === "zh" ? "安居助手会整理采光、布局、交通和费用等真实信息。" : "Anju Assistant can organize the home's light, layout, transport, and costs."} /></label>
                 </div>
               )}
 
-              {postStep === 4 && (
+              {postStep === 3 && (
+                <>
                 <div className="post-form-grid">
                   <label className="field-label" htmlFor="post-contact-name">{locale === "zh" ? "联系人姓名" : "Contact name"}<input id="post-contact-name" value={draft.contactName} onChange={(event) => updateDraft({ contactName: event.target.value })} placeholder="Your name" /></label>
                   <label className="field-label" htmlFor="post-contact-email">{locale === "zh" ? "联系邮箱" : "Contact email"}<input id="post-contact-email" type="email" value={draft.contactEmail} onChange={(event) => updateDraft({ contactEmail: event.target.value })} placeholder="you@example.com" /></label>
                   <label className="field-label field-span-2" htmlFor="post-tour-preference">{locale === "zh" ? "看房时间偏好" : "Tour availability"}<select id="post-tour-preference" value={draft.tourPreference} onChange={(event) => updateDraft({ tourPreference: event.target.value })}><option value="flexible">{locale === "zh" ? "时间灵活" : "Flexible"}</option><option value="weekday">{locale === "zh" ? "工作日" : "Weekdays"}</option><option value="weekend">{locale === "zh" ? "周末" : "Weekends"}</option></select></label>
                   <div className="post-privacy-note field-span-2"><LockIcon /><div><strong>{t.addressPrivate}</strong><p>{locale === "zh" ? "看房接受前，公开页面只显示大致区域。" : "Public pages show only the approximate area until a tour is accepted."}</p></div></div>
-                  <fieldset className="agent-service-panel field-span-2">
-                    <legend className="field-label">{locale === "zh" ? "出租协助（可选）" : "Rental assistance (optional)"}</legend>
-                    <p className="field-help">{locale === "zh" ? "默认由你自己管理。需要帮助时，可以请求匹配经纪；发布后由你确认人选和费用，不会自动收费。" : "You manage the rental by default. Request an agent match if you want help; you confirm the person and fee after publishing, with no automatic charge."}</p>
+                  <details className="agent-service-panel field-span-2" open={draft.agentService === "agentMatch"}>
+                    <summary>{locale === "zh" ? "需要经纪协助？（可选）" : "Need agent assistance? (optional)"}<span>{draft.agentService === "agentMatch" ? (locale === "zh" ? "已请求匹配" : "Match requested") : (locale === "zh" ? "默认自己管理" : "Self-managed by default")}</span></summary>
                     <div className="agent-service-options">
                       <label className={`agent-service-option ${draft.agentService === "selfManaged" ? "active" : ""}`}>
                         <input type="radio" name="agent-service" value="selfManaged" checked={draft.agentService === "selfManaged"} onChange={() => updateDraft({ agentService: "selfManaged" })} />
@@ -4982,12 +5063,8 @@ export default function HomePage() {
                       {draft.agentFeePlan === "flatFee" && <label className="field-label agent-fee-amount" htmlFor="post-agent-fee-amount">{locale === "zh" ? "预期固定费用" : "Expected flat fee"}<input id="post-agent-fee-amount" type="number" min="1" step="1" value={draft.agentFeeAmount} onChange={(event) => updateDraft({ agentFeeAmount: event.target.value })} placeholder="1500" /></label>}
                       </div>
                     </div>}
-                  </fieldset>
+                  </details>
                 </div>
-              )}
-
-              {postStep === 5 && (
-                <>
                   <div className="lifecycle-publish-panel">
                     <div>
                       <strong>{locale === "zh" ? "公开期限（可选）" : "Public listing expiration (optional)"}</strong>
@@ -4996,19 +5073,19 @@ export default function HomePage() {
                     <label className="field-label"><span>{locale === "zh" ? "公开至" : "Public until"}</span><input type="date" min={todayDateOnly()} value={draft.expiresOn} onChange={(event) => updateDraft({ expiresOn: event.target.value })} /></label>
                   </div>
                    <section className={`listing-quality-panel ${listingQuality.attentionCount > 0 ? "has-attention" : "is-ready"}`} aria-labelledby="listing-quality-title">
-                     <div className="listing-quality-heading"><div><span className="section-label">QUALITY ASSISTANT</span><h3 id="listing-quality-title">{locale === "zh" ? "发布质量助手" : "Listing quality assistant"}</h3><p>{locale === "zh" ? "发布前检查缺少的信息、描述清晰度、重复照片和异常租金。检查在本地完成，不会把私密地址发送给 AI。" : "Before publishing, check missing facts, description clarity, duplicate photos, and unusual rent. These checks run locally; your private address is not sent to AI."}</p></div><strong aria-label={`${listingQuality.score}%`}>{listingQuality.score}%</strong></div>
+                     <div className="listing-quality-heading"><div><h3 id="listing-quality-title">{locale === "zh" ? "发布检查" : "Publish check"}</h3><p>{locale === "zh" ? "自动检查必填内容、照片、文案和租金。" : "Automatically checks required fields, photos, copy, and rent."}</p></div><strong aria-label={`${listingQuality.score}%`}>{listingQuality.score}%</strong></div>
                      <div className="listing-quality-bar" role="progressbar" aria-label={locale === "zh" ? "房源质量评分" : "Listing quality score"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={listingQuality.score}><span style={{ width: `${listingQuality.score}%` }} /></div>
                      <p className="listing-quality-summary" role="status">{listingQuality.attentionCount === 0 ? (locale === "zh" ? "当前信息完整，可以继续发布前预览。" : "The listing is in good shape for a final preview.") : (locale === "zh" ? `还有 ${listingQuality.attentionCount} 项值得处理；点击项目可直接回到对应字段。` : `${listingQuality.attentionCount} item(s) need attention; select one to jump back to its field.`)} {listingQuality.comparableCount >= 3 ? (locale === "zh" ? `已使用 ${listingQuality.comparableCount} 套同区域参考检查租金。` : `Rent was checked against ${listingQuality.comparableCount} local comparisons.`) : (locale === "zh" ? "附近可比房源不足，租金仍请人工复核。" : "There are not enough local comparisons; review the rent manually.")}</p>
                      <div className="listing-quality-checks" aria-label={locale === "zh" ? "质量检查项目" : "Quality checks"}>{listingQuality.checks.map((check) => check.done ? <span className="listing-quality-check done" key={check.key}><span className="listing-quality-mark" aria-hidden="true"><CheckIcon size={11} /></span>{locale === "zh" ? check.zh : check.en}</span> : <button className={`listing-quality-check missing ${check.severity}`} key={check.key} type="button" onClick={() => focusQualityTarget(check.target)}><span className="listing-quality-mark" aria-hidden="true" />{locale === "zh" ? check.zh : check.en}<ArrowIcon size={11} /></button>)}</div>
                      {listingQuality.attentionCount > 0 && <div className="listing-quality-issues">{listingQuality.checks.filter((check) => !check.done).map((check) => <article className={`listing-quality-issue ${check.severity}`} key={check.key}><span className="listing-quality-issue-mark" aria-hidden="true">{check.severity === "required" ? "!" : "i"}</span><div><strong>{locale === "zh" ? check.zh : check.en}</strong><p>{locale === "zh" ? check.detailZh : check.detailEn}</p><button className="text-button" type="button" onClick={() => focusQualityTarget(check.target)}>{locale === "zh" ? check.actionZh : check.actionEn}<ArrowIcon size={12} /></button></div></article>)}</div>}
                    </section>
-                   <section className={`listing-safety-review ${postSafetyReview.blocking.length > 0 ? "has-blocking" : postSafetyReview.warnings.length > 0 ? "has-warnings" : "is-clear"}`} aria-labelledby="listing-safety-review-title">
-                     <div className="listing-safety-review-heading"><div><span className="section-label">SAFETY REVIEW</span><h3 id="listing-safety-review-title">{locale === "zh" ? "发布前安全检查" : "Safety review before publishing"}</h3><p>{locale === "zh" ? "这项检查只针对公开标题和介绍；精确地址与联系人仍保存在私密字段。" : "This checks only the public title and description; the exact address and contact fields remain private."}</p></div><strong>{postSafetyReview.blocking.length > 0 ? (locale === "zh" ? "需修改" : "Fix first") : postSafetyReview.warnings.length > 0 ? (locale === "zh" ? "请复核" : "Review") : (locale === "zh" ? "未发现明显问题" : "No obvious flags")}</strong></div>
+                   <details className={`listing-safety-review ${postSafetyReview.blocking.length > 0 ? "has-blocking" : postSafetyReview.warnings.length > 0 ? "has-warnings" : "is-clear"}`} open={postSafetyReview.blocking.length > 0}>
+                     <summary id="listing-safety-review-title"><span>{locale === "zh" ? "安全检查" : "Safety check"}</span><strong>{postSafetyReview.blocking.length > 0 ? (locale === "zh" ? "需修改" : "Fix first") : postSafetyReview.warnings.length > 0 ? (locale === "zh" ? "请复核" : "Review") : (locale === "zh" ? "通过" : "Clear")}</strong></summary>
                      {postSafetyReview.blocking.length === 0 && postSafetyReview.warnings.length === 0 ? <p className="listing-safety-review-clear">{locale === "zh" ? "目前没有发现明显的住房限制、公开联系方式或高风险付款表述。发布前仍请人工复核事实和费用。" : "No obvious housing restrictions, public contact details, or high-risk payment language were found. Still review facts and fees before publishing."}</p> : <div className="listing-safety-review-list">
                        {postSafetyReview.blocking.map((issue) => <div className="listing-safety-review-item is-blocking" key={issue.key}><span aria-hidden="true">!</span><div><strong>{locale === "zh" ? issue.titleZh : issue.titleEn}</strong><p>{locale === "zh" ? issue.detailZh : issue.detailEn}</p></div></div>)}
                        {postSafetyReview.warnings.map((issue) => <div className="listing-safety-review-item is-warning" key={issue.key}><span aria-hidden="true">!</span><div><strong>{locale === "zh" ? issue.titleZh : issue.titleEn}</strong><p>{locale === "zh" ? issue.detailZh : issue.detailEn}</p></div></div>)}
                      </div>}
-                   </section>
+                   </details>
                    <div className="post-preview">
                   <div className="preview-photo">{draft.photos[0] ? <Image src={draft.photos[0]} alt="" fill sizes="460px" /> : null}<span>{locale === "zh" ? "公开预览" : "Public preview"}</span></div>
                   <div className="preview-copy"><span className="listing-type">{draft.rentalType === "privateRoom" ? t.privateRoom : draft.rentalType === "sublet" ? t.sublet : t.entire}</span><h3>{draft.titleZh || (locale === "zh" ? "未命名房源" : "Untitled listing")}</h3><p className="listing-area"><PinIcon size={15} />{locale === "zh" ? toChineseLocationLabel(draft.areaZh || "大致区域") : draft.areaEn || draft.areaZh || "Approximate area"}</p><div className="price-line"><strong>{draft.price ? `$${Number(draft.price).toLocaleString("en-US")}` : "—"}</strong><span>{t.month}</span></div><p className="preview-move-in">{t.detailMoveIn}：{draft.moveInMode === "immediate" ? t.immediate : draft.moveInDate || "—"}</p><div className="tag-row">{draft.features.map((feature) => <span className="listing-tag" key={feature}>{featureLabel(feature)}</span>)}</div>{draft.agentService === "agentMatch" && <div className="agent-service-preview"><ShieldIcon size={16} /><div><strong>{selectedAgentProfile ? (locale === "zh" ? `已选择经纪：${selectedAgentProfile.displayNameZh}` : `Agent selected: ${selectedAgentProfile.displayNameEn}`) : (locale === "zh" ? "已请求经纪协助" : "Agent assistance requested")}</strong><p>{draft.agentFeePlan === "firstMonthRent" ? (locale === "zh" ? "费用意向：成交后支付一个月租金" : "Fee preference: one month’s rent after a lease") : draft.agentFeePlan === "flatFee" ? (locale === "zh" ? `费用意向：固定 $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")}` : `Fee preference: $${Number(draft.agentFeeAmount || 0).toLocaleString("en-US")} flat`) : (locale === "zh" ? "费用意向：请经纪报价" : "Fee preference: agent to quote")}</p></div></div>}<div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>精确地址不会出现在公开预览中。</p></div></div></div>
@@ -5021,7 +5098,7 @@ export default function HomePage() {
                 <button className="outline-button" type="button" onClick={() => { if (postStep === 1) setPostOpen(false); else setPostStep((current) => (current - 1) as PostStep); }}>{postStep === 1 ? t.close : (locale === "zh" ? "上一步" : "Back")}</button>
                 <button className="text-button" type="button" onClick={saveDraftAndClose}>{locale === "zh" ? "保存草稿" : "Save draft"}</button>
                 <button className="text-button" type="button" onClick={() => { void clearDraft(); }}>{locale === "zh" ? "清除草稿" : "Clear draft"}</button>
-                {postStep < 5 ? <button className="primary-button" type="button" onClick={handlePostNext}>{locale === "zh" ? "下一步" : "Next"}<ArrowIcon /></button> : <button className="primary-button" type="button" disabled={publishLoading || mediaUploading} onClick={publishLocalListing}>{publishLoading ? (locale === "zh" ? "保存中…" : "Saving…") : (editingListingId ? (locale === "zh" ? "保存房源修改" : "Save listing changes") : (locale === "zh" ? "发布云端房源" : "Publish to cloud"))}<CheckIcon /></button>}
+                {postStep < 3 ? <button className="primary-button" type="button" onClick={handlePostNext}>{locale === "zh" ? "下一步" : "Next"}<ArrowIcon /></button> : <button className="primary-button" type="button" disabled={publishLoading || mediaUploading} onClick={publishLocalListing}>{publishLoading ? (locale === "zh" ? "保存中…" : "Saving…") : (editingListingId ? (locale === "zh" ? "保存房源修改" : "Save listing changes") : (locale === "zh" ? "发布房源" : "Publish listing"))}<CheckIcon /></button>}
               </div>
             </div>
           </aside>
@@ -5184,7 +5261,7 @@ export default function HomePage() {
               <form key={contactListing.id} ref={inquiryFormRef} className="contact-form" onSubmit={submitInquiry}>
                 {inquiryError && <p className="form-error" role="alert">{inquiryError}</p>}
                 <section className="inquiry-quick-start" aria-labelledby="inquiry-quick-start-title">
-                  <div><span className="section-label">QUICK START</span><h3 id="inquiry-quick-start-title">{locale === "zh" ? "先选一个目的" : "Start with one clear goal"}</h3><p>{locale === "zh" ? "一键加入常用咨询内容；你仍然可以在发送前修改。" : "Add a common intent in one tap; you can edit everything before sending."}</p></div>
+                  <div><h3 id="inquiry-quick-start-title">{locale === "zh" ? "你最想了解什么？" : "What do you want to know first?"}</h3></div>
                   <div className="inquiry-quick-actions">
                     {["details", "asap", "costs"].map((value) => {
                       const option = INQUIRY_COMMENT_OPTIONS.find((item) => item.value === value);
@@ -5205,24 +5282,19 @@ export default function HomePage() {
                   <label className="field-label" htmlFor="contact-tour-date"><span>{locale === "zh" ? "希望看房日期（可选）" : "Preferred tour date (optional)"}</span><input id="contact-tour-date" name="tourRequestedDate" type="date" min={todayDateOnly()} value={inquiryRequestedDate} onChange={(event) => setInquiryRequestedDate(event.target.value)} /></label>
                   <label className="field-label" htmlFor="contact-tour-window"><span>{locale === "zh" ? "希望看房时段" : "Preferred time window"}</span><select id="contact-tour-window" name="tourRequestedWindow" value={inquiryRequestedWindow} onChange={(event) => setInquiryRequestedWindow(event.target.value)}>{TOUR_REQUEST_WINDOWS.map((value) => <option value={value} key={value}>{value === "any" ? (locale === "zh" ? "都可以" : "Any time") : value === "weekdayDay" ? (locale === "zh" ? "工作日白天" : "Weekday daytime") : value === "weekdayEvening" ? (locale === "zh" ? "工作日晚上" : "Weekday evening") : value === "weekendDay" ? (locale === "zh" ? "周末白天" : "Weekend daytime") : (locale === "zh" ? "周末晚上" : "Weekend evening")}</option>)}</select></label>
                 </div>
-                <fieldset className="inquiry-comment-options">
-                  <legend className="field-label">{locale === "zh" ? "你想了解什么？（可多选）" : "What would you like to know? (Choose any)"}</legend>
+                <details className="inquiry-comment-options">
+                  <summary>{locale === "zh" ? "添加更多问题（可选）" : "Add more questions (optional)"}</summary>
                   <div className="comment-options">
                     {INQUIRY_COMMENT_OPTIONS.map((option) => {
                       const selected = selectedInquiryComments.includes(option.value);
                       return <button className={`comment-option ${selected ? "active" : ""}`} key={option.value} type="button" onClick={() => setSelectedInquiryComments((current) => selected ? current.filter((value) => value !== option.value) : [...current, option.value])} aria-pressed={selected}>{selected && <CheckIcon size={12} />}{locale === "zh" ? option.zh : option.en}</button>;
                     })}
                   </div>
-                  <p className="field-help">{locale === "zh" ? "可选择多个，选中的内容会和你的消息一起发送给发布者。" : "Choose any number; selected prompts will be sent with your message."}</p>
-                </fieldset>
-                <div className="inquiry-assistant-panel">
-                  <div className="inquiry-assistant-copy"><span className="inquiry-assistant-mark"><ShieldIcon size={15} /></span><div><strong>{locale === "zh" ? "AI 帮你整理咨询" : "AI inquiry helper"}</strong><p>{locale === "zh" ? "只使用公开房源信息和你刚刚填写的条件，不会索要敏感资料。" : "Uses only public listing facts and the answers above; it never asks for sensitive documents."}</p></div></div>
-                  <button className="outline-button inquiry-assistant-button" type="button" onClick={() => { void assistInquiry(); }} disabled={inquiryAssistLoading}>{inquiryAssistLoading ? (locale === "zh" ? "整理中…" : "Preparing…") : (locale === "zh" ? "帮我写一段" : "Help me write")}</button>
-                  {inquiryAssistError && <p className="inquiry-assistant-error" role="alert">{inquiryAssistError}</p>}
-                  {inquiryTranslation && <details className="inquiry-translation"><summary>{locale === "zh" ? "查看英文翻译" : "View Chinese translation"}</summary><p>{inquiryTranslation}</p></details>}
-                </div>
-                <label className="field-label" htmlFor="contact-message">{t.message}</label>
+                </details>
+                <div className="inquiry-message-heading"><label className="field-label" htmlFor="contact-message">{locale === "zh" ? "给发布者的消息" : "Message to the poster"}</label><button className="text-button inquiry-assistant-button" type="button" onClick={() => { void assistInquiry(); }} disabled={inquiryAssistLoading}>{inquiryAssistLoading ? (locale === "zh" ? "安居助手整理中…" : "Anju Assistant is writing…") : (locale === "zh" ? "安居助手帮我整理" : "Polish with Anju Assistant")}</button></div>
                 <textarea id="contact-message" name="message" placeholder={t.messagePlaceholder} rows={4} value={inquiryMessage} onChange={(event) => { setInquiryMessage(event.target.value); setInquiryTranslation(""); }} />
+                {inquiryAssistError && <p className="inquiry-assistant-error" role="alert">{inquiryAssistError}</p>}
+                {inquiryTranslation && <details className="inquiry-translation"><summary>{locale === "zh" ? "查看英文翻译" : "View Chinese translation"}</summary><p>{inquiryTranslation}</p></details>}
                 <p className="form-safety"><ShieldIcon size={15} />{locale === "zh" ? "我们不会在这个阶段要求信用资料或受保护特征。" : "We do not ask for credit files or protected traits at this stage."}</p>
                 <button className="primary-button full-button" type="submit"><ChatIcon />{t.sendInquiry}</button>
               </form>
