@@ -5168,7 +5168,13 @@ export default function HomePage() {
               <h3 className="drawer-section-heading">{t.detailAmenities}</h3>
               <div className="tag-row drawer-tags">{listingTags(selectedListing).map((tag) => <span className="listing-tag" key={tag}>{tag}</span>)}</div>
               <div className="drawer-privacy"><div className="privacy-icon"><LockIcon /></div><div><strong>{t.addressPrivate}</strong><p>{listingPrivacy(selectedListing)}</p></div></div>
-              <CommuteEstimator locale={locale} areaZh={selectedListing.areaZh} areaEn={selectedListing.areaEn} />
+              <CommuteEstimator
+                locale={locale}
+                areaZh={selectedListing.areaZh}
+                areaEn={selectedListing.areaEn}
+                listingId={selectedListing.id}
+                canUsePrivateOrigin={selectedListing.source === "remote"}
+              />
               <SafetyNotice
                 locale={locale}
                 isSample={selectedListing.source === "sample" || selectedListing.source === "demo"}
