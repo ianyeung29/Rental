@@ -478,7 +478,7 @@ const SPECIFIC_AREA_GUIDES: readonly AreaGuide[] = [
 const GENERAL_AREA_GUIDES: readonly AreaGuide[] = [
   {
     id: "flushing-and-elmhurst",
-    aliases: ["Flushing", "法拉盛", "Elmhurst", "艾姆赫斯特", "Rego Park", "雷哥公园", "Jackson Heights", "杰克逊高地", "Murray Hill", "茉莉丘", "法拉盛梅里山"],
+    aliases: ["Flushing", "法拉盛", "Elmhurst", "艾姆赫斯特", "Rego Park", "雷哥公园", "Jackson Heights", "杰克逊高地", "Murray Hill", "莫瑞丘", "茉莉丘", "穆雷山", "默里山", "法拉盛梅里山"],
     titleZh: "法拉盛 · 艾姆赫斯特生活圈",
     titleEn: "Flushing · Elmhurst community area",
     regionZh: "皇后区",
