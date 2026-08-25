@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { buildCommuteEstimate } from "../../lib/location-context";
+import { buildCommuteEstimate, buildNearbyChineseSupermarketEstimate } from "../../lib/location-context";
+import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { recordApplicationErrorSafely, recordLocationQualityEventSafely } from "../../lib/monitoring";
 import { consumeRateLimit, hashRateLimitPart, requestAddress } from "../../lib/rate-limit";
 import { recordApiUsageSafely } from "../../lib/usage";
@@ -17,7 +18,10 @@ export async function POST(request: Request) {
   }
 
   const destination = typeof body.destination === "string" ? body.destination.trim() : "";
-  if (!destination) return NextResponse.json({ error: "Add a destination such as a school, landmark, or neighborhood." }, { status: 400 });
+  const preset = body.preset === "nearbyChineseSupermarket" ? "nearbyChineseSupermarket" : null;
+  const listingId = typeof body.listingId === "string" ? body.listingId.trim().slice(0, 180) : "";
+  if (!destination && !preset) return NextResponse.json({ error: "Add a destination such as a school, landmark, or neighborhood." }, { status: 400 });
+  if (preset && !listingId) return NextResponse.json({ error: "This listing cannot use a private-address supermarket estimate." }, { status: 400 });
 
   let rateLimit;
   try {
@@ -29,15 +33,40 @@ export async function POST(request: Request) {
 
   let estimate;
   try {
-    estimate = await buildCommuteEstimate({
-      areaEn: typeof body.areaEn === "string" ? body.areaEn : "",
-      areaZh: typeof body.areaZh === "string" ? body.areaZh : "",
-      boroughEn: typeof body.boroughEn === "string" ? body.boroughEn : "",
-      boroughZh: typeof body.boroughZh === "string" ? body.boroughZh : "",
-      destination,
-      mode: body.mode,
-      locale: body.locale === "en" ? "en" : "zh",
-    });
+    if (preset === "nearbyChineseSupermarket") {
+      if (!sql) return NextResponse.json({ error: "DATABASE_URL is not configured on the server yet." }, { status: 503 });
+      await ensureDatabaseSchema();
+      const rows = await sql.query(`
+        SELECT l.area_zh, l.area_en, pd.private_address
+        FROM rental_listings l
+        JOIN rental_listing_private_details pd ON pd.listing_id = l.id
+        WHERE l.id = $1
+          AND l.status = 'published'
+          AND l.moderation_status = 'approved'
+          AND (l.expires_on IS NULL OR l.expires_on >= CURRENT_DATE)
+        LIMIT 1
+      `, [listingId]);
+      const listing = rows[0] as Record<string, unknown> | undefined;
+      if (!listing || !String(listing.private_address || "").trim()) {
+        return NextResponse.json({ error: "A private-address supermarket estimate is not available for this listing." }, { status: 404 });
+      }
+      estimate = await buildNearbyChineseSupermarketEstimate({
+        privateAddress: String(listing.private_address),
+        areaEn: String(listing.area_en || ""),
+        areaZh: String(listing.area_zh || ""),
+        locale: body.locale === "en" ? "en" : "zh",
+      });
+    } else {
+      estimate = await buildCommuteEstimate({
+        areaEn: typeof body.areaEn === "string" ? body.areaEn : "",
+        areaZh: typeof body.areaZh === "string" ? body.areaZh : "",
+        boroughEn: typeof body.boroughEn === "string" ? body.boroughEn : "",
+        boroughZh: typeof body.boroughZh === "string" ? body.boroughZh : "",
+        destination,
+        mode: body.mode,
+        locale: body.locale === "en" ? "en" : "zh",
+      });
+    }
   } catch (error) {
     await recordApplicationErrorSafely({ source: "google_maps", route: "/api/commute", method: "POST", message: "Google Maps commute estimate failed.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "" });
     return NextResponse.json({ error: "Map services are temporarily unavailable; try again later." }, { status: 502 });
@@ -50,7 +79,7 @@ export async function POST(request: Request) {
       routeCalls: estimate.usage.routeCalls,
       cacheHit: estimate.usage.cacheHit,
       status: estimate.usage.cacheHit ? "cached" : estimate.source === "google" ? "success" : "empty",
-      metadata: { mode: estimate.mode },
+      metadata: { mode: estimate.mode, preset: preset || "freeText" },
     });
   }
   if (!estimate.cached && (estimate.usage.placesCalls > 0 || estimate.usage.routeCalls > 0)) {
@@ -64,7 +93,7 @@ export async function POST(request: Request) {
         ...(estimate.source === "none" && estimate.usage.placesCalls > 0 ? ["commute-place-not-found"] : []),
         ...(!estimate.minutes && estimate.usage.routeCalls > 0 ? ["commute-route-not-verifiable"] : []),
       ],
-      metadata: { mode: estimate.mode },
+      metadata: { mode: estimate.mode, preset: preset || "freeText" },
     });
   }
   const { usage: _usage, ...payload } = estimate;

@@ -742,6 +742,10 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .commute-result.ready { border-color: #c7d881; background: #f4f8d4; }
 .commute-result.empty { border-color: #e9df9e; background: #fffceb; }
 .commute-result > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; }
+.commute-result-summary { align-items: flex-end; }
+.commute-result-place { display: grid; gap: 2px; min-width: 0; }
+.commute-result-place span { color: var(--muted); font-size: 9px; font-weight: 700; }
+.commute-result-place b { overflow-wrap: anywhere; color: var(--ink); font-size: 13px; line-height: 1.2; }
 .commute-result strong { color: var(--ink); font-size: 20px; letter-spacing: -.035em; }
 .commute-result span { color: var(--muted); font-size: 11px; font-weight: 700; }
 .commute-result p, .commute-result small { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }

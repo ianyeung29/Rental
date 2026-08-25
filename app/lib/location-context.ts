@@ -90,6 +90,7 @@ export type CommuteMode = "drive" | "walk" | "transit";
 export type CommuteEstimate = {
   source: "google" | "none";
   approximateArea: string;
+  origin: "privateAddress" | "approximateArea";
   destination: string;
   mode: CommuteMode;
   minutes?: number;
@@ -909,6 +910,7 @@ function commuteCacheValue(value: unknown): CommuteEstimate | null {
   return {
     source: record.source as "google" | "none",
     approximateArea: clean(record.approximateArea),
+    origin: record.origin === "privateAddress" ? "privateAddress" : "approximateArea",
     destination: clean(record.destination),
     mode,
     ...(Number.isFinite(minutes) && minutes > 0 ? { minutes: Math.round(minutes) } : {}),
@@ -922,6 +924,157 @@ function commuteCacheValue(value: unknown): CommuteEstimate | null {
       cacheHit: true,
     },
   };
+}
+
+// This route is deliberately narrow: it is only used for the fixed
+// "nearby Chinese supermarket" shortcut on a published listing. The private
+// address never reaches the browser, and free-text destinations continue to
+// use the public approximate-area origin below. That prevents the commute tool
+// from becoming an exact-address probing endpoint.
+export async function buildNearbyChineseSupermarketEstimate(request: {
+  privateAddress: string;
+  areaEn: string;
+  areaZh: string;
+  boroughEn?: string;
+  boroughZh?: string;
+  locale?: "zh" | "en";
+}): Promise<CommuteEstimate> {
+  const privateAddress = clean(request.privateAddress, 500);
+  const areaEn = clean(request.areaEn);
+  const areaZh = clean(request.areaZh);
+  const boroughEn = clean(request.boroughEn);
+  const boroughZh = clean(request.boroughZh);
+  const area = areaZh || areaEn;
+  const locale = request.locale === "en" ? "en" : "zh";
+  const fallbackDestination = locale === "zh" ? "附近中文超市" : "Nearby Chinese supermarket";
+  const noResult = (note: string, source: "google" | "none" = "none", cached = false): CommuteEstimate => ({
+    source,
+    approximateArea: area,
+    origin: "privateAddress",
+    destination: fallbackDestination,
+    mode: "walk",
+    cached,
+    checkedAt: new Date().toISOString(),
+    note,
+    usage: { placesCalls: 0, routeCalls: 0, cacheHit: cached },
+  });
+
+  if (!privateAddress || !area) {
+    return noResult(locale === "zh" ? "此房源暂时没有可用于附近超市估算的私密地址或公开区域。" : "This listing does not yet have the private address and public area needed for a nearby-supermarket estimate.");
+  }
+  const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) return noResult(locale === "zh" ? "服务器端地图服务尚未配置。" : "Server-side map context is not configured.");
+
+  const lookupSettings = await currentLocationLookupSettings();
+  const cacheKey = JSON.stringify({
+    version: 1,
+    kind: "listing-nearby-chinese-supermarket",
+    areaEn,
+    areaZh,
+    boroughEn,
+    boroughZh,
+    privateAddressHash: privateAddressCacheHash(privateAddress),
+    locale,
+    lookupSettings: {
+      placesCallsPerLookup: lookupSettings.placesCallsPerLookup,
+      routeCallsPerLookup: lookupSettings.routeCallsPerLookup,
+    },
+  });
+  const memoryCached = commuteCache.get(cacheKey);
+  if (memoryCached && memoryCached.expiresAt > Date.now()) {
+    return { ...memoryCached.value, cached: true, usage: { placesCalls: 0, routeCalls: 0, cacheHit: true } };
+  }
+  try {
+    const stored = commuteCacheValue(await readLocationContextCache(cacheKey));
+    if (stored) {
+      commuteCache.set(cacheKey, { expiresAt: Date.now() + CONTEXT_CACHE_TTL, value: stored });
+      return { ...stored, cached: true, usage: { placesCalls: 0, routeCalls: 0, cacheHit: true } };
+    }
+  } catch {
+    // Persistent caching is an optimization; an unavailable cache should not block a route estimate.
+  }
+
+  const languageCode = locale === "zh" ? "zh-CN" : "en";
+  const budget: LocationLookupBudget = {
+    placesCalls: 0,
+    routeCalls: 0,
+    placesLimit: lookupSettings.placesCallsPerLookup,
+    routeLimit: lookupSettings.routeCallsPerLookup,
+  };
+  const queryArea = [areaEn || areaZh, boroughEn || boroughZh, "New York"].filter(Boolean).join(", ");
+  const routeOrigin = locationSearchOrigin(privateAddress, queryArea);
+  const resultWithUsage = (result: CommuteEstimate) => ({ ...result, usage: { ...budget, cacheHit: false } });
+
+  try {
+    // Resolve the private origin only on the server, then give Places an
+    // explicit distance bias. A text query alone can favour a recognizable
+    // store in the broader borough instead of the closest valid store.
+    const originResults = await searchPlacesWithinBudget(apiKey, { textQuery: routeOrigin, pageSize: 1 }, languageCode, budget);
+    const originCoordinates = originResults[0]?.coordinates || null;
+    const locationBias = originCoordinates
+      ? { locationBias: { circle: { center: originCoordinates, radius: 5_000 } } }
+      : {};
+    const firstPass = await searchPlacesWithinBudget(apiKey, {
+      textQuery: originCoordinates ? "Chinese supermarket" : nearbyQuery("Chinese supermarket", routeOrigin),
+      pageSize: 10,
+      includedType: "supermarket",
+      strictTypeFiltering: true,
+      rankPreference: "DISTANCE",
+      ...locationBias,
+    }, languageCode, budget);
+    let candidates = uniquePlaces(firstPass).filter(isChineseOrAsianMarket);
+    if (!candidates.length && budget.placesCalls < budget.placesLimit) {
+      const secondPass = await searchPlacesWithinBudget(apiKey, {
+        textQuery: originCoordinates ? "Chinese grocery Asian supermarket" : nearbyQuery("Chinese grocery Asian supermarket", routeOrigin),
+        pageSize: 10,
+        includedType: "supermarket",
+        strictTypeFiltering: true,
+        rankPreference: "DISTANCE",
+        ...locationBias,
+      }, languageCode, budget);
+      candidates = uniquePlaces(secondPass).filter(isChineseOrAsianMarket);
+    }
+    const routeCandidates = candidates
+      .filter((place) => Boolean(place.coordinates))
+      .slice(0, Math.min(3, budget.routeLimit));
+    if (!routeCandidates.length) {
+      return resultWithUsage(noResult(locale === "zh" ? "地图没有找到可验证的附近中文 / 亚洲超市。" : "The map did not return a verifiable nearby Chinese or Asian supermarket."));
+    }
+
+    const routed: Array<{ place: PlaceResult; minutes: number }> = [];
+    for (const place of routeCandidates) {
+      const route = await routeMinutesWithinBudget(apiKey, routeOrigin, place.coordinates!, "WALK", languageCode, budget);
+      if (isAcceptableNearbyWalkMinutes(route.minutes)) routed.push({ place, minutes: route.minutes! });
+    }
+    const closest = routed.sort((left, right) => left.minutes - right.minutes)[0];
+    if (!closest) {
+      return resultWithUsage(noResult(locale === "zh" ? "地图没有返回距离房源约 45 分钟步行以内的可验证中文 / 亚洲超市。" : "The map did not return a verifiable Chinese or Asian supermarket within about a 45-minute walk of this listing."));
+    }
+
+    const result: CommuteEstimate = {
+      source: "google",
+      approximateArea: area,
+      origin: "privateAddress",
+      destination: closest.place.name,
+      mode: "walk",
+      minutes: closest.minutes,
+      cached: false,
+      checkedAt: new Date().toISOString(),
+      note: locale === "zh"
+        ? "此结果使用发布者私密地址在服务器端匹配并计算；仅显示超市名称和步行时间，不公开房源地址。"
+        : "This result is matched and routed from the poster's private address on the server. Only the supermarket name and walking time are shown; the listing address remains private.",
+      usage: { ...budget, cacheHit: false },
+    };
+    commuteCache.set(cacheKey, { expiresAt: Date.now() + CONTEXT_CACHE_TTL, value: result });
+    try {
+      await writeLocationContextCache(cacheKey, { kind: "commute", ...result }, 7);
+    } catch {
+      // Keep the in-memory result if the optional persistent cache is unavailable.
+    }
+    return result;
+  } catch {
+    return resultWithUsage(noResult(locale === "zh" ? "地图服务暂时不可用；请稍后重试。" : "Map services are temporarily unavailable; try again later."));
+  }
 }
 
 export async function buildCommuteEstimate(request: {
@@ -944,6 +1097,7 @@ export async function buildCommuteEstimate(request: {
   const noResult = (note: string, source: "google" | "none" = "none", cached = false): CommuteEstimate => ({
     source,
     approximateArea: area,
+    origin: "approximateArea",
     destination,
     mode,
     cached,
@@ -1008,6 +1162,7 @@ export async function buildCommuteEstimate(request: {
     const result: CommuteEstimate = {
       source: "google",
       approximateArea: area,
+      origin: "approximateArea",
       destination: destinationPlace.name || destination,
       mode,
       minutes: route.minutes,
