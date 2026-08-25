@@ -38,6 +38,7 @@ export default function SiteFooter() {
             <h2>找房与发布</h2>
             <Link href="/">找房</Link>
             <Link href="/">发布房源</Link>
+            <a href="/install">安装到手机桌面</a>
             <a href="/sitemap">网站地图</a>
           </div>
           <div>

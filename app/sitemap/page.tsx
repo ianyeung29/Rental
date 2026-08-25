@@ -19,6 +19,7 @@ const directory = [
   {
     title: "帮助与反馈",
     links: [
+      ["安装到手机桌面", "/install"],
       ["联系我们", "/contact"],
       ["提交反馈", "/feedback"],
       ["网站地图", "/sitemap"],

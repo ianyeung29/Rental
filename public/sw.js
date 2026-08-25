@@ -1,10 +1,11 @@
-const CACHE_VERSION = "anjurentals-pwa-v6";
+const CACHE_VERSION = "anjurentals-pwa-v7";
 const APP_SHELL = [
   "/",
   "/about",
   "/agents",
   "/contact",
   "/feedback",
+  "/install",
   "/legal",
   "/sitemap",
   "/brand/anjurentals-mark.svg",
