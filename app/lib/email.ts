@@ -22,6 +22,24 @@ export function emailIsConfigured() {
   return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.RESEND_FROM_EMAIL?.trim());
 }
 
+function normalizedEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export function adminRecipientsExcludingPoster(recipients: string[], posterEmail: string) {
+  const poster = normalizedEmail(posterEmail);
+  const seen = new Set<string>();
+  return recipients
+    .map((value) => normalizedEmail(value))
+    .filter((value) => value && value !== poster && !value.endsWith(".invalid"))
+    .filter((value) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    })
+    .slice(0, 10);
+}
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;",
@@ -358,6 +376,79 @@ export async function sendSavedSearchAlert(input: { email: string; displayName: 
     html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">你的搜索有新房源</h1><p style="font-size:15px;line-height:1.7">你好 ${name}，搜索「${location}」发现了 ${input.listingTitles.length} 套新房源。</p><ul style="padding:16px 16px 16px 34px;background:#edf3ff;font-size:13px;line-height:1.8">${listingHtml}</ul><p style="margin:28px 0"><a href="${appUrl}/#rentals" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">查看新房源</a></p></main></body></html>`,
   });
   if (error) throw resendFailure(error, "Resend could not send the saved search alert.");
+}
+
+type AdminNewListingNotificationInput = {
+  recipients: string[];
+  publisherEmail: string;
+  publisherName: string;
+  titleZh: string;
+  titleEn: string;
+  areaZh: string;
+  areaEn: string;
+  price: number;
+  bedrooms: string;
+  bathrooms: string;
+  squareFeet: number | null;
+  moveIn: string;
+  lease: string;
+  rentalType: string;
+};
+
+function listingMoveInLabel(value: string) {
+  return value === "immediate" ? "立即入住 / Move in immediately" : value || "未填写 / Not specified";
+}
+
+function listingLeaseLabel(value: string) {
+  const months = /^(\d+)\s+months$/i.exec(value.trim());
+  return months ? `${months[1]} 个月 / ${months[1]} months` : value || "未填写 / Not specified";
+}
+
+function listingTypeLabel(value: string) {
+  if (value === "privateRoom") return "独立房间 / Private room";
+  if (value === "sublet") return "转租 / Sublet";
+  return "整套住房 / Entire home";
+}
+
+export async function sendAdminNewListingNotification(input: AdminNewListingNotificationInput) {
+  const { apiKey, from, appUrl } = config();
+  const recipients = adminRecipientsExcludingPoster(input.recipients, input.publisherEmail);
+  if (!recipients.length) return false;
+
+  const listingTitle = input.titleZh || input.titleEn || "新房源 / New listing";
+  const area = input.areaZh || input.areaEn || "未填写 / Not specified";
+  const details = [
+    `发布者：${input.publisherName || "安居用户"} <${input.publisherEmail}>`,
+    `房源：${listingTitle}`,
+    `公开区域：${area}`,
+    `月租：$${Number(input.price || 0).toLocaleString("en-US")}`,
+    `类型：${listingTypeLabel(input.rentalType)}`,
+    `户型：${input.bedrooms || "—"} 卧 · ${input.bathrooms || "—"} 卫`,
+    input.squareFeet ? `面积：${input.squareFeet.toLocaleString("en-US")} 平方英尺` : "面积：未填写",
+    `入住：${listingMoveInLabel(input.moveIn)}`,
+    `最短租期：${listingLeaseLabel(input.lease)}`,
+  ].join("\n");
+  const escapedTitle = escapeHtml(listingTitle);
+  const escapedPublisher = escapeHtml(input.publisherName || "安居用户");
+  const escapedDetails = escapeHtml(details).replace(/\n/g, "<br>");
+  const adminUrl = `${appUrl}/admin`;
+  const resend = new Resend(apiKey);
+  const { error } = await resend.emails.send({
+    from,
+    to: recipients,
+    subject: `安居新房源 · ${listingTitle}`,
+    text: [
+      "Anjurentals 新房源通知",
+      "",
+      details,
+      "",
+      "为保护发布者隐私，此邮件不包含精确地址。",
+      `打开安居管理后台：${adminUrl}`,
+    ].join("\n"),
+    html: `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#f3f6f1;color:#142a44;font-family:Arial,'Microsoft YaHei',sans-serif"><main style="max-width:560px;margin:0 auto;padding:42px 24px"><p style="color:#637384;font-size:12px;letter-spacing:.12em;font-weight:700">安居 · ANJURENTALS</p><h1 style="font-size:28px;line-height:1.15;margin:24px 0 12px">有一套新房源发布</h1><p style="font-size:15px;line-height:1.7">${escapedPublisher} 刚发布了「${escapedTitle}」。</p><p style="padding:16px;background:#edf3ff;font-size:13px;line-height:1.7">${escapedDetails}</p><p style="margin:28px 0"><a href="${adminUrl}" style="display:inline-block;padding:13px 18px;background:#2768f0;color:#fff;text-decoration:none;font-weight:700">打开管理后台</a></p><p style="color:#637384;font-size:12px;line-height:1.6">为保护发布者隐私，这封通知不包含精确地址。</p></main></body></html>`,
+  });
+  if (error) throw resendFailure(error, "Resend could not send the new listing notification.");
+  return true;
 }
 
 type PublicMessageInput = {

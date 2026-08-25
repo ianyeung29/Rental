@@ -12,7 +12,7 @@
     "cap:android:run": "npx cap run android",
     "cap:android:debug": "npx cap sync && cd android && gradlew.bat assembleDebug",
     "cap:android:release": "npx cap sync && cd android && gradlew.bat bundleRelease",
-    "test": "node --test --experimental-strip-types scripts/location-context-rules.test.mjs scripts/listing-quality.test.mjs scripts/renter-application.test.mjs scripts/owner-operations.test.mjs scripts/saved-search-alerts.test.mjs",
+    "test": "node --test --experimental-strip-types scripts/location-context-rules.test.mjs scripts/listing-quality.test.mjs scripts/renter-application.test.mjs scripts/owner-operations.test.mjs scripts/saved-search-alerts.test.mjs scripts/admin-listing-notification.test.mjs",
     "db:seed": "node scripts/seed-sample-data.mjs",
     "db:seed:agents": "node scripts/seed-agent-directory.mjs"
   },
