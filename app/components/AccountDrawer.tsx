@@ -863,7 +863,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
                 </article>)}
               </div>
           )}
-          <div className="account-footer"><p>{zh ? "账户权限只允许你管理自己的房源和收到的咨询。" : "Your account can manage only its own listings and received inquiries."}</p><button className="outline-button" type="button" onClick={onLogout}>{zh ? "退出登录" : "Sign out"}</button></div>
+          <div className="account-footer"><p>{zh ? "账户权限只允许你管理自己的房源和收到的咨询。" : "Your account can manage only its own listings and received inquiries."}</p><div className="account-footer-actions"><Link className="text-button" href="/delete-account" onClick={onClose}>{zh ? "删除账户" : "Delete account"}</Link><button className="outline-button" type="button" onClick={onLogout}>{zh ? "退出登录" : "Sign out"}</button></div></div>
         </div>
       </aside>
     </div>

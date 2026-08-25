@@ -49,11 +49,11 @@ export async function POST(request: Request) {
       if (variants.some((item) => !ALLOWED_IMAGE_TYPES.has(item.contentType) || !Number.isFinite(item.size) || item.size <= 0 || item.size > MAX_IMAGE_BYTES)) {
         return NextResponse.json({ error: "Each optimized image must be 8 MB or smaller." }, { status: 400 });
       }
-      return NextResponse.json(await createListingImageUploads({ filename, variants }));
+      return NextResponse.json(await createListingImageUploads({ filename, variants, keyPrefix: user ? `listings/${user.id}` : "listings/demo" }));
     }
     if (!ALLOWED_IMAGE_TYPES.has(contentType)) return NextResponse.json({ error: "Only JPEG, PNG, and WebP images are supported." }, { status: 400 });
     if (!Number.isFinite(size) || size <= 0 || size > MAX_IMAGE_BYTES) return NextResponse.json({ error: "Each image must be 8 MB or smaller." }, { status: 400 });
-    return NextResponse.json(await createImageUpload({ filename, contentType, size, keyPrefix: purpose === "agentPortrait" && user ? `agents/${user.id}` : purpose === "profileAvatar" && user ? `profiles/${user.id}` : "listings" }));
+    return NextResponse.json(await createImageUpload({ filename, contentType, size, keyPrefix: purpose === "agentPortrait" && user ? `agents/${user.id}` : purpose === "profileAvatar" && user ? `profiles/${user.id}` : user ? `listings/${user.id}` : "listings/demo" }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     await recordApplicationErrorSafely({ source: "r2", route: "/api/media/presign", method: "POST", message: message || "R2 image upload presign failed.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "" });
