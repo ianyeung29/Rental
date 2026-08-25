@@ -4,7 +4,7 @@ import { ensureDatabaseSchema, sql } from "../../../../lib/db";
 import { getCurrentUser } from "../../../../lib/auth";
 import { reviewListingSafety } from "../../../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../../../lib/email";
-import { listingLimitFor } from "../../../../lib/account-types";
+import { hasUnlimitedListingAccess, listingLimitFor } from "../../../../lib/account-types";
 import { normalizeListingMedia } from "../../../../lib/listing-media";
 import { duplicateMediaCount } from "../../../../lib/listing-quality";
 
@@ -213,7 +213,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const currentExpiresOn = dateOnly(ownedListing.expires_on);
       const currentCountsTowardQuota = (ownedListing.status === "published" || ownedListing.status === "paused")
         && (!currentExpiresOn || currentExpiresOn >= new Date().toISOString().slice(0, 10));
-      if (!currentCountsTowardQuota) {
+      if (!currentCountsTowardQuota && !hasUnlimitedListingAccess(user.role)) {
         const listingLimit = listingLimitFor(user.accountType, user.agentVerified);
         const quotaRows = await sql.query(`
           SELECT COUNT(*)::int AS count

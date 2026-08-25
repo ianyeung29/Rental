@@ -6,7 +6,7 @@ import { recordAuditEventSafely } from "../../lib/audit";
 import { reviewListingSafety } from "../../lib/safety";
 import { emailIsConfigured, sendAgentRequestNotification } from "../../lib/email";
 import { demoModeEnabled } from "../../lib/demo";
-import { listingLimitFor } from "../../lib/account-types";
+import { hasUnlimitedListingAccess, listingLimitFor } from "../../lib/account-types";
 import { listingMediaFromDatabase, normalizeListingMedia } from "../../lib/listing-media";
 import { notifyInstantSavedSearches } from "../../lib/saved-search-alerts";
 import { duplicateMediaCount } from "../../lib/listing-quality";
@@ -385,7 +385,7 @@ export async function POST(request: Request) {
 
   try {
     await ensureDatabaseSchema();
-    if (user) {
+    if (user && !hasUnlimitedListingAccess(user.role)) {
       const listingLimit = listingLimitFor(user.accountType, user.agentVerified);
       const quotaRows = await sql.query(`
         SELECT COUNT(*)::int AS count
