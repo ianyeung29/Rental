@@ -82,4 +82,8 @@ export function isAgentPortraitKeyForUser(key: string, userId: string) {
   return key.startsWith(`agents/${userId}/`) && /^agents\/.+\/[a-f0-9-]{36}\.(jpg|png|webp)$/i.test(key);
 }
 
+export function isProfileAvatarKeyForUser(key: string, userId: string) {
+  return key.startsWith(`profiles/${userId}/`) && /^profiles\/.+\/[a-f0-9-]{36}\.(jpg|png|webp)$/i.test(key);
+}
+
 export { ALLOWED_IMAGE_TYPES, IMAGE_CACHE_CONTROL, MAX_IMAGE_BYTES };

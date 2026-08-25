@@ -34,6 +34,7 @@ import { TOUR_REQUEST_WINDOWS } from "./lib/inquiry-options";
 import { reviewListingSafety } from "./lib/safety";
 import { compareListingsForSearch, type SearchRankingListing, type SearchRankingSnapshot } from "./lib/search-ranking";
 import { analyzeListingQuality, type ListingQualityTarget } from "./lib/listing-quality";
+import { MAX_LISTING_PHOTOS } from "./lib/listing-constants";
 import { useDialogA11y } from "./lib/use-dialog-a11y";
 import { optimizeImageFile } from "./lib/image-optimizer";
 import portraitStyles from "./components/AgentPortrait.module.css";
@@ -160,6 +161,7 @@ type AuthUser = {
   email: string;
   displayName: string;
   phone: string;
+  avatarUrl: string;
   role: string;
   accountType: AccountType;
   agentVerificationStatus: AgentVerificationStatus;
@@ -386,7 +388,7 @@ function normalizeClientMedia(value: unknown): ListingMedia[] {
       ...(Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0 ? { width, height } : {}),
       ...(fingerprint ? { fingerprint } : {}),
     }];
-  }).slice(0, 4);
+  }).slice(0, MAX_LISTING_PHOTOS);
 }
 
 function mediaFromDraft(draft: ListingDraft): ListingMedia[] {
@@ -488,7 +490,7 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
       { id: "sheepshead-bay", zh: "羊头湾", en: "Sheepshead Bay", value: "Sheepshead Bay" },
       { id: "gravesend", zh: "格雷夫森德", en: "Gravesend", value: "Gravesend" },
       { id: "bath-beach", zh: "巴斯海滩", en: "Bath Beach", value: "Bath Beach" },
-      { id: "bay-ridge", zh: "海湾岭", en: "Bay Ridge", value: "Bay Ridge" },
+      { id: "bay-ridge", zh: "湾脊", en: "Bay Ridge", value: "Bay Ridge" },
       { id: "dyker-heights", zh: "戴克高地", en: "Dyker Heights", value: "Dyker Heights" },
       { id: "brighton-beach", zh: "布莱顿海滩", en: "Brighton Beach", value: "Brighton Beach" },
       { id: "midwood", zh: "中木区", en: "Midwood", value: "Midwood" },
@@ -511,14 +513,14 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
       { id: "rego-park", zh: "雷哥公园", en: "Rego Park", value: "Rego Park" },
       { id: "forest-hills", zh: "森林小丘", en: "Forest Hills", value: "Forest Hills" },
       { id: "maspeth", zh: "马斯佩斯", en: "Maspeth", value: "Maspeth" },
-      { id: "whitestone", zh: "白石", en: "Whitestone", value: "Whitestone" },
-      { id: "bayside", zh: "贝赛德", en: "Bayside", value: "Bayside" },
+      { id: "whitestone", zh: "白石镇", en: "Whitestone", value: "Whitestone" },
+      { id: "bayside", zh: "貝賽", en: "Bayside", value: "Bayside" },
       { id: "fresh-meadows", zh: "新鲜草原", en: "Fresh Meadows", value: "Fresh Meadows" },
-      { id: "college-point", zh: "学院点", en: "College Point", value: "College Point" },
+      { id: "college-point", zh: "大学点", en: "College Point", value: "College Point" },
       { id: "jackson-heights", zh: "杰克逊高地", en: "Jackson Heights", value: "Jackson Heights" },
-      { id: "woodside", zh: "木边", en: "Woodside", value: "Woodside" },
+      { id: "woodside", zh: "伍德赛德", en: "Woodside", value: "Woodside" },
       { id: "long-island-city", zh: "长岛市", en: "Long Island City", value: "Long Island City" },
-      { id: "murray-hill-queens", zh: "法拉盛梅里山", en: "Murray Hill", value: "Murray Hill" },
+      { id: "murray-hill-queens", zh: "茉莉丘", en: "Murray Hill", value: "Murray Hill" },
       { id: "astoria", zh: "阿斯托里亚", en: "Astoria", value: "Astoria" },
     ],
   },
@@ -528,8 +530,8 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
     en: "The Bronx",
     value: "Bronx",
     locations: [
-      { id: "fordham", zh: "福德姆", en: "Fordham", value: "Fordham" },
-      { id: "riverdale", zh: "河谷区", en: "Riverdale", value: "Riverdale" },
+      { id: "fordham", zh: "福特汉姆", en: "Fordham", value: "Fordham" },
+      { id: "riverdale", zh: "里弗代尔", en: "Riverdale", value: "Riverdale" },
       { id: "kingsbridge", zh: "金斯布里奇", en: "Kingsbridge", value: "Kingsbridge" },
       { id: "pelham-bay", zh: "佩勒姆湾", en: "Pelham Bay", value: "Pelham Bay" },
       { id: "belmont", zh: "贝尔蒙特", en: "Belmont", value: "Belmont" },
@@ -557,7 +559,7 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
     locations: [
       { id: "great-neck", zh: "大颈", en: "Great Neck", value: "Great Neck" },
       { id: "jericho", zh: "杰里科", en: "Jericho", value: "Jericho" },
-      { id: "syosset", zh: "西奥塞特", en: "Syosset", value: "Syosset" },
+      { id: "syosset", zh: "赛奥塞特", en: "Syosset", value: "Syosset" },
       { id: "hicksville", zh: "希克斯维尔", en: "Hicksville", value: "Hicksville" },
       { id: "plainview", zh: "普莱恩维尤", en: "Plainview", value: "Plainview" },
       { id: "east-meadow", zh: "东草原", en: "East Meadow", value: "East Meadow" },
@@ -569,9 +571,9 @@ const POPULAR_AREA_GROUPS: readonly PopularAreaGroup[] = [
       { id: "nassau", zh: "拿骚县", en: "Nassau County", value: "Nassau" },
       { id: "suffolk", zh: "萨福克县", en: "Suffolk County", value: "Suffolk" },
       { id: "huntington", zh: "亨廷顿", en: "Huntington", value: "Huntington" },
-      { id: "commack", zh: "科马克", en: "Commack", value: "Commack" },
+      { id: "commack", zh: "康马克", en: "Commack", value: "Commack" },
       { id: "stony-brook", zh: "石溪", en: "Stony Brook", value: "Stony Brook" },
-      { id: "patchogue", zh: "帕奇奥格", en: "Patchogue", value: "Patchogue" },
+      { id: "patchogue", zh: "帕乔格", en: "Patchogue", value: "Patchogue" },
     ],
   },
   {
@@ -645,8 +647,10 @@ function findPopularAreaSelection(areaEn: string, areaZh: string) {
     const normalizedCandidate = candidate.trim().toLocaleLowerCase();
     return Boolean(normalizedValue && normalizedCandidate && (normalizedValue === normalizedCandidate || normalizedValue.includes(normalizedCandidate)));
   };
-  const group = POPULAR_AREA_GROUPS.find((item) => matches(areaEn, item.en) || matches(areaZh, item.zh));
-  const location = group?.locations.find((item) => matches(areaEn, item.en) || matches(areaZh, item.zh));
+  const matchesLocation = (item: { zh: string; en: string; value: string }) =>
+    [item.zh, item.en, item.value].some((label) => locationSearchVariants(label).some((variant) => matches(areaEn, variant) || matches(areaZh, variant)));
+  const group = POPULAR_AREA_GROUPS.find((item) => matchesLocation(item));
+  const location = group?.locations.find((item) => matchesLocation(item));
   return { areaGroupId: group?.id || "", areaLocationId: location?.id || "" };
 }
 
@@ -667,53 +671,6 @@ const INQUIRY_COMMENT_OPTIONS = [
   { value: "utilities", zh: "想确认水电网等费用是否包含", en: "I'd like to confirm whether utilities are included" },
   { value: "requirements", zh: "想了解申请条件和所需材料", en: "I'd like to learn about the application requirements" },
 ] as const;
-
-type AssistantSearchUpdate = {
-  location?: string;
-  minPrice?: string;
-  maxPrice?: string;
-  minSqft?: string;
-  maxSqft?: string;
-  bedrooms?: string;
-  bathrooms?: string;
-  rentalType?: RentalType;
-  moveIn?: string;
-  features: string[];
-};
-
-function parseAssistantSearch(value: string): AssistantSearchUpdate {
-  const normalized = value.trim().toLocaleLowerCase().replace(/，/g, ",");
-  const result: AssistantSearchUpdate = { features: [] };
-  const locations = POPULAR_AREA_GROUPS.flatMap((group) => [group, ...group.locations]);
-  const location = locations.find((item) => [item.zh, item.en, item.value].some((label) => normalized.includes(label.toLocaleLowerCase())));
-  if (location) result.location = location.value;
-  const maxPriceMatch = normalized.match(/(?:不超过|以内|以下|最多|预算|under|below|max(?:imum)?(?: budget)?)[^\d$]{0,8}\$?\s*([\d,]{3,})/i)
-    || normalized.match(/\$\s*([\d,]{3,})\s*(?:以内|以下|or less|max|under)/i);
-  const minPriceMatch = normalized.match(/(?:至少|以上|最低|from|min(?:imum)?)[^\d$]{0,8}\$?\s*([\d,]{3,})/i);
-  if (maxPriceMatch) result.maxPrice = maxPriceMatch[1].replace(/,/g, "");
-  if (minPriceMatch) result.minPrice = minPriceMatch[1].replace(/,/g, "");
-  const bedroomMatch = normalized.match(/([0-4])\s*(?:房|卧|bed(?:room)?s?)/i);
-  const chineseBedroom = normalized.match(/([一二两三四])\s*(?:房|卧)/);
-  const chineseNumber: Record<string, string> = { 一: "1", 二: "2", 两: "2", 三: "3", 四: "4" };
-  if (bedroomMatch) result.bedrooms = bedroomMatch[1];
-  else if (chineseBedroom) result.bedrooms = chineseNumber[chineseBedroom[1]];
-  const bathroomMatch = normalized.match(/([1-4](?:\.5)?)\s*(?:卫|卫生间|bath(?:room)?s?)/i);
-  if (bathroomMatch) result.bathrooms = bathroomMatch[1];
-  const sqftMatch = normalized.match(/([\d,]{3,})\s*(?:平方英尺|平方尺|sq\.?\s*ft|square feet)/i);
-  if (sqftMatch) result.minSqft = sqftMatch[1].replace(/,/g, "");
-  if (/(独立房间|单间|private room)/i.test(normalized)) result.rentalType = "privateRoom";
-  else if (/(转租|sublet)/i.test(normalized)) result.rentalType = "sublet";
-  else if (/(整租|整套|entire (?:home|place|apartment))/i.test(normalized)) result.rentalType = "entire";
-  if (/(立即入住|马上入住|immediate|move in now)/i.test(normalized)) result.moveIn = "immediate";
-  const featureTerms: Array<[string, RegExp]> = [
-    ["furnished", /家具|furnished/i], ["utilities", /包水电|utilities included/i], ["parking", /停车|parking/i],
-    ["pets", /宠物|pet friendly|pets allowed/i], ["laundry", /洗衣|laundry/i], ["inUnitLaundry", /室内洗衣|in[- ]unit laundry/i],
-    ["airConditioning", /空调|air conditioning|\bac\b/i], ["dishwasher", /洗碗机|dishwasher/i], ["balcony", /阳台|露台|balcony|terrace/i],
-    ["elevator", /电梯|elevator/i], ["nearTransit", /近地铁|近公交|near transit|near subway/i], ["shortTerm", /短租|short term/i],
-  ];
-  result.features = featureTerms.filter(([, pattern]) => pattern.test(normalized)).map(([key]) => key);
-  return result;
-}
 
 // Common NYC and Long Island search aliases. Exact listing text remains searchable too.
 const LOCATION_ALIAS_GROUPS = [
@@ -764,7 +721,7 @@ const LOCATION_ALIAS_GROUPS = [
   ["英伍德", "因伍德", "inwood"],
   ["晨边高地", "晨邊高地", "莫宁赛德高地", "莫寧賽德高地", "morningside heights"],
   ["格拉梅西", "格拉梅西", "gramercy", "gramercy park"],
-  ["穆雷山", "默里山", "法拉盛梅里山", "murray hill", "murray hill queens"],
+  ["茉莉丘", "穆雷山", "默里山", "法拉盛梅里山", "梅里山", "murray hill", "murray hill queens"],
   ["基普斯湾", "基普斯灣", "kips bay"],
   ["熨斗区", "熨斗區", "扁铁区", "扁鐵區", "flatiron", "flatiron district"],
   ["联合广场", "聯合廣場", "union square"],
@@ -792,7 +749,7 @@ const LOCATION_ALIAS_GROUPS = [
   ["圆石山", "圓石山", "鹅卵石山", "鵝卵石山", "cobble hill"],
   ["博鲁姆山", "博魯姆山", "boerum hill"],
   ["日落公园", "日落公園", "sunset park"],
-  ["海湾岭", "海灣嶺", "bay ridge"],
+  ["湾脊", "灣脊", "海湾岭", "海灣嶺", "bay ridge"],
   ["本森赫斯特", "本森赫斯特", "bensonhurst"],
   ["羊头湾", "羊頭灣", "sheepshead bay"],
   ["格雷夫森德", "格雷夫森德", "gravesend"],
@@ -810,8 +767,8 @@ const LOCATION_ALIAS_GROUPS = [
   ["长岛市", "長島市", "长岛城", "長島城", "long island city", "lic"],
   ["阿斯托里亚", "阿斯托里亞", "astoria"],
   ["阳光边", "陽光邊", "sunnyside"],
-  ["伍德赛德", "伍德賽德", "woodside"],
-  ["学院点", "學院點", "college point"],
+  ["伍德赛德", "伍德賽德", "木边", "木邊", "木边区", "木邊區", "woodside"],
+  ["大学点", "大學點", "学院点", "學院點", "college point"],
   ["杰克逊高地", "傑克遜高地", "jackson heights"],
   ["艾姆赫斯特", "艾姆赫斯特", "elmhurst"],
   ["科罗娜", "科羅娜", "corona"],
@@ -824,12 +781,12 @@ const LOCATION_ALIAS_GROUPS = [
   ["牙买加", "牙買加", "j​​amaica", "jamaica"],
   ["牙买加庄园", "牙買加莊園", "jamaica estates"],
   ["布里亚伍德", "布里亞伍德", "briarwood"],
-  ["贝赛德", "貝賽德", "贝赛", "貝賽", "bayside"],
+  ["貝賽", "贝赛", "贝赛德", "貝賽德", "bayside"],
   ["道格拉斯顿", "道格拉斯頓", "douglaston"],
   ["小颈", "小頸", "little neck"],
-  ["白石", "白石", "whitestone"],
+  ["白石镇", "白石鎮", "白石", "whitestone"],
   ["里奇伍德", "里奇伍德", "ridgewood"],
-  ["马斯佩斯", "馬斯佩斯", "maspeth"],
+  ["马斯佩斯", "馬斯佩斯", "马斯佩思", "馬斯佩思", "麦斯佩斯", "麥斯佩斯", "maspeth"],
   ["臭氧公园", "臭氧公園", "臭氧园", "臭氧園", "ozone park"],
   ["霍华德海滩", "霍華德海灘", "howard beach"],
   ["洛克威", "洛克威", "洛克威海滩", "洛克威海灘", "rockaway", "rockaway beach"],
@@ -838,14 +795,14 @@ const LOCATION_ALIAS_GROUPS = [
   ["圣奥尔本斯", "聖奧爾本斯", "st. albans", "st albans"],
   ["坎布里亚高地", "坎布里亞高地", "cambria heights"],
 
-  ["河代尔", "河代爾", "河谷", "riverdale"],
+  ["里弗代尔", "里弗代爾", "河代尔", "河代爾", "河谷区", "河谷區", "河谷", "riverdale"],
   ["金斯布里奇", "金斯布里奇", "kingsbridge"],
   ["福特汉姆", "福特漢姆", "fordham"],
   ["贝尔蒙特", "貝爾蒙特", "belmont"],
   ["大学高地", "大學高地", "university heights"],
   ["莫里斯公园", "莫里斯公園", "morris park"],
   ["佩勒姆湾", "佩勒姆灣", "pelham bay"],
-  ["索罗格斯颈", "索羅格斯頸", "索罗格颈", "索羅格頸", "throggs neck", "throgs neck"],
+  ["特罗格斯颈", "特羅格斯頸", "索罗格斯颈", "索羅格斯頸", "窄颈", "窄頸", "throggs neck", "throgs neck"],
   ["莫特黑文", "莫特黑文", "mott haven"],
   ["康科斯", "康科斯", "the concourse", "concourse"],
   ["诺伍德", "諾伍德", "norwood"],
@@ -887,20 +844,20 @@ const LOCATION_ALIAS_GROUPS = [
   ["莱维敦", "萊維敦", "levittown"],
   ["希克斯维尔", "希克斯維爾", "hicksville"],
   ["普莱恩维尤", "普萊恩維尤", "plainview"],
-  ["西奥塞特", "西奧塞特", "syosset"],
+  ["赛奥塞特", "賽奧塞特", "西奥塞特", "西奧塞特", "赛奥塞", "賽奧塞", "赛奥西特", "賽奧西特", "syosset"],
   ["杰里科", "傑里科", "jericho"],
   ["罗斯林", "羅斯林", "roslyn"],
   ["格伦科夫", "格倫科夫", "glen cove"],
   ["牡蛎湾", "牡蠣灣", "oyster bay"],
   ["贝思佩奇", "貝思佩奇", "bethpage"],
-  ["东草原", "東草原", "east meadow"],
+  ["东草原", "東草原", "东梅多", "東梅多", "east meadow"],
   ["西亨普斯特德", "西亨普斯特德", "west hempstead"],
 
   ["亨廷顿", "亨廷頓", "huntington"],
   ["亨廷顿站", "亨廷頓站", "huntington station"],
   ["冷泉港", "冷泉港", "cold spring harbor"],
   ["北港", "北港", "northport"],
-  ["康马克", "康馬克", "commack"],
+  ["康马克", "康馬克", "科马克", "科馬克", "commack"],
   ["史密斯敦", "史密斯敦", "smithtown"],
   ["霍波格", "霍波格", "hauppauge"],
   ["石溪", "石溪", "stony brook"],
@@ -917,7 +874,7 @@ const LOCATION_ALIAS_GROUPS = [
   ["布伦特伍德", "布倫特伍德", "brentwood"],
   ["中央伊斯利普", "中央伊斯利普", "central islip"],
   ["河头", "河頭", "riverhead"],
-  ["帕乔格", "帕喬格", "patchogue"],
+  ["帕乔格", "帕喬格", "帕奇奥格", "帕奇奧格", "patchogue"],
   ["东汉普顿", "東漢普頓", "east hampton"],
   ["南安普顿", "南安普頓", "southampton"],
   ["萨格港", "薩格港", "sag harbor"],
@@ -1946,8 +1903,6 @@ export default function HomePage() {
   const [locale, setLocale] = useState<Locale>("zh");
   const [locationInput, setLocationInput] = useState("");
   const [appliedLocation, setAppliedLocation] = useState("");
-  const [assistantSearchInput, setAssistantSearchInput] = useState("");
-  const [assistantSearchSummary, setAssistantSearchSummary] = useState("");
   const [selectedPopularAreaId, setSelectedPopularAreaId] = useState("");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
@@ -3164,7 +3119,7 @@ export default function HomePage() {
     setActiveFeatures((current) => (current.includes(feature) ? current.filter((item) => item !== feature) : [...current, feature]));
   };
 
-  const handleProfileUpdate = async (input: { displayName: string; phone: string }) => {
+  const handleProfileUpdate = async (input: { displayName: string; phone: string; avatarKey?: string | null }) => {
     const response = await fetch("/api/auth/me", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -3244,27 +3199,6 @@ export default function HomePage() {
     setAppliedLocation(value);
   };
 
-  const applyAssistantSearch = () => {
-    const parsed = parseAssistantSearch(assistantSearchInput);
-    if (parsed.location) { setLocationInput(parsed.location); setAppliedLocation(parsed.location); }
-    if (parsed.minPrice) setMinPrice(parsed.minPrice);
-    if (parsed.maxPrice) setMaxPrice(parsed.maxPrice);
-    if (parsed.minSqft) setMinSqft(parsed.minSqft);
-    if (parsed.maxSqft) setMaxSqft(parsed.maxSqft);
-    if (parsed.bedrooms) setBedrooms(parsed.bedrooms);
-    if (parsed.bathrooms) setBathrooms(parsed.bathrooms);
-    if (parsed.rentalType) setRentalType(parsed.rentalType);
-    if (parsed.moveIn) setMoveIn(parsed.moveIn);
-    if (parsed.features.length) setActiveFeatures((current) => Array.from(new Set([...current, ...parsed.features])));
-    const recognized = [parsed.location, parsed.maxPrice ? `${locale === "zh" ? "最高" : "Max"} $${Number(parsed.maxPrice).toLocaleString("en-US")}` : "", parsed.bedrooms ? `${parsed.bedrooms} ${locale === "zh" ? "卧室" : "bed"}` : "", ...parsed.features.slice(0, 2).map((feature) => t[feature as keyof typeof t])].filter(Boolean);
-    if (!recognized.length) {
-      setAssistantSearchSummary(locale === "zh" ? "暂时没有识别到筛选条件，请尝试写明区域、预算或卧室数。" : "No filters were recognized yet. Try including an area, budget, or bedroom count.");
-      return;
-    }
-    setAssistantSearchSummary((locale === "zh" ? "已应用：" : "Applied: ") + recognized.join(" · "));
-    setMobileFiltersOpen(false);
-  };
-
   const resetFilters = () => {
     setLocationInput("");
     setAppliedLocation("");
@@ -3278,8 +3212,6 @@ export default function HomePage() {
     setRentalType("all");
     setMoveIn("");
     setActiveFeatures([]);
-    setAssistantSearchInput("");
-    setAssistantSearchSummary("");
     setMobileFiltersOpen(false);
     showToast(locale === "zh" ? "筛选条件已重置" : "Filters reset");
   };
@@ -3677,7 +3609,7 @@ export default function HomePage() {
   };
 
   const processPhotoFiles = async (files: File[]) => {
-    const limitedFiles = files.slice(0, 4 - draft.photos.length);
+    const limitedFiles = files.slice(0, MAX_LISTING_PHOTOS - draft.photos.length);
     if (limitedFiles.length === 0) return;
     setMediaUploading(true);
     setPostError("");
@@ -3693,7 +3625,7 @@ export default function HomePage() {
         const uploaded = await uploadPhotoToR2(file);
         nextMedia.push(uploaded);
         if (uploaded.fingerprint) fingerprints.add(uploaded.fingerprint);
-        updateDraft(draftArraysFromMedia(nextMedia.slice(0, 4)));
+        updateDraft(draftArraysFromMedia(nextMedia.slice(0, MAX_LISTING_PHOTOS)));
       }
     } catch (error) {
       console.error("[photo-upload]", error);
@@ -4479,7 +4411,7 @@ export default function HomePage() {
               <span aria-hidden="true">+</span>
               {t.post}
             </button>
-            <button className={`avatar-button ${currentUser ? "is-authenticated" : ""}`} type="button" onClick={openAccount} aria-label={currentUser ? currentUser.displayName : t.account}>{currentUser ? currentUser.displayName.slice(0, 1).toUpperCase() : "?"}</button>
+            <button className={`avatar-button ${currentUser ? "is-authenticated" : ""}`} type="button" onClick={openAccount} aria-label={currentUser ? currentUser.displayName : t.account}>{currentUser?.avatarUrl ? <Image src={currentUser.avatarUrl} alt="" width={32} height={32} unoptimized /> : currentUser ? currentUser.displayName.slice(0, 1).toUpperCase() : "?"}</button>
           </div>
         </div>
       </header>
@@ -4509,12 +4441,6 @@ export default function HomePage() {
             </div>
 
             <form id="rental-filter-form" className={`filter-form ${showMore ? "is-more-open" : ""}`} onSubmit={submitSearch}>
-              <section className="assistant-search" aria-labelledby="assistant-search-title">
-                <div className="assistant-search-heading"><span className="anju-assistant-mark" aria-hidden="true"><SearchIcon /></span><div><strong id="assistant-search-title">{locale === "zh" ? "告诉安居助手你想找什么" : "Tell Anju Assistant what you need"}</strong><small>{locale === "zh" ? "例如：法拉盛两房，$3,000以内，允许宠物" : "Example: Two bedrooms in Flushing, under $3,000, pet friendly"}</small></div></div>
-                <textarea rows={2} value={assistantSearchInput} onChange={(event) => setAssistantSearchInput(event.target.value)} placeholder={locale === "zh" ? "输入区域、预算、卧室和需要的特点" : "Enter an area, budget, bedrooms, and features"} />
-                <button className="outline-button" type="button" onClick={applyAssistantSearch} disabled={!assistantSearchInput.trim()}>{locale === "zh" ? "转换成筛选条件" : "Apply as filters"}<ArrowIcon size={13} /></button>
-                {assistantSearchSummary && <p role="status">{assistantSearchSummary}</p>}
-              </section>
               <label className="field-label" htmlFor="location">{t.location}</label>
               <div className="input-shell search-input-shell">
                 <SearchIcon />
@@ -4988,7 +4914,7 @@ export default function HomePage() {
 
               {postStep === 2 && (
                 <div className="post-form-grid">
-                  <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 4 张，当前 ${draft.photos.length} 张。支持 JPG、PNG、WebP，照片会上传到云端。` : `Up to 4 photos, ${draft.photos.length} selected. JPG, PNG, and WebP upload to cloud storage.`}</span></label><NativeMediaActions locale={locale} remaining={Math.max(0, 4 - draft.photos.length)} disabled={mediaUploading} onFiles={(files) => processPhotoFiles(files)} />
+                  <label className="field-label field-span-2" htmlFor="post-photos">{locale === "zh" ? "房源照片" : "Listing photos"}<input id="post-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={mediaUploading} onChange={handlePhotoUpload} /><span className="field-help">{locale === "zh" ? `最多 ${MAX_LISTING_PHOTOS} 张，当前 ${draft.photos.length} 张。支持 JPG、PNG、WebP，照片会上传到云端。` : `Up to ${MAX_LISTING_PHOTOS} photos, ${draft.photos.length} selected. JPG, PNG, and WebP upload to cloud storage.`}</span></label><NativeMediaActions locale={locale} remaining={Math.max(0, MAX_LISTING_PHOTOS - draft.photos.length)} disabled={mediaUploading} onFiles={(files) => processPhotoFiles(files)} />
                   {draft.photos.length > 0 && <div className="photo-preview field-span-2">{draft.photos.map((photo, index) => <div className="photo-preview-item" key={`${photo.slice(0, 24)}-${index}`}><Image src={photo} alt={`${locale === "zh" ? "房源照片" : "Listing photo"} ${index + 1}`} width={112} height={82} /><span className="photo-order">{index === 0 ? (locale === "zh" ? "首图" : "Cover") : index + 1}</span><div className="photo-preview-actions"><button className="photo-action" type="button" onClick={() => movePhoto(index, "up")} disabled={index === 0} aria-label={locale === "zh" ? "设为首图" : "Move photo up"}><ChevronIcon direction="up" /></button><button className="photo-action" type="button" onClick={() => movePhoto(index, "down")} disabled={index === draft.photos.length - 1} aria-label={locale === "zh" ? "照片后移" : "Move photo down"}><ChevronIcon direction="down" /></button><button className="photo-action photo-remove" type="button" onClick={() => updateDraft(draftArraysFromMedia(mediaFromDraft(draft).filter((_, photoIndex) => photoIndex !== index)))} aria-label={locale === "zh" ? `删除照片 ${index + 1}` : `Remove photo ${index + 1}`}><CloseIcon size={14} /></button></div></div>)}</div>}
                   <div id="post-features" className="field-label feature-field-label" tabIndex={-1}>{locale === "zh" ? "房源特点（可多选）" : "Features (choose all that apply)"}<div className="feature-filters post-features">{POST_FEATURE_KEYS.map((key) => <button className={`feature-chip ${draft.features.includes(key) ? "active" : ""}`} key={key} type="button" onClick={() => updateDraft({ features: draft.features.includes(key) ? draft.features.filter((item) => item !== key) : [...draft.features, key] })} aria-pressed={draft.features.includes(key)}><span className="chip-mark" aria-hidden="true">{draft.features.includes(key) ? <CheckIcon size={12} /> : ""}</span>{t[key]}</button>)}</div></div>
                   <div className="anju-assistant field-span-2">

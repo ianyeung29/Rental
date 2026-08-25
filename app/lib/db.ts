@@ -31,6 +31,8 @@ export async function ensureDatabaseSchema() {
         email TEXT NOT NULL UNIQUE,
         display_name TEXT NOT NULL,
         phone TEXT NOT NULL DEFAULT '',
+        avatar_key TEXT NOT NULL DEFAULT '',
+        avatar_url TEXT NOT NULL DEFAULT '',
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'user',
         account_type TEXT NOT NULL DEFAULT 'user',
@@ -42,6 +44,8 @@ export async function ensureDatabaseSchema() {
       )
     `);
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT ''");
+    await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS avatar_key TEXT NOT NULL DEFAULT ''");
+    await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS avatar_url TEXT NOT NULL DEFAULT ''");
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT 'user'");
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS agent_verification_status TEXT NOT NULL DEFAULT 'unsubmitted'");
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ");

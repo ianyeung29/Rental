@@ -143,12 +143,12 @@ const SPECIFIC_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "maspeth",
-    aliases: ["Maspeth", "马斯佩思"],
-    titleZh: "马斯佩思低密度住宅区",
+    aliases: ["Maspeth", "马斯佩斯", "马斯佩思", "麦斯佩斯"],
+    titleZh: "马斯佩斯低密度住宅区",
     titleEn: "Maspeth neighborhood guide",
     regionZh: "皇后区",
     regionEn: "Queens",
-    summaryZh: "马斯佩思以住宅街、工业用地和 Grand Avenue 一带的本地商业混合为特点，公共交通和道路通勤的差异很大；看房时应特别确认停车、公交站距离和晚间环境。",
+    summaryZh: "马斯佩斯以住宅街、工业用地和 Grand Avenue 一带的本地商业混合为特点，公共交通和道路通勤的差异很大；看房时应特别确认停车、公交站距离和晚间环境。",
     summaryEn: "Maspeth mixes residential streets, industrial parcels, and local businesses around Grand Avenue. Transit and driving patterns vary widely, so parking, bus-stop distance, and the evening environment deserve extra attention.",
     highlights: [
       { labelZh: "住宅与工业混合", labelEn: "Residential-industrial mix", detailZh: "同一区域可能同时出现住宅街、仓储或工业用途，具体街道氛围差别明显。", detailEn: "Residential streets can sit near warehouse or industrial uses, creating noticeable street-to-street differences." },
@@ -159,12 +159,12 @@ const SPECIFIC_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "bayside",
-    aliases: ["Bayside", "贝赛德"],
-    titleZh: "贝赛德住宅与 Bell Boulevard 生活圈",
+    aliases: ["Bayside", "貝賽", "贝赛", "贝赛德", "貝賽德"],
+    titleZh: "貝賽住宅与 Bell Boulevard 生活圈",
     titleEn: "Bayside neighborhood guide",
     regionZh: "皇后区",
     regionEn: "Queens",
-    summaryZh: "贝赛德整体以住宅街为主，Bell Boulevard 和 Bay Terrace 一带提供餐饮、购物及日常服务；LIRR Bayside 站和公交是重要出行参考，但到商业区或车站的距离要按具体位置确认。",
+    summaryZh: "貝賽整体以住宅街为主，Bell Boulevard 和 Bay Terrace 一带提供餐饮、购物及日常服务；LIRR Bayside 站和公交是重要出行参考，但到商业区或车站的距离要按具体位置确认。",
     summaryEn: "Bayside is primarily residential, with dining, shopping, and daily services around Bell Boulevard and Bay Terrace. The Bayside LIRR station and buses are useful transit references, but the distance to them depends on the specific block.",
     highlights: [
       { labelZh: "本地商业", labelEn: "Local retail", detailZh: "Bell Boulevard 和 Bay Terrace 的商业设施更像本地生活中心，和法拉盛市中心的密集度不同。", detailEn: "Bell Boulevard and Bay Terrace function as local town centers and have a different feel from dense Downtown Flushing." },
@@ -175,12 +175,12 @@ const SPECIFIC_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "whitestone",
-    aliases: ["Whitestone", "白石", "Beechhurst", "比彻斯特", "Malba", "马尔巴"],
-    titleZh: "白石 · 比彻斯特住宅区",
+    aliases: ["Whitestone", "白石镇", "白石", "Beechhurst", "比彻斯特", "Malba", "马尔巴"],
+    titleZh: "白石镇 · 比彻斯特住宅区",
     titleEn: "Whitestone · Beechhurst neighborhood guide",
     regionZh: "皇后区",
     regionEn: "Queens",
-    summaryZh: "白石和比彻斯特以低密度住宅、海湾附近街区和本地商业为主，Bay Terrace、Bell Boulevard 等购物点可作生活参考；公共交通覆盖和步行便利度较依赖具体位置。",
+    summaryZh: "白石镇和比彻斯特以低密度住宅、海湾附近街区和本地商业为主，Bay Terrace、Bell Boulevard 等购物点可作生活参考；公共交通覆盖和步行便利度较依赖具体位置。",
     summaryEn: "Whitestone and Beechhurst are largely low-density residential areas near the waterfront, with local shopping references including Bay Terrace and Bell Boulevard. Transit coverage and walkability depend heavily on the exact location.",
     highlights: [
       { labelZh: "低密度住宅", labelEn: "Low-density housing", detailZh: "独立住宅、联排和低层住宅较常见，街道之间的停车和房屋维护情况需要逐一查看。", detailEn: "Detached homes, townhouses, and low-rise housing are common; parking and property condition should be checked street by street." },
@@ -191,12 +191,12 @@ const SPECIFIC_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "college-point",
-    aliases: ["College Point", "学院点"],
-    titleZh: "学院点住宅与 College Point Boulevard",
+    aliases: ["College Point", "大学点", "学院点"],
+    titleZh: "大学点住宅与 College Point Boulevard",
     titleEn: "College Point neighborhood guide",
     regionZh: "皇后区",
     regionEn: "Queens",
-    summaryZh: "学院点的住宅、工业和大型零售用途沿 College Point Boulevard 及周边交错分布，生活便利度和街道环境差异较大；看房时要核实公交、停车、噪音和到超市的实际路线。",
+    summaryZh: "大学点的住宅、工业和大型零售用途沿 College Point Boulevard 及周边交错分布，生活便利度和街道环境差异较大；看房时要核实公交、停车、噪音和到超市的实际路线。",
     summaryEn: "College Point mixes residential, industrial, and larger-format retail uses around College Point Boulevard. Convenience and street conditions vary, so verify buses, parking, noise, and the actual grocery route.",
     highlights: [
       { labelZh: "大型零售", labelEn: "Retail access", detailZh: "College Point Boulevard 周边有较多大型商店和餐饮选择，但步行环境不一定连续。", detailEn: "College Point Boulevard has larger stores and dining options, though the walking environment may not be continuous." },
@@ -271,12 +271,12 @@ const SPECIFIC_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "bay-ridge",
-    aliases: ["Bay Ridge", "海湾岭", "Dyker Heights", "戴克高地"],
-    titleZh: "海湾岭 · 戴克高地住宅区",
+    aliases: ["Bay Ridge", "湾脊", "海湾岭", "Dyker Heights", "戴克高地"],
+    titleZh: "湾脊 · 戴克高地住宅区",
     titleEn: "Bay Ridge · Dyker Heights neighborhood guide",
     regionZh: "布鲁克林",
     regionEn: "Brooklyn",
-    summaryZh: "海湾岭和戴克高地以住宅街、3rd/5th Avenue 本地商业、餐饮和滨水空间为主要生活参考，街区南北差异明显；请核实到 R 线、公交、超市和工作地点的路线。",
+    summaryZh: "湾脊和戴克高地以住宅街、3rd/5th Avenue 本地商业、餐饮和滨水空间为主要生活参考，街区南北差异明显；请核实到 R 线、公交、超市和工作地点的路线。",
     summaryEn: "Bay Ridge and Dyker Heights combine residential streets, local shopping and dining along 3rd and 5th Avenues, and waterfront space. Conditions change from north to south, so check routes to the R train, buses, groceries, and work.",
     highlights: [
       { labelZh: "本地商业", labelEn: "Local retail", detailZh: "3rd Avenue、5th Avenue 和 86th Street 一带提供较完整的日常餐饮和零售。", detailEn: "3rd Avenue, 5th Avenue, and 86th Street provide a strong mix of everyday dining and retail." },
@@ -303,12 +303,12 @@ const SPECIFIC_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "syosset",
-    aliases: ["Syosset", "西奥塞特"],
-    titleZh: "西奥塞特住宅与 LIRR 生活圈",
+    aliases: ["Syosset", "赛奥塞特", "西奥塞特", "赛奥塞", "赛奥西特"],
+    titleZh: "赛奥塞特住宅与 LIRR 生活圈",
     titleEn: "Syosset neighborhood guide",
     regionZh: "长岛",
     regionEn: "Long Island",
-    summaryZh: "西奥塞特以住宅社区、Jericho Turnpike 商业和 Syosset LIRR 站为主要参考，日常生活通常需要驾车或接驳；房源到车站、超市和学校的实际距离要逐一核实。",
+    summaryZh: "赛奥塞特以住宅社区、Jericho Turnpike 商业和 Syosset LIRR 站为主要参考，日常生活通常需要驾车或接驳；房源到车站、超市和学校的实际距离要逐一核实。",
     summaryEn: "Syosset combines residential neighborhoods, Jericho Turnpike shopping, and the Syosset LIRR station. Daily life often involves driving or a transfer, so check the actual distance to rail, groceries, and schools.",
     highlights: [
       { labelZh: "铁路参考", labelEn: "Rail reference", detailZh: "Syosset LIRR 站可作为进城通勤参考，但停车、接驳和班次要按工作时间确认。", detailEn: "Syosset LIRR is a useful Manhattan-commute reference, but parking, transfers, and schedules should match the workday." },
@@ -478,7 +478,7 @@ const SPECIFIC_AREA_GUIDES: readonly AreaGuide[] = [
 const GENERAL_AREA_GUIDES: readonly AreaGuide[] = [
   {
     id: "flushing-and-elmhurst",
-    aliases: ["Flushing", "法拉盛", "Elmhurst", "艾姆赫斯特", "Rego Park", "雷哥公园", "Jackson Heights", "杰克逊高地"],
+    aliases: ["Flushing", "法拉盛", "Elmhurst", "艾姆赫斯特", "Rego Park", "雷哥公园", "Jackson Heights", "杰克逊高地", "Murray Hill", "茉莉丘", "法拉盛梅里山"],
     titleZh: "法拉盛 · 艾姆赫斯特生活圈",
     titleEn: "Flushing · Elmhurst community area",
     regionZh: "皇后区",
@@ -494,8 +494,8 @@ const GENERAL_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "forest-hills-and-bayside",
-    aliases: ["Forest Hills", "森林小丘", "Bayside", "贝赛德", "Fresh Meadows", "新鲜草原", "Whitestone", "白石", "College Point", "学院点"],
-    titleZh: "森林小丘 · 贝赛德住宅区",
+    aliases: ["Forest Hills", "森林小丘", "Bayside", "貝賽", "贝赛", "贝赛德", "貝賽德", "Fresh Meadows", "新鲜草原", "Whitestone", "白石镇", "白石", "College Point", "大学点", "学院点"],
+    titleZh: "森林小丘 · 貝賽住宅区",
     titleEn: "Forest Hills · Bayside residential areas",
     regionZh: "皇后区",
     regionEn: "Queens",
@@ -526,7 +526,7 @@ const GENERAL_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "brooklyn-general",
-    aliases: ["Brooklyn", "布鲁克林", "Downtown Brooklyn", "布鲁克林市中心", "Brooklyn Heights", "布鲁克林高地", "Williamsburg", "威廉斯堡", "Greenpoint", "绿点", "Bushwick", "布什维克", "Park Slope", "公园坡", "Bay Ridge", "海湾岭", "Dyker Heights", "戴克高地", "Brighton Beach", "布莱顿海滩", "Midwood", "中木区"],
+    aliases: ["Brooklyn", "布鲁克林", "Downtown Brooklyn", "布鲁克林市中心", "Brooklyn Heights", "布鲁克林高地", "Williamsburg", "威廉斯堡", "Greenpoint", "绿点", "Bushwick", "布什维克", "Park Slope", "公园坡", "Bay Ridge", "湾脊", "海湾岭", "Dyker Heights", "戴克高地", "Brighton Beach", "布莱顿海滩", "Midwood", "中木区"],
     titleZh: "布鲁克林区域参考",
     titleEn: "Brooklyn area reference",
     regionZh: "布鲁克林",
@@ -538,7 +538,7 @@ const GENERAL_AREA_GUIDES: readonly AreaGuide[] = [
   },
   {
     id: "long-island-community",
-    aliases: ["Long Island", "长岛", "Nassau County", "拿骚县", "Suffolk County", "萨福克县", "Great Neck", "大颈", "Jericho", "杰里科", "Syosset", "西奥塞特", "Hicksville", "希克斯维尔", "Plainview", "普莱恩维尤", "East Meadow", "东草原", "New Hyde Park", "新海德公园", "Garden City", "花园城", "Westbury", "西伯里", "Mineola", "米尼奥拉", "Manhasset", "曼哈塞特", "Huntington", "亨廷顿", "Commack", "科马克", "Stony Brook", "石溪", "Patchogue", "帕奇奥格"],
+    aliases: ["Long Island", "长岛", "Nassau County", "拿骚县", "Suffolk County", "萨福克县", "Great Neck", "大颈", "Jericho", "杰里科", "Syosset", "赛奥塞特", "西奥塞特", "赛奥塞", "Hicksville", "希克斯维尔", "Plainview", "普莱恩维尤", "East Meadow", "东草原", "东梅多", "New Hyde Park", "新海德公园", "Garden City", "花园城", "Westbury", "西伯里", "Mineola", "米尼奥拉", "Manhasset", "曼哈塞特", "Huntington", "亨廷顿", "Commack", "康马克", "科马克", "Stony Brook", "石溪", "Patchogue", "帕乔格", "帕奇奥格"],
     titleZh: "长岛城镇生活参考",
     titleEn: "Long Island town reference",
     regionZh: "长岛",
