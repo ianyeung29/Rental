@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "安居 · Anjurentals",
+    name: "安居",
     short_name: "安居",
     description: "安居房源搜索与租赁市场。",
     lang: "zh-CN",

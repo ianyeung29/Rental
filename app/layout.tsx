@@ -11,6 +11,11 @@ export const metadata: Metadata = {
     icon: "/brand/anjurentals-mark.svg",
     shortcut: "/brand/anjurentals-mark.svg",
   },
+  appleWebApp: {
+    capable: true,
+    title: "安居",
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {
