@@ -20,6 +20,7 @@ type AccountUser = {
   displayName: string;
   email: string;
   phone: string;
+  avatarUrl: string;
   role: string;
   accountType: "user" | "agent";
   agentVerificationStatus: "unsubmitted" | "pending" | "verified" | "rejected" | "expired";
@@ -177,7 +178,7 @@ type AccountDrawerProps = {
   resendLoading: boolean;
   resendError: string;
   onResendVerification: () => void;
-  onUpdateProfile: (input: { displayName: string; phone: string }) => Promise<void>;
+  onUpdateProfile: (input: { displayName: string; phone: string; avatarKey?: string | null }) => Promise<void>;
   onAgentAccountActivated: (input: { accountType: "agent"; agentVerificationStatus: AccountUser["agentVerificationStatus"]; agentVerified: boolean }) => void;
   onAgentVerificationStatusChange: (status: AccountUser["agentVerificationStatus"]) => void;
   onViewListing: (id: string) => void;
@@ -241,6 +242,10 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   const [profilePhone, setProfilePhone] = useState(user.phone || "");
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [profileFile, setProfileFile] = useState<File | null>(null);
+  const [profilePreviewUrl, setProfilePreviewUrl] = useState("");
+  const [profileUploadStatus, setProfileUploadStatus] = useState<"idle" | "uploading" | "uploaded">("idle");
+  const [profileUploadError, setProfileUploadError] = useState("");
   const [renterProfile, setRenterProfile] = useState<RenterProfile>(() => defaultRenterProfile(user));
   const [renterProfileDraft, setRenterProfileDraft] = useState<RenterProfile>(() => defaultRenterProfile(user));
   const [renterProfileEditing, setRenterProfileEditing] = useState(false);
@@ -281,14 +286,54 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
     });
   }, [applications, receivedApplications, readApplicationIds, tab]);
   const applicationIsUnread = (application: DashboardApplication) => Boolean(application.unread && !readApplicationIds.has(application.id));
+  const handleProfileAvatarChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = "";
+    setProfileUploadError("");
+    setProfileUploadStatus("idle");
+    if (!file) return;
+    if (!AGENT_PORTRAIT_TYPES.has(file.type)) {
+      setProfileFile(null);
+      setProfileUploadError(zh ? "请选择 JPEG、PNG 或 WebP 图片。" : "Choose a JPEG, PNG, or WebP image.");
+      return;
+    }
+    if (file.size > AGENT_PORTRAIT_MAX_BYTES) {
+      setProfileFile(null);
+      setProfileUploadError(zh ? "头像图片需要小于 8 MB。" : "The profile picture must be 8 MB or smaller.");
+      return;
+    }
+    setProfileFile(file);
+    setProfilePreviewUrl(URL.createObjectURL(file));
+  };
+  const uploadProfileAvatar = async () => {
+    if (!profileFile) return "";
+    setProfileUploadStatus("uploading");
+    const optimized = await optimizeImageFile(profileFile, "agentPortrait");
+    const presignResponse = await fetch("/api/media/presign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ purpose: "profileAvatar", filename: profileFile.name, contentType: optimized.contentType, size: optimized.blob.size }),
+    });
+    const presign = await presignResponse.json().catch(() => ({})) as { error?: string; key?: string; uploadUrl?: string; cacheControl?: string };
+    if (!presignResponse.ok || !presign.key || !presign.uploadUrl) throw new Error(presign.error || (zh ? "头像上传准备失败。" : "The profile picture upload could not be prepared."));
+    const uploadResponse = await fetch(presign.uploadUrl, { method: "PUT", headers: { "Content-Type": optimized.contentType, "Cache-Control": presign.cacheControl || "public, max-age=31536000, immutable" }, body: optimized.blob });
+    if (!uploadResponse.ok) throw new Error(zh ? "头像上传失败，请检查 R2 设置后重试。" : "The profile picture upload failed. Check the R2 settings and try again.");
+    setProfileUploadStatus("uploaded");
+    return presign.key;
+  };
   const handleProfileSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setProfileSaving(true);
     setProfileError("");
     try {
-      await onUpdateProfile({ displayName: profileName, phone: profilePhone });
+      const avatarKey = await uploadProfileAvatar();
+      await onUpdateProfile({ displayName: profileName, phone: profilePhone, ...(avatarKey ? { avatarKey } : {}) });
       setProfileEditing(false);
+      setProfileFile(null);
+      setProfilePreviewUrl("");
+      setProfileUploadStatus("idle");
     } catch (error) {
+      setProfileUploadStatus("idle");
       setProfileError(error instanceof Error ? error.message : (zh ? "资料暂时无法更新。" : "Profile could not be updated right now."));
     } finally {
       setProfileSaving(false);
@@ -479,6 +524,11 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
       if (portraitPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(portraitPreviewUrl);
     };
   }, [portraitPreviewUrl]);
+  useEffect(() => {
+    return () => {
+      if (profilePreviewUrl.startsWith("blob:")) URL.revokeObjectURL(profilePreviewUrl);
+    };
+  }, [profilePreviewUrl]);
   const handlePortraitChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] || null;
     event.target.value = "";
@@ -564,7 +614,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
             <button className="drawer-close" type="button" onClick={onClose} aria-label={zh ? "关闭" : "Close"}><CloseIcon /></button>
           </div>
           <div className="account-identity">
-            <div className={portraitStyles.accountAvatarLarge} aria-hidden="true">{verificationApplication?.portraitUrl ? <Image src={verificationApplication.portraitUrl} alt="" width={46} height={46} /> : initial}</div>
+            <div className={portraitStyles.accountAvatarLarge} aria-hidden="true">{user.avatarUrl ? <Image src={user.avatarUrl} alt="" width={46} height={46} unoptimized /> : verificationApplication?.portraitUrl ? <Image src={verificationApplication.portraitUrl} alt="" width={46} height={46} unoptimized /> : initial}</div>
             <div><h2 id="account-title">{user.displayName}</h2><p>{user.email}</p><div className="account-verification"><span className={`status-chip ${user.emailVerified ? "published" : "unpublished"}`}>{user.emailVerified ? (zh ? "邮箱已验证" : "Email verified") : (zh ? "邮箱未验证" : "Email not verified")}</span>{user.accountType === "agent" && <span className={`status-chip ${user.agentVerified ? "published" : user.agentVerificationStatus === "rejected" || user.agentVerificationStatus === "expired" ? "expired" : "unpublished"}`}>{agentStatusLabel}</span>}{!user.emailVerified && <button className="text-button" type="button" onClick={onResendVerification} disabled={resendLoading}>{resendLoading ? (zh ? "发送中…" : "Sending…") : (zh ? "重新发送" : "Resend")}</button>}</div></div>
           </div>
           {user.role === "admin" && <Link className="admin-access-panel" href="/admin/agent-verifications" onClick={onClose}>
@@ -602,10 +652,24 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
               <div><span>{zh ? "电话" : "Phone"}</span><strong>{user.phone || (zh ? "尚未设置" : "Not set")}</strong></div>
               <div><span>{zh ? "登录邮箱" : "Sign-in email"}</span><strong>{user.email}</strong></div>
             </div> : <form className="profile-form" onSubmit={handleProfileSubmit}>
+              <div className={portraitStyles.uploadPanel}>
+                <div className={portraitStyles.preview} aria-label={zh ? "个人头像预览" : "Profile picture preview"}>
+                  {(profilePreviewUrl || user.avatarUrl) ? <Image src={profilePreviewUrl || user.avatarUrl} alt="" width={72} height={72} unoptimized /> : <span>{initial}</span>}
+                </div>
+                <div className={portraitStyles.copy}>
+                  <strong>{zh ? "个人头像（可选）" : "Profile picture (optional)"}</strong>
+                  <small>{zh ? "这张照片只用于你的账号头像；不会出现在公开房源页。" : "This picture is used for your account avatar and is not shown on public listings."}</small>
+                  <label className={`outline-button ${portraitStyles.picker}`} htmlFor="profile-avatar-file">{profileFile ? (zh ? "更换照片" : "Change photo") : (zh ? "选择照片" : "Choose photo")}</label>
+                  <input className={portraitStyles.fileInput} id="profile-avatar-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleProfileAvatarChange} />
+                  {profileUploadStatus === "uploading" && <small className={portraitStyles.status} role="status">{zh ? "正在上传头像…" : "Uploading profile picture…"}</small>}
+                  {profileUploadStatus === "uploaded" && <small className={portraitStyles.status} role="status">{zh ? "头像已上传，保存资料后生效。" : "Picture uploaded; save your profile to apply it."}</small>}
+                  {profileUploadError && <small className={portraitStyles.error} role="alert">{profileUploadError}</small>}
+                </div>
+              </div>
               <label className="profile-field"><span className="profile-field-label" id="profile-display-name-label">{zh ? "姓名" : "Name"}</span><input id="profile-display-name" aria-labelledby="profile-display-name-label" value={profileName} onChange={(event) => setProfileName(event.target.value)} autoComplete="name" maxLength={80} required /></label>
               <label className="profile-field"><span className="profile-field-label" id="profile-phone-label">{zh ? "电话（可选）" : "Phone (optional)"}</span><input id="profile-phone" aria-labelledby="profile-phone-label" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} autoComplete="tel" maxLength={32} inputMode="tel" placeholder={zh ? "例如 516-555-0123" : "e.g. 516-555-0123"} /></label>
               <label className="profile-field"><span className="profile-field-label" id="profile-email-label">{zh ? "登录邮箱" : "Sign-in email"}</span><input id="profile-email" aria-labelledby="profile-email-label" value={user.email} readOnly disabled /><small>{zh ? "邮箱用于登录；如需更改，之后需要重新验证。" : "Used for sign-in; changing it will require a separate re-verification flow."}</small></label>
-              <div className="profile-form-actions"><button className="outline-button" type="button" onClick={() => { setProfileName(user.displayName); setProfilePhone(user.phone || ""); setProfileError(""); setProfileEditing(false); }} disabled={profileSaving}>{zh ? "取消" : "Cancel"}</button><button className="primary-button" type="submit" disabled={profileSaving}>{profileSaving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存资料" : "Save profile")}</button></div>
+              <div className="profile-form-actions"><button className="outline-button" type="button" onClick={() => { setProfileName(user.displayName); setProfilePhone(user.phone || ""); setProfileFile(null); setProfilePreviewUrl(""); setProfileUploadStatus("idle"); setProfileUploadError(""); setProfileError(""); setProfileEditing(false); }} disabled={profileSaving}>{zh ? "取消" : "Cancel"}</button><button className="primary-button" type="submit" disabled={profileSaving || profileUploadStatus === "uploading"}>{profileSaving ? (zh ? "保存中…" : "Saving…") : (zh ? "保存资料" : "Save profile")}</button></div>
             </form>}
           </section>
           <section className="account-profile-panel renter-profile-panel" aria-labelledby="renter-profile-title">

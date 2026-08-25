@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { ensureDatabaseSchema, sql } from "./db";
 import { emailIsConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email";
 import { AccountType, AgentVerificationStatus, isVerifiedAgent, normalizeAccountType, normalizeAgentVerificationStatus } from "./account-types";
+import { isProfileAvatarKeyForUser, publicUrlForKey } from "./r2";
 
 const SESSION_COOKIE = "rental_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -16,6 +17,7 @@ export type AuthUser = {
   email: string;
   displayName: string;
   phone: string;
+  avatarUrl: string;
   role: string;
   accountType: AccountType;
   agentVerificationStatus: AgentVerificationStatus;
@@ -49,6 +51,7 @@ function userFromRow(row: Record<string, unknown>): AuthUser {
     email: String(row.email),
     displayName: String(row.display_name),
     phone: String(row.phone || ""),
+    avatarUrl: String(row.avatar_url || ""),
     role: String(row.role || "user"),
     accountType,
     agentVerificationStatus,
@@ -199,7 +202,7 @@ export async function registerUser(input: { email: string; password: string; dis
     token,
     verificationSent: verification.sent,
     verificationError: verification.error,
-    user: { id: userId, email, displayName, phone: "", role: "user", accountType, agentVerificationStatus: "unsubmitted", agentVerified: false, emailVerified: false } satisfies AuthUser,
+    user: { id: userId, email, displayName, phone: "", avatarUrl: "", role: "user", accountType, agentVerificationStatus: "unsubmitted", agentVerified: false, emailVerified: false } satisfies AuthUser,
   };
 }
 
@@ -208,7 +211,7 @@ export async function loginUser(input: { email: string; password: string }) {
   const db = database();
   const email = normalizeEmail(input.email);
   if (!email || !input.password) throw new AuthError("Enter your email and password.");
-  const rows = await db.query("SELECT id, email, display_name, phone, password_hash, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE email = $1 LIMIT 1", [email]);
+  const rows = await db.query("SELECT id, email, display_name, phone, avatar_url, password_hash, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE email = $1 LIMIT 1", [email]);
   const row = rows[0] as Record<string, unknown> | undefined;
   if (!row || typeof row.password_hash !== "string" || !(await verifyPassword(input.password, row.password_hash))) throw new AuthError("The email or password is not correct.", 401);
   const token = await createSession(String(row.id));
@@ -220,17 +223,17 @@ export async function loginWithGoogle(input: { subject: string; email: string; d
   const db = database();
   const email = normalizeEmail(input.email);
   if (!email || !input.subject) throw new AuthError("Google did not return a complete identity.", 400);
-  const bySubject = await db.query("SELECT id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at, google_subject FROM rental_users WHERE google_subject = $1 LIMIT 1", [input.subject]);
+  const bySubject = await db.query("SELECT id, email, display_name, phone, avatar_url, role, account_type, agent_verification_status, email_verified_at, google_subject FROM rental_users WHERE google_subject = $1 LIMIT 1", [input.subject]);
   let row = bySubject[0] as Record<string, unknown> | undefined;
   if (row && normalizeEmail(String(row.email)) !== email) throw new AuthError("This Google identity is linked to a different account.", 409);
   if (!row) {
-    const byEmail = await db.query("SELECT id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at, google_subject FROM rental_users WHERE email = $1 LIMIT 1", [email]);
+    const byEmail = await db.query("SELECT id, email, display_name, phone, avatar_url, role, account_type, agent_verification_status, email_verified_at, google_subject FROM rental_users WHERE email = $1 LIMIT 1", [email]);
     row = byEmail[0] as Record<string, unknown> | undefined;
   }
   if (row) {
     if (row.google_subject && String(row.google_subject) !== input.subject) throw new AuthError("This email is linked to another Google identity.", 409);
     await db.query("UPDATE rental_users SET google_subject = $1, email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW() WHERE id = $2", [input.subject, String(row.id)]);
-    const refreshed = await db.query("SELECT id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [String(row.id)]);
+    const refreshed = await db.query("SELECT id, email, display_name, phone, avatar_url, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [String(row.id)]);
     row = refreshed[0] as Record<string, unknown> | undefined;
   } else {
     const userId = `user-${randomUUID()}`;
@@ -238,7 +241,7 @@ export async function loginWithGoogle(input: { subject: string; email: string; d
       "INSERT INTO rental_users (id, email, display_name, password_hash, account_type, email_verified_at, google_subject) VALUES ($1, $2, $3, $4, $5, NOW(), $6)",
       [userId, email, input.displayName.trim().slice(0, 80) || "Google user", `google:${randomUUID()}`, normalizeAccountType(requestedAccountType), input.subject],
     );
-    const created = await db.query("SELECT id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [userId]);
+    const created = await db.query("SELECT id, email, display_name, phone, avatar_url, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [userId]);
     row = created[0] as Record<string, unknown> | undefined;
   }
   if (!row) throw new AuthError("Google account setup could not be completed.", 502);
@@ -252,7 +255,7 @@ export async function getCurrentUser() {
   await ensureDatabaseSchema();
   const db = database();
   const rows = await db.query(`
-    SELECT u.id, u.email, u.display_name, u.phone, u.role, u.account_type, u.agent_verification_status, u.email_verified_at
+    SELECT u.id, u.email, u.display_name, u.phone, u.avatar_url, u.role, u.account_type, u.agent_verification_status, u.email_verified_at
     FROM rental_sessions s
     JOIN rental_users u ON u.id = s.user_id
     WHERE s.token_hash = $1 AND s.expires_at > NOW()
@@ -261,18 +264,26 @@ export async function getCurrentUser() {
   return rows[0] ? userFromRow(rows[0] as Record<string, unknown>) : null;
 }
 
-export async function updateCurrentUserProfile(userId: string, input: { displayName: string; phone: string }) {
+export async function updateCurrentUserProfile(userId: string, input: { displayName: string; phone: string; avatarKey?: string | null }) {
   await ensureDatabaseSchema();
   const db = database();
   const displayName = input.displayName.trim().slice(0, 80);
   const phone = input.phone.trim().slice(0, 32);
+  const hasAvatarUpdate = input.avatarKey !== undefined;
+  const avatarKey = hasAvatarUpdate ? String(input.avatarKey || "").trim().slice(0, 240) : "";
+  if (hasAvatarUpdate && avatarKey && !isProfileAvatarKeyForUser(avatarKey, userId)) throw new AuthError("Upload the profile picture through the account profile form.");
+  const avatarUrl = hasAvatarUpdate && avatarKey ? publicUrlForKey(avatarKey) : "";
   if (!displayName) throw new AuthError("Enter your name.");
   const rows = await db.query(`
     UPDATE rental_users
-    SET display_name = $1, phone = $2, updated_at = NOW()
-    WHERE id = $3
-    RETURNING id, email, display_name, phone, role, account_type, agent_verification_status, email_verified_at
-  `, [displayName, phone, userId]);
+    SET display_name = $1,
+        phone = $2,
+        avatar_key = CASE WHEN $3 THEN $4 ELSE avatar_key END,
+        avatar_url = CASE WHEN $3 THEN $5 ELSE avatar_url END,
+        updated_at = NOW()
+    WHERE id = $6
+    RETURNING id, email, display_name, phone, avatar_url, role, account_type, agent_verification_status, email_verified_at
+  `, [displayName, phone, hasAvatarUpdate, avatarKey, avatarUrl, userId]);
   const row = rows[0] as Record<string, unknown> | undefined;
   if (!row) throw new AuthError("Account not found.", 404);
   return userFromRow(row);

@@ -19,11 +19,14 @@ export async function POST(request: Request) {
       purpose?: unknown;
       variants?: unknown;
     };
-    const purpose = body.purpose === "agentPortrait" ? "agentPortrait" : "listingImage";
+    const purpose = body.purpose === "agentPortrait" ? "agentPortrait" : body.purpose === "profileAvatar" ? "profileAvatar" : "listingImage";
     if (purpose === "agentPortrait") {
       if (!user) return NextResponse.json({ error: "Sign in before uploading an agent portrait." }, { status: 401 });
       if (user.accountType !== "agent") return NextResponse.json({ error: "Only agent accounts can upload an agent portrait." }, { status: 403 });
       if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before uploading an agent portrait." }, { status: 403 });
+    } else if (purpose === "profileAvatar") {
+      if (!user) return NextResponse.json({ error: "Sign in before uploading a profile picture." }, { status: 401 });
+      if (!user.emailVerified) return NextResponse.json({ error: "Verify your email before uploading a profile picture." }, { status: 403 });
     } else {
       if (!user && !demoMode) return NextResponse.json({ error: "Sign in before uploading listing images." }, { status: 401 });
       if (user && !user.emailVerified) return NextResponse.json({ error: "Verify your email before uploading listing images." }, { status: 403 });
@@ -50,7 +53,7 @@ export async function POST(request: Request) {
     }
     if (!ALLOWED_IMAGE_TYPES.has(contentType)) return NextResponse.json({ error: "Only JPEG, PNG, and WebP images are supported." }, { status: 400 });
     if (!Number.isFinite(size) || size <= 0 || size > MAX_IMAGE_BYTES) return NextResponse.json({ error: "Each image must be 8 MB or smaller." }, { status: 400 });
-    return NextResponse.json(await createImageUpload({ filename, contentType, size, keyPrefix: purpose === "agentPortrait" && user ? `agents/${user.id}` : "listings" }));
+    return NextResponse.json(await createImageUpload({ filename, contentType, size, keyPrefix: purpose === "agentPortrait" && user ? `agents/${user.id}` : purpose === "profileAvatar" && user ? `profiles/${user.id}` : "listings" }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     await recordApplicationErrorSafely({ source: "r2", route: "/api/media/presign", method: "POST", message: message || "R2 image upload presign failed.", errorName: error instanceof Error ? error.name : "UnknownError", stack: error instanceof Error ? error.stack : "" });

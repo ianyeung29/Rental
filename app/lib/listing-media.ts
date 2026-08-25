@@ -1,4 +1,5 @@
 import { publicUrlForKey } from "./r2";
+import { MAX_LISTING_PHOTOS } from "./listing-constants";
 
 const IMAGE_CONTENT_TYPE = /^image\/(jpeg|png|webp)$/;
 
@@ -55,7 +56,7 @@ export function normalizeListingMedia(value: unknown): NormalizedListingMedia[] 
       ...(width && height ? { width, height } : {}),
       sortOrder: index,
     }];
-  }).slice(0, 4);
+  }).slice(0, MAX_LISTING_PHOTOS);
 }
 
 export function listingMediaFromDatabase(value: unknown) {
@@ -79,5 +80,5 @@ export function listingMediaFromDatabase(value: unknown) {
       ...(thumbnailKey && thumbnailUrl ? { thumbnailKey, thumbnailUrl, ...(thumbnailContentType ? { thumbnailContentType } : {}) } : {}),
       ...(width && height ? { width, height } : {}),
     }];
-  }).slice(0, 4);
+  }).slice(0, MAX_LISTING_PHOTOS);
 }

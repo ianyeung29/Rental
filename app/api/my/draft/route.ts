@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "../../../lib/auth";
 import { ensureDatabaseSchema, sql } from "../../../lib/db";
 import { LOCATION_LOOKUP_OPTIONS, MAX_LOCATION_LOOKUP_OPTIONS } from "../../../lib/location-context";
+import { MAX_LISTING_PHOTOS } from "../../../lib/listing-constants";
 
 const MAX_BODY_LENGTH = 28_000;
 const DRAFT_FIELDS = [
@@ -45,7 +46,7 @@ function draftFromValue(value: unknown) {
               ...(thumbnailKey && thumbnailUrl ? { thumbnailKey, thumbnailUrl, thumbnailContentType: text(record.thumbnailContentType, 80) || "image/jpeg" } : {}),
               ...(Number.isInteger(Number(record.width)) && Number.isInteger(Number(record.height)) ? { width: Number(record.width), height: Number(record.height) } : {}),
             }];
-          }).slice(0, 4)
+          }).slice(0, MAX_LISTING_PHOTOS)
         : [];
     } else if (field === "features" || field === "photos" || field === "photoKeys" || field === "photoThumbnails" || field === "locationLookupOptions") {
       draft[field] = Array.isArray(fieldValue)
