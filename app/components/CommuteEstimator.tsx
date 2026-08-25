@@ -21,7 +21,7 @@ type CommuteResult = {
 const quickDestinations = [
   { zh: "法拉盛市中心（公共交通）", en: "Downtown Flushing (public transit)", valueZh: "法拉盛市中心", valueEn: "Downtown Flushing", mode: "transit" as const },
   { zh: "布鲁克林八大道（公共交通）", en: "Brooklyn 8th Avenue (public transit)", valueZh: "布鲁克林八大道", valueEn: "Brooklyn 8th Avenue", mode: "transit" as const },
-  { zh: "附近中文超市（步行）", en: "A nearby Chinese supermarket (walk)", valueZh: "附近中文超市", valueEn: "a nearby Chinese supermarket", mode: "walk" as const, preset: "nearbyChineseSupermarket" as const },
+  { zh: "附近中文超市", en: "A nearby Chinese supermarket", valueZh: "附近中文超市", valueEn: "a nearby Chinese supermarket", mode: "walk" as const, preset: "nearbyChineseSupermarket" as const },
 ];
 
 function transitLineLabel(line: LocationContextTransitLine, zh: boolean) {
@@ -78,10 +78,10 @@ export default function CommuteEstimator({ locale, areaZh, areaEn, listingId, ca
   };
 
   return <section className="commute-panel" aria-labelledby="commute-panel-title">
-    <div className="commute-heading"><div><span className="section-label">AREA CONTEXT</span><h3 id="commute-panel-title">{zh ? "估算到华人商圈、地铁或公交的时间" : "Estimate routes to Chinese hubs and transit"}</h3><p>{zh ? "商圈、学校等目的地按公开大致区域估算；“附近中文超市”会在服务器端按私密地址匹配最近超市，只显示名称和步行时间。" : "Hubs, schools, and other destinations use the public approximate area. The nearby Chinese supermarket shortcut matches the closest store from the private address on the server and shows only its name and walking time."}</p></div></div>
+    <div className="commute-heading"><div><span className="section-label">AREA CONTEXT</span><h3 id="commute-panel-title">{zh ? "估算到华人商圈、地铁或公交的时间" : "Estimate routes to Chinese hubs and transit"}</h3><p>{zh ? "商圈、学校等目的地按公开大致区域估算；“附近中文超市”会在服务器端按私密地址匹配最近超市，只显示名称和所选出行方式的时间。" : "Hubs, schools, and other destinations use the public approximate area. The nearby Chinese supermarket shortcut matches the closest store from the private address on the server and shows only its name and travel time for the selected mode."}</p></div></div>
     <form className="commute-form" onSubmit={submit}>
       <label className="field-label" htmlFor="commute-destination">{zh ? "目的地" : "Destination"}<input id="commute-destination" value={destination} onChange={(event) => { setDestination(event.target.value); setPreset(null); }} placeholder={zh ? "例如：法拉盛市中心、NYU" : "e.g. Downtown Flushing, NYU"} maxLength={180} /></label>
-      <label className="field-label" htmlFor="commute-mode">{zh ? "出行方式" : "Travel mode"}<select id="commute-mode" value={mode} onChange={(event) => { const nextMode = event.target.value as CommuteMode; setMode(nextMode); if (nextMode !== "walk") setPreset(null); }}><option value="drive">{zh ? "驾车" : "Drive"}</option><option value="transit">{zh ? "公共交通" : "Public transit"}</option><option value="walk">{zh ? "步行" : "Walk"}</option></select></label>
+      <label className="field-label" htmlFor="commute-mode">{zh ? "出行方式" : "Travel mode"}<select id="commute-mode" value={mode} onChange={(event) => { const nextMode = event.target.value as CommuteMode; setMode(nextMode); if (nextMode === "transit") setPreset(null); }}><option value="drive">{zh ? "驾车" : "Drive"}</option><option value="transit">{zh ? "公共交通" : "Public transit"}</option><option value="walk">{zh ? "步行" : "Walk"}</option></select></label>
       <button className="primary-button commute-submit" type="submit" disabled={!destination.trim() || loading}>{loading ? (zh ? "估算中…" : "Estimating…") : (zh ? "估算时间" : "Estimate time")}</button>
     </form>
     <div className="commute-quick-options" aria-label={zh ? "常用目的地" : "Common destinations"}>{quickDestinations.map((item) => <button className="commute-quick-option" type="button" key={item.en} onClick={() => { setDestination(zh ? item.valueZh : item.valueEn); setMode(item.mode); setPreset(item.preset || null); setError(""); }}>{zh ? item.zh : item.en}</button>)}</div>

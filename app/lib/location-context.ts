@@ -937,6 +937,7 @@ export async function buildNearbyChineseSupermarketEstimate(request: {
   areaZh: string;
   boroughEn?: string;
   boroughZh?: string;
+  mode?: unknown;
   locale?: "zh" | "en";
 }): Promise<CommuteEstimate> {
   const privateAddress = clean(request.privateAddress, 500);
@@ -945,6 +946,12 @@ export async function buildNearbyChineseSupermarketEstimate(request: {
   const boroughEn = clean(request.boroughEn);
   const boroughZh = clean(request.boroughZh);
   const area = areaZh || areaEn;
+  // The private-address shortcut supports routes that can be calculated from
+  // one fixed private origin. Public transit intentionally falls back to the
+  // normal area-based flow because it needs a separate, user-visible transit
+  // itinerary rather than a single nearby-store estimate.
+  const mode: Extract<CommuteMode, "drive" | "walk"> = request.mode === "drive" ? "drive" : "walk";
+  const travelMode = mode === "drive" ? "DRIVE" : "WALK";
   const locale = request.locale === "en" ? "en" : "zh";
   const fallbackDestination = locale === "zh" ? "附近中文超市" : "Nearby Chinese supermarket";
   const noResult = (note: string, source: "google" | "none" = "none", cached = false): CommuteEstimate => ({
@@ -952,7 +959,7 @@ export async function buildNearbyChineseSupermarketEstimate(request: {
     approximateArea: area,
     origin: "privateAddress",
     destination: fallbackDestination,
-    mode: "walk",
+    mode,
     cached,
     checkedAt: new Date().toISOString(),
     note,
@@ -967,13 +974,14 @@ export async function buildNearbyChineseSupermarketEstimate(request: {
 
   const lookupSettings = await currentLocationLookupSettings();
   const cacheKey = JSON.stringify({
-    version: 1,
+    version: 3,
     kind: "listing-nearby-chinese-supermarket",
     areaEn,
     areaZh,
     boroughEn,
     boroughZh,
     privateAddressHash: privateAddressCacheHash(privateAddress),
+    mode,
     locale,
     lookupSettings: {
       placesCallsPerLookup: lookupSettings.placesCallsPerLookup,
@@ -1014,6 +1022,10 @@ export async function buildNearbyChineseSupermarketEstimate(request: {
     const locationBias = originCoordinates
       ? { locationBias: { circle: { center: originCoordinates, radius: 5_000 } } }
       : {};
+    // Route from the very same server-resolved point used to rank the search
+    // results. Routing from the raw text again can resolve a street-only input
+    // to a different Queens locality and make a nearby store appear far away.
+    const routeStart: RouteWaypoint = originCoordinates || routeOrigin;
     const firstPass = await searchPlacesWithinBudget(apiKey, {
       textQuery: originCoordinates ? "Chinese supermarket" : nearbyQuery("Chinese supermarket", routeOrigin),
       pageSize: 10,
@@ -1022,33 +1034,44 @@ export async function buildNearbyChineseSupermarketEstimate(request: {
       rankPreference: "DISTANCE",
       ...locationBias,
     }, languageCode, budget);
-    let candidates = uniquePlaces(firstPass).filter(isChineseOrAsianMarket);
-    if (!candidates.length && budget.placesCalls < budget.placesLimit) {
+    const firstPassCandidates = uniquePlaces(firstPass);
+    let queryCandidates = firstPassCandidates;
+    if (budget.placesCalls < budget.placesLimit) {
       const secondPass = await searchPlacesWithinBudget(apiKey, {
-        textQuery: originCoordinates ? "Chinese grocery Asian supermarket" : nearbyQuery("Chinese grocery Asian supermarket", routeOrigin),
+        textQuery: originCoordinates ? "Asian supermarket" : nearbyQuery("Asian supermarket", routeOrigin),
         pageSize: 10,
         includedType: "supermarket",
         strictTypeFiltering: true,
         rankPreference: "DISTANCE",
         ...locationBias,
       }, languageCode, budget);
-      candidates = uniquePlaces(secondPass).filter(isChineseOrAsianMarket);
+      queryCandidates = uniquePlaces([...firstPassCandidates, ...secondPass]);
     }
-    const routeCandidates = candidates
+    // The lookup result is already constrained to the Chinese/Asian-supermarket
+    // query. Keep the name rule as an extra guard, but if a legitimate local
+    // business uses an unfamiliar name, compare the Google-matched candidates
+    // rather than incorrectly returning no result.
+    const classifiedCandidates = queryCandidates.filter(isChineseOrAsianMarket);
+    const matchedCandidates = classifiedCandidates.length ? classifiedCandidates : queryCandidates;
+    const routeCandidates = matchedCandidates
       .filter((place) => Boolean(place.coordinates))
-      .slice(0, Math.min(3, budget.routeLimit));
+      .slice(0, Math.min(5, budget.routeLimit));
     if (!routeCandidates.length) {
       return resultWithUsage(noResult(locale === "zh" ? "地图没有找到可验证的附近中文 / 亚洲超市。" : "The map did not return a verifiable nearby Chinese or Asian supermarket."));
     }
 
     const routed: Array<{ place: PlaceResult; minutes: number }> = [];
     for (const place of routeCandidates) {
-      const route = await routeMinutesWithinBudget(apiKey, routeOrigin, place.coordinates!, "WALK", languageCode, budget);
-      if (isAcceptableNearbyWalkMinutes(route.minutes)) routed.push({ place, minutes: route.minutes! });
+      const route = await routeMinutesWithinBudget(apiKey, routeStart, place.coordinates!, travelMode, languageCode, budget);
+      if (mode === "drive" ? typeof route.minutes === "number" && Number.isFinite(route.minutes) && route.minutes > 0 : isAcceptableNearbyWalkMinutes(route.minutes)) {
+        routed.push({ place, minutes: route.minutes! });
+      }
     }
     const closest = routed.sort((left, right) => left.minutes - right.minutes)[0];
     if (!closest) {
-      return resultWithUsage(noResult(locale === "zh" ? "地图没有返回距离房源约 45 分钟步行以内的可验证中文 / 亚洲超市。" : "The map did not return a verifiable Chinese or Asian supermarket within about a 45-minute walk of this listing."));
+      return resultWithUsage(noResult(mode === "walk"
+        ? (locale === "zh" ? "地图没有返回距离房源约 45 分钟步行以内的可验证中文 / 亚洲超市。" : "The map did not return a verifiable Chinese or Asian supermarket within about a 45-minute walk of this listing.")
+        : (locale === "zh" ? "地图没有返回可验证的驾车路线；请稍后重试。" : "The map did not return a verifiable driving route; please try again later.")));
     }
 
     const result: CommuteEstimate = {
@@ -1056,13 +1079,13 @@ export async function buildNearbyChineseSupermarketEstimate(request: {
       approximateArea: area,
       origin: "privateAddress",
       destination: closest.place.name,
-      mode: "walk",
+      mode,
       minutes: closest.minutes,
       cached: false,
       checkedAt: new Date().toISOString(),
       note: locale === "zh"
-        ? "此结果使用发布者私密地址在服务器端匹配并计算；仅显示超市名称和步行时间，不公开房源地址。"
-        : "This result is matched and routed from the poster's private address on the server. Only the supermarket name and walking time are shown; the listing address remains private.",
+        ? `此结果使用发布者私密地址在服务器端匹配并计算；仅显示超市名称和${mode === "walk" ? "步行" : "驾车"}时间，不公开房源地址。`
+        : `This result is matched and routed from the poster's private address on the server. Only the supermarket name and ${mode === "walk" ? "walking" : "driving"} time are shown; the listing address remains private.`,
       usage: { ...budget, cacheHit: false },
     };
     commuteCache.set(cacheKey, { expiresAt: Date.now() + CONTEXT_CACHE_TTL, value: result });

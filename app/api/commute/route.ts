@@ -54,6 +54,7 @@ export async function POST(request: Request) {
         privateAddress: String(listing.private_address),
         areaEn: String(listing.area_en || ""),
         areaZh: String(listing.area_zh || ""),
+        mode: body.mode,
         locale: body.locale === "en" ? "en" : "zh",
       });
     } else {
