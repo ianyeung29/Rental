@@ -4,7 +4,7 @@ import { ensureDatabaseSchema, sql } from "../../lib/db";
 import { getCurrentUser } from "../../lib/auth";
 import { recordAuditEventSafely } from "../../lib/audit";
 import { reviewListingSafety } from "../../lib/safety";
-import { emailIsConfigured, sendAgentRequestNotification } from "../../lib/email";
+import { adminRecipientsExcludingPoster, emailIsConfigured, sendAdminNewListingNotification, sendAgentRequestNotification } from "../../lib/email";
 import { demoModeEnabled } from "../../lib/demo";
 import { hasUnlimitedListingAccess, listingLimitFor } from "../../lib/account-types";
 import { listingMediaFromDatabase, normalizeListingMedia } from "../../lib/listing-media";
@@ -272,6 +272,25 @@ function agentFeeLabel(input: ReturnType<typeof normalizeBody>) {
   return "请经纪报价";
 }
 
+async function adminListingNotificationRecipients(posterEmail: string) {
+  const configuredRecipients = (process.env.ADMIN_ALERT_EMAIL || "")
+    .split(/[;,]/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const recipients = configuredRecipients.length
+    ? configuredRecipients
+    : !sql
+      ? []
+      : (await sql.query(`
+          SELECT email
+          FROM rental_users
+          WHERE role = 'admin' AND email_verified_at IS NOT NULL
+          ORDER BY created_at ASC
+          LIMIT 10
+        `)).map((row) => String((row as Record<string, unknown>).email || ""));
+  return adminRecipientsExcludingPoster(recipients, posterEmail);
+}
+
 export async function GET(request: Request) {
   if (!sql) return NextResponse.json({ error: "DATABASE_URL is not configured on the server yet." }, { status: 503 });
   try {
@@ -522,6 +541,30 @@ export async function POST(request: Request) {
         }
       }
     }
+    let adminListingNotificationSent = false;
+    if (user && emailIsConfigured()) {
+      try {
+        const recipients = await adminListingNotificationRecipients(user.email);
+        adminListingNotificationSent = await sendAdminNewListingNotification({
+          recipients,
+          publisherEmail: user.email,
+          publisherName: user.displayName,
+          titleZh: input.titleZh,
+          titleEn: input.titleEn,
+          areaZh: input.areaZh,
+          areaEn: input.areaEn,
+          price: input.price,
+          bedrooms: input.bedrooms,
+          bathrooms: input.bathrooms,
+          squareFeet: input.squareFeet,
+          moveIn: input.moveIn,
+          lease: input.lease,
+          rentalType: input.rentalType,
+        });
+      } catch {
+        // Publishing must not fail because this optional admin notification could not be delivered.
+      }
+    }
     let instantSearchAlerts = 0;
     try {
       const alertResult = await notifyInstantSavedSearches({
@@ -544,7 +587,7 @@ export async function POST(request: Request) {
       // Publishing must not fail because an optional saved-search alert could not be delivered.
     }
     await recordAuditEventSafely({ request, eventType: "listing.publish", user, metadata: { listingId: id, posterRole: input.posterRole, agentService: input.agentService, mediaCount: input.media.length, demoMode } });
-    return NextResponse.json({ ...toClientListing(row), agentRequestStatus: agentRequestId ? "pending" : null, agentNotificationSent, instantSearchAlerts, demoMode, safetyReview }, { status: 201 });
+    return NextResponse.json({ ...toClientListing(row), agentRequestStatus: agentRequestId ? "pending" : null, agentNotificationSent, adminListingNotificationSent, instantSearchAlerts, demoMode, safetyReview }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "The listing could not be saved to the database." }, { status: 502 });
   }
