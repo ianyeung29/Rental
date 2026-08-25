@@ -23,3 +23,7 @@ export function isVerifiedAgent(accountType: AccountType, status: AgentVerificat
 export function listingLimitFor(accountType: AccountType, agentVerified: boolean) {
   return accountType === "agent" && agentVerified ? VERIFIED_AGENT_LISTING_LIMIT : STANDARD_LISTING_LIMIT;
 }
+
+export function hasUnlimitedListingAccess(role: string) {
+  return role === "admin";
+}

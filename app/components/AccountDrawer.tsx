@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
-import { listingLimitFor } from "../lib/account-types";
+import { hasUnlimitedListingAccess, listingLimitFor } from "../lib/account-types";
 import { toChineseLocationLabel } from "../lib/location-labels";
 import { exactOccupantOrDefault, OCCUPANT_OPTIONS } from "../lib/renter-options";
 import { DEFAULT_RENTER_PROFILE_SHARING, type RenterProfileShareOptions } from "../lib/renter-application";
@@ -225,6 +225,7 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
   const zh = locale === "zh";
   const dialogRef = useDialogA11y(true, onClose);
   const initial = user.displayName.trim().slice(0, 1).toUpperCase() || "U";
+  const unlimitedListingAccess = hasUnlimitedListingAccess(user.role);
   const listingLimit = listingLimitFor(user.accountType, user.agentVerified);
   const today = new Date().toISOString().slice(0, 10);
   const activeListingCount = listings.filter((listing) => (listing.status === "published" || listing.status === "paused") && (!listing.expiresOn || listing.expiresOn >= today)).length;
@@ -712,8 +713,8 @@ export default function AccountDrawer({ locale, user, tab, listings, inquiries, 
               <button className="outline-button" type="button" onClick={() => { void handleAgentApplication(); }} disabled={agentApplicationLoading}>{agentApplicationLoading ? (zh ? "准备中…" : "Starting…") : (zh ? "开始经纪申请" : "Start agent application")}</button>
             </>}
           </section>}
-          <section className="account-quota-panel" aria-label={zh ? "房源发布额度" : "Listing publishing capacity"}>
-            <div><span className="section-label">{zh ? "发布额度" : "POSTING CAPACITY"}</span><strong>{user.agentVerified ? (zh ? "已核验经纪额度" : "Verified agent capacity") : (zh ? "普通账户额度" : "Regular account capacity")}</strong><p>{user.agentVerified ? (zh ? "执照核验通过后，可发布更多房源。" : "Your approved license gives this account a higher listing limit.") : (zh ? "经纪账户完成执照核验后，额度会自动提高。" : "Agent accounts receive the higher limit after license verification.")}</p></div><span className="quota-count">{activeListingCount} / {listingLimit}</span>
+           <section className="account-quota-panel" aria-label={zh ? "房源发布额度" : "Listing publishing capacity"}>
+            <div><span className="section-label">{zh ? "发布额度" : "POSTING CAPACITY"}</span><strong>{unlimitedListingAccess ? (zh ? "管理员无限额度" : "Admin unlimited capacity") : user.agentVerified ? (zh ? "已核验经纪额度" : "Verified agent capacity") : (zh ? "普通账户额度" : "Regular account capacity")}</strong><p>{unlimitedListingAccess ? (zh ? "管理员账户不受有效房源数量限制。" : "Admin accounts are not limited by the active listing quota.") : user.agentVerified ? (zh ? "执照核验通过后，可发布更多房源。" : "Your approved license gives this account a higher listing limit.") : (zh ? "经纪账户完成执照核验后，额度会自动提高。" : "Agent accounts receive the higher limit after license verification.")}</p></div><span className="quota-count">{activeListingCount} / {unlimitedListingAccess ? (zh ? "无限" : "Unlimited") : listingLimit}</span>
           </section>
           {user.accountType === "agent" && <section className="agent-verification-panel" aria-labelledby="agent-verification-title">
             <div className="account-profile-heading"><div><span className="section-label">{zh ? "经纪身份" : "AGENT IDENTITY"}</span><h3 id="agent-verification-title">{zh ? "提交执照核验" : "Submit license verification"}</h3><p>{zh ? "我们会根据州执照公开记录人工核对。提交经纪身份不会自动获得核验徽章或更高额度。" : "We manually compare the license with public state records. Choosing agent does not automatically grant verification or higher capacity."}</p></div><span className={`status-chip ${user.agentVerified ? "published" : user.agentVerificationStatus === "rejected" || user.agentVerificationStatus === "expired" ? "expired" : "unpublished"}`}>{agentStatusLabel}</span></div>
