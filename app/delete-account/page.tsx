@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function DeleteAccountPage() {
   return (
-    <PublicPageShell title="删除安居账户" description="通过注册邮箱确认后，永久删除账户及其相关资料。">
+    <PublicPageShell languageHref="/delete-account/en" title="删除安居账户" description="通过注册邮箱确认后，永久删除账户及其相关资料。">
       <section className="account-deletion-page public-section public-section-first">
         <div className="account-deletion-copy">
           <h2>开始删除请求</h2>

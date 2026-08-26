@@ -29,9 +29,11 @@ const directory = [
     title: "规则与隐私",
     links: [
       ["法律与平台规则", "/legal"],
+      ["Legal and platform policies", "/legal/en"],
       ["使用条款", "/legal#terms"],
       ["隐私说明", "/legal#privacy"],
       ["删除账户", "/delete-account"],
+      ["Delete account", "/delete-account/en"],
       ["公平住房", "/legal#fair-housing"],
     ],
   },

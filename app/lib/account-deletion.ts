@@ -73,7 +73,7 @@ async function mediaKeysForUser(userId: string) {
   return [...keys];
 }
 
-export async function requestAccountDeletion(emailValue: string) {
+export async function requestAccountDeletion(emailValue: string, locale: "zh" | "en" = "zh") {
   await ensureDatabaseSchema();
   const db = database();
   const email = normalizeEmail(emailValue);
@@ -93,7 +93,7 @@ export async function requestAccountDeletion(emailValue: string) {
     [`account-delete-${randomUUID()}`, userId, tokenHash(token), expiresAt.toISOString()],
   );
   try {
-    await sendAccountDeletionConfirmationEmail({ email: String(user.email), displayName: String(user.display_name || ""), token });
+    await sendAccountDeletionConfirmationEmail({ email: String(user.email), displayName: String(user.display_name || ""), token, locale });
   } catch (error) {
     await db.query("DELETE FROM rental_account_deletion_requests WHERE user_id = $1 AND token_hash = $2", [userId, tokenHash(token)]);
     throw error;
