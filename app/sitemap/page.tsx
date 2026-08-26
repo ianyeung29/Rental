@@ -31,6 +31,7 @@ const directory = [
       ["法律与平台规则", "/legal"],
       ["使用条款", "/legal#terms"],
       ["隐私说明", "/legal#privacy"],
+      ["删除账户", "/delete-account"],
       ["公平住房", "/legal#fair-housing"],
     ],
   },

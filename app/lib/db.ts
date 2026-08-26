@@ -443,6 +443,16 @@ export async function ensureDatabaseSchema() {
       )
     `);
     await sql.query(`
+      CREATE TABLE IF NOT EXISTS rental_account_deletion_requests (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES rental_users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_rate_limits (
         scope_key TEXT PRIMARY KEY,
         window_started_at TIMESTAMPTZ NOT NULL,
@@ -706,6 +716,7 @@ export async function ensureDatabaseSchema() {
     await sql.query("CREATE INDEX IF NOT EXISTS rental_users_account_type_idx ON rental_users(account_type, agent_verification_status)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_email_verifications_user_idx ON rental_email_verifications(user_id, expires_at)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_password_resets_user_idx ON rental_password_resets(user_id, expires_at DESC)");
+    await sql.query("CREATE INDEX IF NOT EXISTS rental_account_deletion_requests_user_idx ON rental_account_deletion_requests(user_id, expires_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_rate_limits_updated_idx ON rental_rate_limits(updated_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_api_usage_created_idx ON rental_api_usage(created_at DESC)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_api_usage_provider_idx ON rental_api_usage(provider, endpoint, created_at DESC)");

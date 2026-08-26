@@ -1441,6 +1441,23 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .legal-section li + li { margin-top: 7px; }
 .legal-section a { color: var(--blue-dark); text-decoration: underline; text-underline-offset: 2px; }
 .legal-footnote { padding-top: 17px; border-top: 1px solid var(--line); color: var(--soft-muted) !important; font-size: 12px !important; }
+.account-deletion-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, .78fr); gap: 56px; align-items: start; border-top: 1px solid var(--line-strong); }
+.account-deletion-copy { max-width: 62ch; }
+.account-deletion-copy h2 { margin: 0 0 15px; color: var(--ink); font-size: 28px; letter-spacing: -.045em; line-height: 1.12; }
+.account-deletion-copy p, .account-deletion-copy li { color: var(--muted); font-size: 14px; line-height: 1.75; }
+.account-deletion-copy p { margin: 0 0 14px; }
+.account-deletion-copy ul { margin: 20px 0 0; padding-left: 20px; }
+.account-deletion-copy li + li { margin-top: 9px; }
+.account-deletion-form { margin: 0; padding: 24px; border: 1px solid var(--line-strong); background: var(--blue-wash); }
+.account-deletion-check { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 11px; align-items: start; color: var(--ink); font-size: 13px; font-weight: 700; line-height: 1.6; }
+.account-deletion-check input { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--blue); }
+.account-deletion-result { padding: 24px; border: 1px solid #c7d881; background: #f4f8d4; }
+.account-deletion-result strong { display: block; color: var(--ink); font-size: 16px; }
+.account-deletion-result p { margin: 9px 0 18px; color: #52611a; font-size: 13px; line-height: 1.7; }
+.danger-button { min-height: 44px; padding: 0 14px; border: 1px solid #9c4328; color: #fff; background: #9c4328; font-size: 13px; font-weight: 800; }
+.danger-button:hover:not(:disabled) { background: #7f331e; }
+.danger-button:disabled { cursor: not-allowed; opacity: .52; }
+.account-footer-actions { display: flex; align-items: center; justify-content: flex-end; gap: 15px; }
 .sitemap-directory { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 42px; margin-top: 32px; }
 .sitemap-directory section { border-top: 1px solid var(--line-strong); }
 .sitemap-directory h3 { margin: 17px 0 9px; font-size: 18px; letter-spacing: -.035em; }
@@ -1621,6 +1638,10 @@ textarea { padding: 10px 11px; resize: vertical; line-height: 1.55; }
   .legal-index { grid-template-columns: 1fr; }
   .legal-index .section-label { grid-column: auto; }
   .legal-section h2 { font-size: 22px; }
+  .account-deletion-page { grid-template-columns: 1fr; gap: 28px; }
+  .account-deletion-copy h2 { font-size: 24px; }
+  .account-deletion-form, .account-deletion-result { padding: 18px; }
+  .account-footer-actions { justify-content: space-between; width: 100%; }
   .sitemap-directory { grid-template-columns: 1fr; }
   .agent-directory { padding-top: 40px; }
   .agent-directory-intro { align-items: flex-start; flex-direction: column; }
