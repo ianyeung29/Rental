@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 export default function LegalPage() {
   return (
     <PublicPageShell
+      languageHref="/legal/en"
       title="把平台边界写清楚，才方便放心使用。"
       description="这里汇总安居的使用条款、隐私政策、安全与公平住房规则。我们会随着产品和适用法律变化更新这份页面。"
     >

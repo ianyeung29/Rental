@@ -9,12 +9,15 @@ type PublicPageShellProps = {
   title: string;
   description: string;
   children: ReactNode;
+  locale?: "zh" | "en";
+  languageHref?: string;
 };
 
-export default function PublicPageShell({ title, description, children }: PublicPageShellProps) {
+export default function PublicPageShell({ title, description, children, locale = "zh", languageHref }: PublicPageShellProps) {
+  const english = locale === "en";
   return (
-    <div className="public-shell">
-      <a className="skip-link" href="#public-content">跳到主要内容</a>
+    <div className="public-shell" lang={english ? "en" : "zh-CN"}>
+      <a className="skip-link" href="#public-content">{english ? "Skip to main content" : "跳到主要内容"}</a>
       <header className="public-topbar">
         <div className="public-topbar-inner">
           <Link className="brand" href="/" aria-label="安居 Anjurentals home">
@@ -25,15 +28,16 @@ export default function PublicPageShell({ title, description, children }: Public
             </span>
           </Link>
 
-          <nav className="public-nav" aria-label="公共导航">
-            <Link href="/">找房</Link>
-            <Link href="/agents">经纪目录</Link>
-            <a href="/about">关于安居</a>
-            <a href="/contact">联系我们</a>
-            <a href="/feedback">反馈</a>
+          <nav className="public-nav" aria-label={english ? "Public navigation" : "公共导航"}>
+            <Link href="/">{english ? "Find rentals" : "找房"}</Link>
+            <Link href="/agents">{english ? "Agents" : "经纪目录"}</Link>
+            <a href="/about">{english ? "About" : "关于安居"}</a>
+            <a href="/contact">{english ? "Contact" : "联系我们"}</a>
+            <a href="/feedback">{english ? "Feedback" : "反馈"}</a>
+            {languageHref && <Link href={languageHref}>{english ? "中文" : "English"}</Link>}
           </nav>
 
-          <Link className="public-topbar-cta" href="/">发布房源 <span aria-hidden="true">+</span></Link>
+          <Link className="public-topbar-cta" href="/">{english ? "Post listing" : "发布房源"} <span aria-hidden="true">+</span></Link>
         </div>
       </header>
 
@@ -45,7 +49,7 @@ export default function PublicPageShell({ title, description, children }: Public
         {children}
       </main>
 
-      <SiteFooter />
+      <SiteFooter locale={locale} />
     </div>
   );
 }

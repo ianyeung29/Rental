@@ -12,7 +12,7 @@ export default async function DeleteAccountConfirmPage({ searchParams }: { searc
   const params = await searchParams;
   const token = typeof params.token === "string" ? params.token : "";
   return (
-    <PublicPageShell title="确认删除账户" description="此操作不可撤销。请仅在确认要永久删除账户时继续。">
+    <PublicPageShell languageHref="/delete-account/en/confirm" title="确认删除账户" description="此操作不可撤销。请仅在确认要永久删除账户时继续。">
       <section className="account-deletion-page public-section public-section-first">
         <div className="account-deletion-copy">
           <h2>最后确认</h2>
