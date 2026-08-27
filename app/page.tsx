@@ -2755,6 +2755,11 @@ export default function HomePage() {
   const compareKey = compareListings.map((listing) => listing.id).join("|");
   const savedListings = allListings.filter((listing) => savedIds.has(listing.id));
   const messageInquiries = currentUser?.emailVerified ? serverInquiries : inquiries;
+  // The navigation badge represents actionable, unread conversations—not every
+  // historical inquiry. Closing or reading a thread therefore clears its badge.
+  const unreadMessageCount = currentUser?.emailVerified
+    ? messageInquiries.filter((inquiry) => !inquiry.readAt && inquiry.status !== "closed").length
+    : 0;
   const visibleListings = filteredListings.slice(0, visibleResultCount);
   const canPostAsAgent = !currentUser ? demoMode : currentUser.agentVerified;
 
@@ -4397,7 +4402,7 @@ export default function HomePage() {
           <nav className="primary-nav" aria-label={locale === "zh" ? "主要导航" : "Primary navigation"}>
             <a className="active" href="#rentals">{t.findRentals}</a>
             <a href="#saved" onClick={(event) => { event.preventDefault(); setSavedOpen(true); }}>{t.saved}{savedIds.size > 0 ? ` ${savedIds.size}` : ""}</a>
-            <a href="#messages" onClick={(event) => { event.preventDefault(); setMessagesOpen(true); }}>{t.messages}{messageInquiries.length > 0 ? ` ${messageInquiries.length}` : ""}</a>
+            <a href="#messages" onClick={(event) => { event.preventDefault(); setMessagesOpen(true); }}>{t.messages}{unreadMessageCount > 0 ? ` ${unreadMessageCount}` : ""}</a>
             {currentUser && <button className="mobile-desk-link" type="button" onClick={() => setAnalyticsOpen(true)}>{locale === "zh" ? "房源表现" : "Performance"}</button>}
           </nav>
           <div className="topbar-actions">
@@ -5278,7 +5283,7 @@ export default function HomePage() {
       <MobileBottomNav
         locale={locale}
         savedCount={savedIds.size}
-        messageCount={messageInquiries.length}
+        messageCount={unreadMessageCount}
         hidden={mobileNavigationHidden}
         icons={{
           find: <SearchIcon size={18} />,
