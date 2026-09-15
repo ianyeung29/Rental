@@ -2201,7 +2201,8 @@ export default function HomePage() {
     const params = new URLSearchParams(window.location.search);
     const verification = params.get("verified");
     const google = params.get("google");
-    if (!verification && !google) return;
+    const apple = params.get("apple");
+    if (!verification && !google && !apple) return;
     const message = verification === "success"
       ? (locale === "zh" ? "邮箱已验证，请重新打开账户状态。" : "Email verified. Refresh your account status if needed.")
       : (locale === "zh" ? "验证链接无效或已过期。" : "That verification link is invalid or expired.");
@@ -2209,9 +2210,20 @@ export default function HomePage() {
       ? (locale === "zh" ? "Google 登录成功" : "Google sign-in complete")
       : google
         ? (locale === "zh" ? "Google 登录未完成，请重试" : "Google sign-in was not completed")
-        : message;
+        : apple === "success"
+          ? (locale === "zh" ? "Apple 登录成功" : "Apple sign-in complete")
+          : apple === "cancelled"
+            ? (locale === "zh" ? "已取消 Apple 登录。" : "Apple sign-in was cancelled.")
+            : apple === "unconfigured"
+              ? (locale === "zh" ? "Apple 登录暂不可用，请稍后重试。" : "Apple sign-in is not configured yet.")
+              : apple === "invalid_state"
+                ? (locale === "zh" ? "Apple 登录已失效，请重试。" : "Apple sign-in expired. Please try again.")
+                : apple
+                  ? (locale === "zh" ? "Apple 登录未完成，请重试。" : "Apple sign-in was not completed. Please try again.")
+                  : message;
     params.delete("verified");
     params.delete("google");
+    params.delete("apple");
     const remainingSearch = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${remainingSearch ? `?${remainingSearch}` : ""}${window.location.hash}`);
     const showTimer = window.setTimeout(() => setVerificationNotice(authMessage), 0);
