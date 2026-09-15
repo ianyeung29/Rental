@@ -1,4 +1,5 @@
 import { createPrivateKey, createPublicKey, randomBytes, sign as signJwt, verify as verifyJwt } from "node:crypto";
+import type { JsonWebKey as NodeJsonWebKey } from "node:crypto";
 import { isIP } from "node:net";
 import type { AccountType } from "./account-types";
 
@@ -15,7 +16,7 @@ export class AppleConfigError extends Error {
   status = 503;
 }
 
-type AppleJwk = JsonWebKey & {
+type AppleJwk = NodeJsonWebKey & {
   kid: string;
   kty: string;
   use?: string;
