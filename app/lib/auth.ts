@@ -248,6 +248,38 @@ export async function loginWithGoogle(input: { subject: string; email: string; d
   return { token: await createSession(String(row.id)), user: userFromRow(row) };
 }
 
+export async function loginWithApple(input: { subject: string; email: string; displayName: string }, requestedAccountType: AccountType = "user") {
+  await ensureDatabaseSchema();
+  const db = database();
+  const email = normalizeEmail(input.email);
+  const subject = input.subject.trim().slice(0, 255);
+  if (!/^\S+@\S+\.\S+$/.test(email) || !subject) throw new AuthError("Apple did not return a complete verified identity.", 400);
+
+  const userFields = "id, email, display_name, phone, avatar_url, role, account_type, agent_verification_status, email_verified_at, apple_subject";
+  const bySubject = await db.query("SELECT " + userFields + " FROM rental_users WHERE apple_subject = $1 LIMIT 1", [subject]);
+  let row = bySubject[0] as Record<string, unknown> | undefined;
+  if (!row) {
+    const byEmail = await db.query("SELECT " + userFields + " FROM rental_users WHERE email = $1 LIMIT 1", [email]);
+    row = byEmail[0] as Record<string, unknown> | undefined;
+  }
+  if (row) {
+    if (row.apple_subject && String(row.apple_subject) !== subject) throw new AuthError("This email is linked to another Apple identity.", 409);
+    await db.query("UPDATE rental_users SET apple_subject = $1, email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW() WHERE id = $2", [subject, String(row.id)]);
+    const refreshed = await db.query("SELECT id, email, display_name, phone, avatar_url, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [String(row.id)]);
+    row = refreshed[0] as Record<string, unknown> | undefined;
+  } else {
+    const userId = "user-" + randomUUID();
+    await db.query(
+      "INSERT INTO rental_users (id, email, display_name, password_hash, account_type, email_verified_at, apple_subject) VALUES ($1, $2, $3, $4, $5, NOW(), $6)",
+      [userId, email, input.displayName.trim().replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").slice(0, 80) || email.split("@")[0] || "Apple user", "apple:" + randomUUID(), normalizeAccountType(requestedAccountType), subject],
+    );
+    const created = await db.query("SELECT id, email, display_name, phone, avatar_url, role, account_type, agent_verification_status, email_verified_at FROM rental_users WHERE id = $1 LIMIT 1", [userId]);
+    row = created[0] as Record<string, unknown> | undefined;
+  }
+  if (!row) throw new AuthError("Apple account setup could not be completed.", 502);
+  return { token: await createSession(String(row.id)), user: userFromRow(row) };
+}
+
 export async function getCurrentUser() {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;

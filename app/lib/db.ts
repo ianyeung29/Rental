@@ -39,6 +39,7 @@ export async function ensureDatabaseSchema() {
         agent_verification_status TEXT NOT NULL DEFAULT 'unsubmitted',
         email_verified_at TIMESTAMPTZ,
         google_subject TEXT,
+        apple_subject TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -50,6 +51,7 @@ export async function ensureDatabaseSchema() {
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS agent_verification_status TEXT NOT NULL DEFAULT 'unsubmitted'");
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ");
     await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS google_subject TEXT");
+    await sql.query("ALTER TABLE rental_users ADD COLUMN IF NOT EXISTS apple_subject TEXT");
     await sql.query(`
       CREATE TABLE IF NOT EXISTS rental_sessions (
         id TEXT PRIMARY KEY,
@@ -713,6 +715,7 @@ export async function ensureDatabaseSchema() {
     `);
     await sql.query("CREATE INDEX IF NOT EXISTS rental_sessions_user_idx ON rental_sessions(user_id, expires_at)");
     await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS rental_users_google_subject_idx ON rental_users(google_subject) WHERE google_subject IS NOT NULL");
+    await sql.query("CREATE UNIQUE INDEX IF NOT EXISTS rental_users_apple_subject_idx ON rental_users(apple_subject) WHERE apple_subject IS NOT NULL");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_users_account_type_idx ON rental_users(account_type, agent_verification_status)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_email_verifications_user_idx ON rental_email_verifications(user_id, expires_at)");
     await sql.query("CREATE INDEX IF NOT EXISTS rental_password_resets_user_idx ON rental_password_resets(user_id, expires_at DESC)");

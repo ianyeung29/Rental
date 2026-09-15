@@ -144,6 +144,10 @@ GOOGLE_REDIRECT_URI=http://localhost:3010/api/auth/google/callback
 
 Add the callback above as an exact authorized redirect URI in the Google client. For production, replace it with the public HTTPS callback URL and set `APP_URL` to the production site URL. Google sign-in uses the `openid`, `email`, and `profile` scopes, links a verified Google email to an existing account when appropriate, and creates a Neon-backed session. See Google’s [OpenID Connect guide](https://developers.google.com/identity/openid-connect/openid-connect), [OIDC reference](https://developers.google.com/identity/openid-connect/reference), and [web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server). Never commit the client secret or paste it into chat.
 
+## Enable Apple web sign-in
+
+Create a Services ID in Apple Developer, associate it with the Sign in with Apple primary App ID, and register the production callback https://www.anjurentals.com/api/auth/apple/callback with the anjurentals.com and www.anjurentals.com domains. Set APPLE_CLIENT_ID to the Services ID, APPLE_TEAM_ID to the Apple Developer Team ID, APPLE_KEY_ID to the key ID, APPLE_PRIVATE_KEY to the contents of the downloaded .p8 file, and APPLE_REDIRECT_URI to the exact registered callback URL. For local testing, use a registered HTTPS staging domain; Apple does not accept localhost callback URLs. Keep the private key in local environment settings and server-side Vercel environment variables only. Apple’s [web setup guide](https://developer.apple.com/help/account/capabilities/configure-sign-in-with-apple-for-the-web) explains the Services ID and return URL requirements, and its [key guidance](https://developer.apple.com/help/account/keys/revoke-edit-and-download-keys) notes that the key can only be downloaded once.
+
 ## Configure Neon and Cloudflare R2
 
 Add the following server-only values to `.env.local`:

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import { AccountType } from "../lib/account-types";
 import { useDialogA11y } from "../lib/use-dialog-a11y";
 
@@ -38,11 +39,23 @@ function GoogleIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+function AppleIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M16.37 1.43c.08 1.12-.4 2.2-1.13 3.05-.75.88-1.98 1.56-3.2 1.47-.1-1.1.45-2.23 1.15-3.02.78-.87 2.12-1.52 3.18-1.5ZM20.74 17.2c-.54 1.24-.8 1.8-1.5 2.9-.97 1.53-2.33 3.43-4.01 3.45-1.5.02-1.9-.98-3.93-.97-2.04.02-2.47.99-3.96.98-1.69-.02-2.98-1.75-3.95-3.28-2.7-4.28-2.99-9.3-1.32-11.98 1.19-1.9 3.06-3.01 4.82-3.01 1.79 0 2.92.98 4.4.98 1.43 0 2.31-.99 4.38-.99 1.57 0 3.23.86 4.42 2.33-3.88 2.13-3.25 7.67.65 9.59Z" />
+    </svg>
+  );
+}
+
 export default function AuthDrawer({ locale, mode, loading, error, onGoogleLogin, onClose, onModeChange, onSubmit }: AuthDrawerProps) {
   const isRegister = mode === "register";
   const zh = locale === "zh";
   const [accountType, setAccountType] = useState<AccountType>("user");
+  const [showAppleSignIn, setShowAppleSignIn] = useState(false);
   const dialogRef = useDialogA11y(true, onClose);
+  useEffect(() => {
+    setShowAppleSignIn(!Capacitor.isNativePlatform());
+  }, []);
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside ref={dialogRef} className="drawer auth-drawer" role="dialog" aria-modal="true" aria-labelledby="auth-title" tabIndex={-1}>
@@ -63,6 +76,7 @@ export default function AuthDrawer({ locale, mode, loading, error, onGoogleLogin
           </form>
           {!isRegister && <p className="auth-forgot-password"><Link className="text-button" href="/reset-password" onClick={onClose}>{zh ? "忘记密码？" : "Forgot password?"}</Link></p>}
           <div className="auth-divider" aria-hidden="true"><span>{zh ? "或" : "OR"}</span></div>
+          {showAppleSignIn && <button className="apple-button" type="button" onClick={() => { const accountTypeForApple = isRegister ? accountType : "user"; window.location.assign("/api/auth/apple?accountType=" + encodeURIComponent(accountTypeForApple)); }} disabled={loading}><AppleIcon />{zh ? "通过 Apple 登录" : "Sign in with Apple"}</button>}
           <button className="google-button" type="button" onClick={() => onGoogleLogin(isRegister ? accountType : "user")} disabled={loading}><GoogleIcon />{isRegister ? (accountType === "agent" ? (zh ? "使用 Google 注册经纪账户" : "Register agent account with Google") : (zh ? "使用 Google 注册普通账户" : "Register regular account with Google")) : (zh ? "使用 Google 登录" : "Continue with Google")}</button>
           <div className="auth-switch">
             <p>{isRegister ? (zh ? "已经有账户？" : "Already have an account?") : (zh ? "还没有账户？" : "New to the marketplace?")}</p>
